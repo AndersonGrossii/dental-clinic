@@ -4,6 +4,20 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+// Parse Railway DATABASE_URL into individual fields
+if (process.env.DATABASE_URL) {
+  try {
+    const url = new URL(process.env.DATABASE_URL);
+    process.env.DB_HOST = url.hostname;
+    process.env.DB_PORT = url.port;
+    process.env.DB_USER = url.username;
+    process.env.DB_PASSWORD = url.password;
+    process.env.DB_NAME = url.pathname.replace('/', '');
+  } catch (err) {
+    console.error('Error parsing DATABASE_URL:', err.message);
+  }
+}
+
 /**
  * Configuración centralizada de la aplicación.
  * Todas las variables de entorno se acceden desde aquí.

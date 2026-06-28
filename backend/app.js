@@ -2,6 +2,7 @@
 // Aplicación Express — Configuración
 // ============================================
 import express from 'express';
+import path from 'path';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
@@ -11,6 +12,7 @@ import { sanitizeBody } from './middlewares/validation.middleware.js';
 import config from './config/app.js';
 import routes from './routes/index.js';
 
+const __dirname = new URL('.', import.meta.url).pathname;
 const app = express();
 
 // ---- Seguridad ----
@@ -20,7 +22,7 @@ app.use(helmet({
 
 // ---- CORS ----
 app.use(cors({
-  origin: config.app.frontendUrl,
+  origin: config.app.env === 'development' ? config.app.frontendUrl : true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -42,6 +44,12 @@ app.use(morgan(config.app.env === 'production' ? 'combined' : 'dev'));
 // ---- Archivos estáticos (uploads) ----
 app.use('/uploads', express.static(config.upload.path));
 
+// ---- Archivos estáticos (frontend) en producción ----
+if (config.app.env === 'production') {
+  const frontendPath = path.resolve(__dirname, '../frontend');
+  app.use(express.static(frontendPath));
+}
+
 // ---- Health Check ----
 app.get('/api/v1/health', (_req, res) => {
   res.json({
@@ -54,6 +62,16 @@ app.get('/api/v1/health', (_req, res) => {
 
 // ---- Rutas de la API ----
 app.use('/api/v1', routes);
+
+// ---- SPA fallback (solo producción) ----
+if (config.app.env === 'production') {
+  const frontendPath = path.resolve(__dirname, '../frontend');
+  app.get('*', (req, res) => {
+    if (!req.path.startsWith('/api/')) {
+      res.sendFile(path.join(frontendPath, 'index.html'));
+    }
+  });
+}
 
 // ---- Ruta 404 ----
 app.use(notFoundMiddleware);
