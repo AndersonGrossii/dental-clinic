@@ -25,12 +25,3 @@ docker-compose up --build
 # Frontend: http://localhost:3000
 # Backend API: http://localhost:4000/api/v1
 ```
-
-### Cuentas por Defecto
-
-| Rol | Email | Contraseña |
-|-----|-------|------------|
-| Propietario | admin@dentalclinic.com | Admin123! |
-| Recepcionista | recepcion@dentalclinic.com | Recep123! |
-| Doctor | dr.rodriguez@dentalclinic.com | Doctor123! |
-| Doctor | dra.lopez@dentalclinic.com | Doctor123! |
