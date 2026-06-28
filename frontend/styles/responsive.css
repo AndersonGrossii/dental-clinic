@@ -1,0 +1,107 @@
+/* ============================================
+   Estilos Responsivos (Media Queries)
+   ============================================ */
+
+/* Dispositivos Medianos (Tablets y Laptops chicas) */
+@media (max-width: 1024px) {
+  :root {
+    --sidebar-width: 72px; /* Forzar sidebar colapsado por defecto */
+  }
+
+  .sidebar .sidebar-label,
+  .sidebar .sidebar-title,
+  .sidebar .user-info-name,
+  .sidebar .user-info-role {
+    display: none !important;
+  }
+
+  .sidebar .sidebar-link {
+    justify-content: center;
+    padding: var(--space-3);
+  }
+
+  .sidebar .sidebar-icon {
+    margin-right: 0;
+  }
+
+  #main-wrapper {
+    margin-left: 72px;
+  }
+}
+
+/* Dispositivos Móviles (Teléfonos) */
+@media (max-width: 768px) {
+  #app-container {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100% !important;
+    height: 60px !important;
+    flex-direction: row !important;
+    z-index: var(--z-sticky);
+    border-right: none;
+    border-top: 1px solid var(--border-color);
+    padding: 0 !important;
+  }
+
+  .sidebar-header,
+  .sidebar-user,
+  .sidebar-section-title {
+    display: none !important;
+  }
+
+  .sidebar-menu {
+    flex-direction: row !important;
+    justify-content: space-around;
+    align-items: center;
+    width: 100%;
+    height: 100%;
+    margin: 0 !important;
+  }
+
+  .sidebar-link {
+    flex-direction: column;
+    align-items: center;
+    font-size: 10px !important;
+    padding: var(--space-1) !important;
+    gap: 2px;
+    height: auto;
+  }
+
+  #main-wrapper {
+    margin-left: 0 !important;
+    padding-bottom: 60px; /* Espacio para barra de navegación inferior */
+  }
+
+  .navbar {
+    padding: 0 var(--space-4);
+  }
+
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+
+  .page-actions {
+    width: 100%;
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .page-actions button {
+    flex: 1;
+  }
+
+  .card-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .table-container {
+    overflow-x: auto; /* Scroll horizontal para tablas grandes */
+  }
+}

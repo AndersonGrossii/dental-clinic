@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clínica Vides Dental</title>
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Estilos del Sistema de Diseño -->
+  <link rel="stylesheet" href="styles/variables.css?v=3">
+  <link rel="stylesheet" href="styles/reset.css?v=3">
+  <link rel="stylesheet" href="styles/base.css?v=3">
+  <link rel="stylesheet" href="styles/layout.css?v=3">
+  <link rel="stylesheet" href="styles/components.css?v=3">
+  <link rel="stylesheet" href="styles/animations.css?v=3">
+  <link rel="stylesheet" href="styles/responsive.css?v=3">
+</head>
+<body>
+  <!-- Cargador General -->
+  <div id="app-loading" class="app-loading-overlay">
+    <div class="spinner"></div>
+    <p>Cargando Clínica Vides Dental...</p>
+  </div>
+
+  <!-- Contenedor Principal SPA -->
+  <div id="app-container" class="app-container">
+    <!-- El Sidebar se inyectará aquí -->
+    <div id="sidebar-container"></div>
+    
+    <!-- Contenido Principal -->
+    <div id="main-wrapper" class="main-content">
+      <!-- El Navbar se inyectará aquí -->
+      <div id="navbar-container"></div>
+      
+      <!-- Contenido Dinámico de Páginas -->
+      <main id="page-content" class="page-container animate-fade-in"></main>
+    </div>
+  </div>
+
+  <!-- Contenedor de Toasts Globales -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Scripts de la Aplicación -->
+  <script type="module" src="scripts/app.js?v=3"></script>
+</body>
+</html>
