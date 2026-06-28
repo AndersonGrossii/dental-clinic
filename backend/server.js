@@ -22,6 +22,7 @@ const startServer = async () => {
     const dbConnected = await testConnection();
     if (!dbConnected) {
       logger.error('No se pudo conectar a PostgreSQL. Abortando inicio.');
+      logger.error(`Host: ${config.db.host}, Port: ${config.db.port}, DB: ${config.db.name}, User: ${config.db.user}`);
       process.exit(1);
     }
 

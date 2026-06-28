@@ -19,7 +19,8 @@ const pool = new Pool({
   password: config.db.password,
   max: config.db.poolMax,
   idleTimeoutMillis: config.db.poolIdleTimeout,
-  connectionTimeoutMillis: 5000,
+  connectionTimeoutMillis: 10000,
+  ssl: config.db.ssl ? { rejectUnauthorized: false } : false,
 });
 
 // Evento de conexión

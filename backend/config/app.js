@@ -34,6 +34,7 @@ const config = {
     name: process.env.DB_NAME || 'dental_clinic',
     user: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD || 'S@ntos9403',
+    ssl: process.env.DB_SSL === 'true' || process.env.NODE_ENV === 'production',
     poolMax: parseInt(process.env.DB_POOL_MAX, 10) || 20,
     poolIdleTimeout: parseInt(process.env.DB_POOL_IDLE_TIMEOUT, 10) || 30000,
   },
