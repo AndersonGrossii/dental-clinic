@@ -343,6 +343,22 @@
   border-color: var(--gray-700);
 }
 
+/* ── Sidebar Mobile Overlay ── */
+.sb-mobile-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: var(--color-overlay);
+  z-index: calc(var(--z-sidebar) + 9);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.sb-mobile-overlay--visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 /* ── Keep old sidebar class for compatibility with existing code ── */
 .sidebar { display: none; }
 

@@ -162,8 +162,8 @@ export class Quotations {
     ).join('');
 
     const itemsHtml = (q.items || [{ description: '', quantity: 1, unit_price: 0, discount: 0 }]).map((item, i) => `
-      <div class="quote-item" style="display: grid; grid-template-columns: 3fr 1fr 1fr 1fr; gap: var(--space-2); margin-top: ${i > 0 ? 'var(--space-2)' : '0'};">
-        <input type="text" name="item_desc_${i}" class="form-input" placeholder="Descripción" value="${item.description || ''}" required />
+      <div class="quote-item-row" style="margin-top: ${i > 0 ? 'var(--space-2)' : '0'};">
+        <input type="text" name="item_desc_${i}" class="form-input quote-item-desc" placeholder="Descripción" value="${item.description || ''}" required />
         <input type="number" name="item_qty_${i}" class="form-input" placeholder="Cant." value="${item.quantity || 1}" min="1" required />
         <input type="number" step="0.01" name="item_price_${i}" class="form-input" placeholder="Precio $" value="${item.unit_price || 0}" min="0" required />
         <input type="number" step="0.01" name="item_discount_${i}" class="form-input" placeholder="Desc. %" value="${item.discount || 0}" min="0" max="100" />
@@ -172,7 +172,7 @@ export class Quotations {
 
     const content = `
       <form id="quote-form">
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+        <div class="form-row-responsive">
           <div class="form-group">
             <label class="form-label">Paciente</label>
             <select name="patient_id" class="form-select" required>
@@ -188,7 +188,7 @@ export class Quotations {
             </select>
           </div>
         </div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
+        <div class="form-row-responsive" style="margin-top: var(--space-3);">
           <div class="form-group">
             <label class="form-label">Fecha de cotización</label>
             <input type="date" name="quotation_date" class="form-input" value="${q.quotation_date || ''}" />
@@ -198,7 +198,7 @@ export class Quotations {
             <input type="date" name="valid_until" class="form-input" value="${q.valid_until || ''}" />
           </div>
         </div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
+        <div class="form-row-3col" style="margin-top: var(--space-3);">
           <div class="form-group">
             <label class="form-label">Impuesto (%)</label>
             <input type="number" name="tax_rate" class="form-input" value="${q.tax_rate || 16}" min="0" max="100" />
@@ -302,10 +302,10 @@ export class Quotations {
           const container = document.getElementById('quote-items-container');
           const idx = container.children.length;
           const div = document.createElement('div');
-          div.className = 'quote-item';
-          div.style.cssText = 'display: grid; grid-template-columns: 3fr 1fr 1fr 1fr; gap: var(--space-2); margin-top: var(--space-2);';
+          div.className = 'quote-item-row';
+          div.style.marginTop = 'var(--space-2)';
           div.innerHTML = `
-            <input type="text" name="item_desc_${idx}" class="form-input" placeholder="Descripción" required />
+            <input type="text" name="item_desc_${idx}" class="form-input quote-item-desc" placeholder="Descripción" required />
             <input type="number" name="item_qty_${idx}" class="form-input" placeholder="Cant." value="1" min="1" required />
             <input type="number" step="0.01" name="item_price_${idx}" class="form-input" placeholder="Precio $" min="0" required />
             <input type="number" step="0.01" name="item_discount_${idx}" class="form-input" placeholder="Desc. %" value="0" min="0" max="100" />

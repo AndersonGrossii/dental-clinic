@@ -51,9 +51,9 @@ export class Appointments {
 
     const doctorFilterHtml = this.isDoctor
       ? ''
-      : `<div class="form-group" style="margin: 0; min-width: 160px;">
+      : `<div class="form-group" style="margin: 0;">
            <label class="form-label" style="font-size: var(--text-xs);">Doctor</label>
-           <select id="filter-doctor" class="form-select">
+           <select id="filter-doctor" class="form-select" style="min-width: 140px;">
              <option value="">Todos</option>
              ${docOptions}
            </select>
@@ -87,26 +87,26 @@ export class Appointments {
       <div class="card" style="margin-bottom: var(--space-4);">
         <div class="card-body">
           <div class="appointment-filters" style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end;">
-            <div class="form-group" style="margin: 0; min-width: 180px; flex: 1;">
+            <div class="form-group" style="margin: 0; flex: 1; min-width: 160px;">
               <label class="form-label" style="font-size: var(--text-xs);">Buscar paciente</label>
               <input type="text" id="filter-search" class="form-input" placeholder="Nombre o teléfono..." value="${this.filters.search || ''}" />
             </div>
             ${doctorFilterHtml}
-            <div class="form-group" style="margin: 0; min-width: 140px;">
+            <div class="form-group" style="margin: 0;">
               <label class="form-label" style="font-size: var(--text-xs);">Fecha desde</label>
-              <input type="date" id="filter-date-from" class="form-input" value="${this.filters.date_from || ''}" />
+              <input type="date" id="filter-date-from" class="form-input" style="min-width: 130px;" value="${this.filters.date_from || ''}" />
             </div>
-            <div class="form-group" style="margin: 0; min-width: 140px;">
+            <div class="form-group" style="margin: 0;">
               <label class="form-label" style="font-size: var(--text-xs);">Fecha hasta</label>
-              <input type="date" id="filter-date-to" class="form-input" value="${this.filters.date_to || ''}" />
+              <input type="date" id="filter-date-to" class="form-input" style="min-width: 130px;" value="${this.filters.date_to || ''}" />
             </div>
-            <div class="form-group" style="margin: 0; min-width: 120px;">
+            <div class="form-group" style="margin: 0;">
               <label class="form-label" style="font-size: var(--text-xs);">Hora desde</label>
-              <input type="time" id="filter-time-from" class="form-input" value="${this.filters.time_from || ''}" />
+              <input type="time" id="filter-time-from" class="form-input" style="min-width: 110px;" value="${this.filters.time_from || ''}" />
             </div>
-            <div class="form-group" style="margin: 0; min-width: 120px;">
+            <div class="form-group" style="margin: 0;">
               <label class="form-label" style="font-size: var(--text-xs);">Hora hasta</label>
-              <input type="time" id="filter-time-to" class="form-input" value="${this.filters.time_to || ''}" />
+              <input type="time" id="filter-time-to" class="form-input" style="min-width: 110px;" value="${this.filters.time_to || ''}" />
             </div>
             <div style="display: flex; gap: var(--space-2); padding-bottom: 1px;">
               <button id="apply-filters-btn" class="btn btn-primary btn-sm">Filtrar</button>
@@ -204,22 +204,22 @@ export class Appointments {
         <div class="form-group" style="margin-top: var(--space-3); border-top: 1px solid var(--border-color); padding-top: var(--space-3);">
           <button type="button" id="toggle-new-patient-btn" class="btn btn-outline">+ Agregar Paciente Nuevo</button>
           <div id="new-patient-fields" style="display: none; margin-top: var(--space-3);">
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
-              <div>
+            <div class="form-row-responsive">
+              <div class="form-group" style="margin: 0;">
                 <label class="form-label">Nombre</label>
                 <input type="text" id="new-patient-first-name" class="form-input" />
               </div>
-              <div>
+              <div class="form-group" style="margin: 0;">
                 <label class="form-label">Apellido</label>
                 <input type="text" id="new-patient-last-name" class="form-input" />
               </div>
             </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
-              <div>
+            <div class="form-row-responsive" style="margin-top: var(--space-3);">
+              <div class="form-group" style="margin: 0;">
                 <label class="form-label">Teléfono</label>
                 <input type="text" id="new-patient-phone" class="form-input" />
               </div>
-              <div>
+              <div class="form-group" style="margin: 0;">
                 <label class="form-label">Correo</label>
                 <input type="email" id="new-patient-email" class="form-input" />
               </div>
@@ -238,12 +238,12 @@ export class Appointments {
           <label class="form-label">Fecha de la Cita</label>
           <input type="date" name="appointment_date" class="form-input" required />
         </div>
-        <div class="form-group" style="margin-top: var(--space-3); display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
-          <div>
+        <div class="form-row-responsive">
+          <div class="form-group" style="margin: 0;">
             <label class="form-label">Hora Inicio</label>
             <input type="time" name="start_time" class="form-input" required />
           </div>
-          <div>
+          <div class="form-group" style="margin: 0;">
             <label class="form-label">Hora Fin</label>
             <input type="time" name="end_time" class="form-input" required />
           </div>

@@ -46,7 +46,7 @@ export class Settings {
         <p style="color: var(--text-secondary);">Ajustes de la clínica y registro de auditoría de seguridad</p>
       </div>
 
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-6);">
+      <div class="settings-layout">
         <!-- Datos de la Clínica -->
         <div class="card" style="padding: var(--space-6);">
           <div class="card-header" style="margin-bottom: var(--space-4); border-bottom: 2px solid var(--gray-100); padding-bottom: 8px;">
@@ -68,12 +68,12 @@ export class Settings {
             </div>
 
             <h4 style="margin: var(--space-4) 0 var(--space-2); color: var(--primary-700); font-size: var(--text-xs); text-transform: uppercase;">Contacto</h4>
-            <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
-              <div>
+            <div class="form-row-responsive">
+              <div class="form-group">
                 <label class="form-label">Teléfono</label>
                 <input type="text" name="phone" class="form-input" value="${info.phone || ''}" />
               </div>
-              <div>
+              <div class="form-group">
                 <label class="form-label">Email</label>
                 <input type="email" name="email" class="form-input" value="${info.email || ''}" />
               </div>
@@ -88,30 +88,30 @@ export class Settings {
               <label class="form-label">Dirección</label>
               <input type="text" name="address" class="form-input" value="${info.address || ''}" />
             </div>
-            <div class="form-group" style="margin-top: var(--space-3); display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
-              <div>
+            <div class="form-row-responsive">
+              <div class="form-group">
                 <label class="form-label">Ciudad</label>
                 <input type="text" name="city" class="form-input" value="${info.city || ''}" />
               </div>
-              <div>
+              <div class="form-group">
                 <label class="form-label">Estado / Provincia</label>
                 <input type="text" name="state" class="form-input" value="${info.state || ''}" />
               </div>
             </div>
-            <div class="form-group" style="margin-top: var(--space-3); display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
-              <div>
+            <div class="form-row-responsive">
+              <div class="form-group">
                 <label class="form-label">País</label>
                 <input type="text" name="country" class="form-input" value="${info.country || 'México'}" />
               </div>
-              <div>
+              <div class="form-group">
                 <label class="form-label">Código Postal</label>
                 <input type="text" name="postal_code" class="form-input" value="${info.postal_code || ''}" />
               </div>
             </div>
 
             <h4 style="margin: var(--space-4) 0 var(--space-2); color: var(--primary-700); font-size: var(--text-xs); text-transform: uppercase;">Configuración</h4>
-            <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
-              <div>
+            <div class="form-row-responsive">
+              <div class="form-group">
                 <label class="form-label">Moneda</label>
                 <select name="currency" class="form-select">
                   <option value="MXN" ${info.currency === 'MXN' ? 'selected' : ''}>MXN - Peso Mexicano</option>
@@ -119,17 +119,17 @@ export class Settings {
                   <option value="EUR" ${info.currency === 'EUR' ? 'selected' : ''}>EUR - Euro</option>
                 </select>
               </div>
-              <div>
+              <div class="form-group">
                 <label class="form-label">Tasa de Impuesto (%)</label>
                 <input type="number" name="tax_rate" class="form-input" value="${info.tax_rate ?? 16}" step="0.01" min="0" max="100" />
               </div>
             </div>
-            <div class="form-group" style="margin-top: var(--space-3); display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
-              <div>
+            <div class="form-row-responsive">
+              <div class="form-group">
                 <label class="form-label">Hora de Apertura</label>
                 <input type="time" name="opening_time" class="form-input" value="${info.opening_time || '08:00'}" />
               </div>
-              <div>
+              <div class="form-group">
                 <label class="form-label">Hora de Cierre</label>
                 <input type="time" name="closing_time" class="form-input" value="${info.closing_time || '20:00'}" />
               </div>

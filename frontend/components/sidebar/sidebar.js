@@ -32,6 +32,7 @@ export class Sidebar {
     const role = user?.role_name || '';
     const isCollapsed = state.get('sidebarCollapsed') || false;
     const theme = state.get('theme');
+    const mobileOpen = state.get('mobileSidebarOpen') || false;
 
     const menuItems = [
       { path: '#/', label: 'Dashboard', icon: icons.dashboard, roles: ['propietario', 'recepcionista', 'doctor'] },
@@ -68,8 +69,12 @@ export class Sidebar {
 
     const initials = (user?.first_name?.[0] || 'U').toUpperCase() + (user?.last_name?.[0] || '').toUpperCase();
 
+    const isMobile = window.innerWidth < 768;
+    const showSidebar = isMobile ? mobileOpen : true;
+    const sidebarHidden = isMobile ? !mobileOpen : isCollapsed;
+
     this.container.innerHTML = `
-      <aside class="sb ${isCollapsed ? 'sb--hidden' : ''}">
+      <aside class="sb ${showSidebar && isMobile ? 'sb--mobile-open' : ''} ${sidebarHidden && !isMobile ? 'sb--hidden' : ''}">
         <!-- Header -->
         <div class="sb__header">
           <div class="sb__brand">
@@ -78,7 +83,10 @@ export class Sidebar {
             </div>
             <span class="sb__brand-name">${clinicName}</span>
           </div>
-          <button id="sb-collapse-btn" class="sb__collapse-btn" title="${isCollapsed ? 'Expandir menú' : 'Ocultar menú'}">
+          <button id="sb-close-mobile" class="sb__collapse-btn" title="Cerrar menú" style="display: ${isMobile ? 'flex' : 'none'};">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+          <button id="sb-collapse-btn" class="sb__collapse-btn" title="${isCollapsed ? 'Expandir menú' : 'Ocultar menú'}" style="display: ${isMobile ? 'none' : 'flex'};">
             ${isCollapsed ? icons.expand : icons.collapse}
           </button>
         </div>
@@ -115,21 +123,50 @@ export class Sidebar {
         </div>
       </aside>
 
-      <!-- Floating toggle button when sidebar is hidden -->
-      <button id="sb-expand-float" class="sb__expand-float ${isCollapsed ? 'sb__expand-float--visible' : ''}" title="Mostrar menú">
+      <!-- Mobile overlay backdrop -->
+      <div id="sb-mobile-overlay" class="sb-mobile-overlay ${mobileOpen && isMobile ? 'sb-mobile-overlay--visible' : ''}"></div>
+
+      <!-- Floating toggle button when sidebar is hidden (desktop only) -->
+      <button id="sb-expand-float" class="sb__expand-float ${!isMobile && isCollapsed ? 'sb__expand-float--visible' : ''}" title="Mostrar menú">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="15" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/></svg>
       </button>
     `;
   }
 
   bindEvents() {
+    // Mobile sidebar close button
+    const closeMobileBtn = this.container.querySelector('#sb-close-mobile');
+    if (closeMobileBtn) {
+      closeMobileBtn.addEventListener('click', () => {
+        state.set('mobileSidebarOpen', false);
+      });
+    }
+
+    // Mobile overlay click to close
+    const overlay = this.container.querySelector('#sb-mobile-overlay');
+    if (overlay) {
+      overlay.addEventListener('click', () => {
+        state.set('mobileSidebarOpen', false);
+      });
+    }
+
+    // Close mobile sidebar when clicking a nav link
+    const navLinks = this.container.querySelectorAll('.sb-link');
+    navLinks.forEach(link => {
+      link.addEventListener('click', () => {
+        if (window.innerWidth < 768) {
+          state.set('mobileSidebarOpen', false);
+        }
+      });
+    });
+
     // Logout
     const logoutBtn = this.container.querySelector('#sidebar-logout');
     if (logoutBtn) {
       logoutBtn.addEventListener('click', () => auth.logout());
     }
 
-    // Collapse / expand
+    // Collapse / expand (desktop only)
     const collapseBtn = this.container.querySelector('#sb-collapse-btn');
     if (collapseBtn) {
       collapseBtn.addEventListener('click', () => {
@@ -138,7 +175,7 @@ export class Sidebar {
       });
     }
 
-    // Floating expand button
+    // Floating expand button (desktop only)
     const expandFloat = this.container.querySelector('#sb-expand-float');
     if (expandFloat) {
       expandFloat.addEventListener('click', () => {
@@ -164,6 +201,11 @@ export class Sidebar {
     }
   }
 
+  static toggleMobile() {
+    const current = state.get('mobileSidebarOpen') || false;
+    state.set('mobileSidebarOpen', !current);
+  }
+
   mount() {
     this.render();
     this.bindEvents();
@@ -171,7 +213,14 @@ export class Sidebar {
     this._onHashChange = () => { this.render(); this.bindEvents(); };
     window.addEventListener('hashchange', this._onHashChange);
 
+    this._onResize = () => { this.render(); this.bindEvents(); };
+    window.addEventListener('resize', this._onResize);
+
     this.unsubscribe = state.subscribe('sidebarCollapsed', () => {
+      this.render();
+      this.bindEvents();
+    });
+    this.unsubscribeMobile = state.subscribe('mobileSidebarOpen', () => {
       this.render();
       this.bindEvents();
     });
@@ -183,7 +232,9 @@ export class Sidebar {
 
   destroy() {
     if (this.unsubscribe) this.unsubscribe();
+    if (this.unsubscribeMobile) this.unsubscribeMobile();
     if (this.unsubscribeClinic) this.unsubscribeClinic();
     if (this._onHashChange) window.removeEventListener('hashchange', this._onHashChange);
+    if (this._onResize) window.removeEventListener('resize', this._onResize);
   }
 }

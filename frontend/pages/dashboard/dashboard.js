@@ -99,7 +99,7 @@ export class Dashboard {
           </div>
         </div>
 
-        <div class="card-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-4); margin-top: var(--space-6);">
+        <div class="card-grid" style="margin-top: var(--space-6);">
           ${statsHtml}
         </div>
 

@@ -150,6 +150,12 @@
    CARDS
    ═══════════════════════════════════════════ */
 
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-4);
+}
+
 .card {
   background-color: var(--color-surface);
   border-radius: var(--radius-lg);
@@ -328,6 +334,84 @@
 
 [data-theme='dark'] .form-section-title {
   border-bottom-color: var(--primary-900);
+}
+
+/* ── Patient Form Grid ── */
+.patient-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+@media (max-width: 600px) {
+  .patient-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .patient-form-grid > [style*="grid-column"] {
+    grid-column: span 1 !important;
+  }
+}
+
+/* ── Settings Layout ── */
+.settings-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-6);
+}
+
+@media (max-width: 768px) {
+  .settings-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Responsive Form Row ── */
+.form-row-responsive {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+@media (max-width: 480px) {
+  .form-row-responsive {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── 3-Column Form Row ── */
+.form-row-3col {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: var(--space-4);
+}
+
+@media (max-width: 600px) {
+  .form-row-3col {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .form-row-3col {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Quote Item Row Mobile ── */
+.quote-item-row {
+  display: grid;
+  grid-template-columns: 3fr 1fr 1fr 1fr;
+  gap: var(--space-2);
+  align-items: start;
+}
+
+@media (max-width: 480px) {
+  .quote-item-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .quote-item-row .quote-item-desc {
+    grid-column: span 2;
+  }
 }
 
 /* ═══════════════════════════════════════════

@@ -146,7 +146,7 @@ export class Patients {
       </div>`;
 
     const content = `
-      <form id="patient-modal-form" style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+      <form id="patient-modal-form" class="patient-form-grid">
         ${sectionTitle('Información Personal')}
         <div class="form-group">
           <label class="form-label">Nombres</label>
