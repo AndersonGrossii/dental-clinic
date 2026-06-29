@@ -450,11 +450,14 @@ export class Appointments {
       });
       const list = Array.isArray(appointments) ? appointments : [];
 
+      const getDocName = (a) => a.doctor_name || a.doctor?.fullName || a.doctorName || 'Sin doctor';
+      const getDocSpec = (a) => a.doctor_specialty || a.doctor?.specialty || '';
+
       const groups = {};
       list.forEach(a => {
-        const key = a.doctor_name || 'Sin doctor';
-        if (!groups[key]) groups[key] = { doctor_name: a.doctor_name, doctor_specialty: a.doctor_specialty || '', appointments: [] };
-        groups[key].appointments.push(a);
+        const name = getDocName(a);
+        if (!groups[name]) groups[name] = { doctor_name: name, doctor_specialty: getDocSpec(a), appointments: [] };
+        groups[name].appointments.push(a);
       });
 
       const allIds = new Set(list.map(a => a.id));
