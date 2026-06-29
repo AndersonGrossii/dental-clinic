@@ -10,14 +10,19 @@ import toast from '../../components/toast/toast.js';
 export class Dashboard {
   constructor(container) {
     this.container = container;
-    // Inicializar con la fecha local de hoy en formato YYYY-MM-DD
-    const local = new Date();
-    const offset = local.getTimezoneOffset();
-    const localDate = new Date(local.getTime() - (offset * 60 * 1000));
-    this.currentDate = localDate.toISOString().split('T')[0];
-    this.todayDate = this.currentDate;
+    this._updateTodayDate();
+    this.currentDate = this.todayDate;
     this.appointmentsList = [];
     this.role = '';
+  }
+
+  _todayStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  _updateTodayDate() {
+    this.todayDate = this._todayStr();
   }
 
   async render() {
@@ -27,7 +32,7 @@ export class Dashboard {
       const stats = dashboardData.stats || {};
       this.role = dashboardData.role || '';
       
-      // Si la fecha seleccionada es hoy, usamos las citas del dashboard
+      this._updateTodayDate();
       if (this.currentDate === this.todayDate) {
         this.appointmentsList = dashboardData.todayAppointments || [];
       } else {
@@ -144,17 +149,15 @@ export class Dashboard {
       const params = {
         date_from: this.currentDate,
         date_to: this.currentDate,
-        limit: 100
+        limit: 999,
+        sortBy: 'a.start_time',
+        sortOrder: 'ASC'
       };
-      
-      // Si el rol es doctor, forzar filtro por doctor_id
       if (this.role === 'doctor' && user?.doctor_id) {
         params.doctor_id = user.doctor_id;
       }
-
-      const response = await appointmentService.getAll(params);
-      // Extraemos el listado de citas según la estructura devuelta
-      this.appointmentsList = response.data || response || [];
+      const list = await appointmentService.getAll(params);
+      this.appointmentsList = Array.isArray(list) ? list : [];
     } catch (err) {
       toast.error('Error al cargar citas de la fecha seleccionada');
       this.appointmentsList = [];
@@ -275,6 +278,7 @@ export class Dashboard {
       subtitleElement.textContent = 'Actualizando agenda...';
     }
 
+    this._updateTodayDate();
     if (this.currentDate === this.todayDate) {
       // Si volvemos a hoy, podemos re-cargar del dashboard o recargar directamente
       const dashboardData = await reportService.getDashboard();
@@ -327,6 +331,7 @@ export class Dashboard {
           const subtitleElement = this.container.querySelector('#db-cal-subtitle');
           if (subtitleElement) subtitleElement.textContent = 'Actualizando agenda...';
           
+          this._updateTodayDate();
           if (this.currentDate === this.todayDate) {
             const dashboardData = await reportService.getDashboard();
             this.appointmentsList = dashboardData.todayAppointments || [];
