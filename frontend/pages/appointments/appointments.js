@@ -38,6 +38,7 @@ export class Appointments {
       if (e.target.classList.contains('change-status-btn')) {
         this.showChangeStatusModal(e.target.dataset.id);
       }
+      if (e.target.id === 'print-daily-btn') this.printDailyAgenda();
       if (e.target.id === 'add-appointment-btn') this.showAddAppointmentModal();
       if (e.target.id === 'apply-filters-btn') this.applyFilters();
       if (e.target.id === 'clear-filters-btn') this.clearFilters();
@@ -190,7 +191,15 @@ export class Appointments {
           <h1 class="page-title">Agenda y Citas</h1>
           <p style="color: var(--color-text-secondary); margin-top: 2px;">Programación y calendario de consultas</p>
         </div>
-        <button id="add-appointment-btn" class="btn btn-primary">+ Nueva Cita</button>
+        <div style="display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap;">
+          <select id="slot-duration" class="form-select" style="width: auto; min-width: 80px;">
+            <option value="15">15 min</option>
+            <option value="30" selected>30 min</option>
+            <option value="60">60 min</option>
+          </select>
+          <button id="print-daily-btn" class="btn btn-outline">Imprimir Agenda</button>
+          <button id="add-appointment-btn" class="btn btn-primary">+ Nueva Cita</button>
+        </div>
       </div>
 
       <div class="card" style="margin-bottom: var(--space-4);">
@@ -427,6 +436,101 @@ export class Appointments {
   clearFilters() {
     this.filters = {};
     this.render({});
+  }
+
+  async printDailyAgenda() {
+    const slotDuration = parseInt(this.container.querySelector('#slot-duration')?.value || '30', 10);
+    const today = this.toDateStr(new Date());
+
+    try {
+      const appointments = await appointmentService.getAll({
+        date_from: today, date_to: today,
+        limit: 9999,
+        sortBy: 'a.start_time', sortOrder: 'ASC'
+      });
+      const list = Array.isArray(appointments) ? appointments : [];
+
+      const groups = {};
+      list.forEach(a => {
+        const key = a.doctor_name || 'Sin doctor';
+        if (!groups[key]) groups[key] = { doctor_name: a.doctor_name, doctor_specialty: a.doctor_specialty || '', appointments: [] };
+        groups[key].appointments.push(a);
+      });
+
+      const allIds = new Set(list.map(a => a.id));
+      const totalAppts = allIds.size;
+
+      const slots = [];
+      for (let m = 540; m < 1200; m += slotDuration) {
+        slots.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
+      }
+
+      const clinic = state.get('clinicInfo') || {};
+      const dateParts = new Date();
+      const dayNames = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+      const monthNames = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+      const dateLabel = `${dayNames[dateParts.getDay()]}, ${dateParts.getDate()} de ${monthNames[dateParts.getMonth()]} de ${dateParts.getFullYear()}`;
+
+      const cellStyle = 'border: 1px solid #ddd; padding: 6px 10px; font-size: 12px;';
+      const thStyle = `${cellStyle} background: #f0f0f0; font-weight: 600; text-align: left;`;
+
+      let bodyHtml = '';
+
+      Object.values(groups).forEach(group => {
+        const sorted = [...group.appointments].sort((a, b) =>
+          (a.start_time || '').localeCompare(b.start_time || '')
+        );
+        let rows = '';
+        slots.forEach(slot => {
+          const match = sorted.find(a => {
+            const s = a.start_time ? a.start_time.substring(0, 5) : '';
+            const e = a.end_time ? a.end_time.substring(0, 5) : '';
+            return s <= slot && e > slot;
+          });
+          const isEmpty = !match;
+          rows += `<tr style="${isEmpty ? 'background: #fafafa;' : ''}">
+            <td style="${cellStyle}${isEmpty ? ' color: #bbb;' : ''}">${slot}</td>
+            <td style="${cellStyle}">${match ? match.patient_name : ''}</td>
+            <td style="${cellStyle}">${match ? (match.treatment_name || '') : ''}</td>
+            <td style="${cellStyle}">${match ? (match.notes || '') : ''}</td>
+            <td style="${cellStyle}">${match ? (match.status_label || '') : ''}</td>
+          </tr>`;
+        });
+        bodyHtml += `
+          <h2 style="font-size: 15px; margin: 24px 0 8px; padding-bottom: 4px; border-bottom: 2px solid #333; color: #1a1a1a;">${group.doctor_name}${group.doctor_specialty ? ' — ' + group.doctor_specialty : ''}</h2>
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 12px;">
+            <thead><tr>
+              <th style="${thStyle}width: 60px;">Hora</th>
+              <th style="${thStyle}">Paciente</th>
+              <th style="${thStyle}width: 120px;">Tratamiento</th>
+              <th style="${thStyle}">Notas</th>
+              <th style="${thStyle}width: 80px;">Estado</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>`;
+      });
+
+      const printWindow = window.open('', '_blank');
+      printWindow.document.write(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Agenda del Día</title></head>
+<body style="font-family: Arial, sans-serif; padding: 30px 40px; color: #333; margin: 0;">
+  <div style="text-align: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 3px double #ccc;">
+    <h1 style="margin: 0; font-size: 22px; color: #111;">${clinic.name || 'Clinica Vides Dental'}</h1>
+    <p style="margin: 4px 0 0; font-size: 13px; color: #555;">${clinic.address || ''}${clinic.phone ? ' — Tel: ' + clinic.phone : ''}</p>
+    <h2 style="margin: 12px 0 0; font-size: 17px; color: #333;">Agenda del Día</h2>
+    <p style="margin: 2px 0 0; font-size: 13px; color: #666;">${dateLabel}</p>
+  </div>
+  ${bodyHtml}
+  <div style="margin-top: 20px; padding-top: 12px; border-top: 1px solid #ddd; font-size: 13px; color: #555;">
+    Total: <strong>${totalAppts}</strong> cita${totalAppts !== 1 ? 's' : ''} programada${totalAppts !== 1 ? 's' : ''}
+    &nbsp;|&nbsp; Intervalo: ${slotDuration} min
+  </div>
+</body></html>`);
+      printWindow.document.close();
+      printWindow.print();
+    } catch (err) {
+      toast.error('Error al cargar la agenda del día');
+    }
   }
 
   showAddAppointmentModal() {
