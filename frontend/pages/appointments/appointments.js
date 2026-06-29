@@ -477,41 +477,39 @@ export class Appointments {
       const cellStyle = 'border: 1px solid #ddd; padding: 6px 10px; font-size: 12px;';
       const thStyle = `${cellStyle} background: #f0f0f0; font-weight: 600; text-align: left;`;
 
-      let bodyHtml = '';
-
-      Object.values(groups).forEach(group => {
-        const sorted = [...group.appointments].sort((a, b) =>
+      const groupsArr = Object.values(groups).map(g => ({
+        name: g.doctor_name,
+        specialty: g.doctor_specialty,
+        sorted: [...g.appointments].sort((a, b) =>
           (a.start_time || '').localeCompare(b.start_time || '')
-        );
-        let rows = '';
-        slots.forEach(slot => {
-          const match = sorted.find(a => {
+        )
+      }));
+
+      let headerCells = `<th style="${thStyle}width: 60px;">Hora</th>`;
+      groupsArr.forEach(g => {
+        headerCells += `<th style="${thStyle}">${g.name}${g.specialty ? '<br><span style="font-weight:400;font-size:10px;color:#666;">' + g.specialty + '</span>' : ''}</th>`;
+      });
+
+      let rows = '';
+      slots.forEach(slot => {
+        rows += `<tr>`;
+        rows += `<td style="${cellStyle}font-weight:600;color:#555;">${slot}</td>`;
+        groupsArr.forEach(g => {
+          const match = g.sorted.find(a => {
             const s = a.start_time ? a.start_time.substring(0, 5) : '';
             const e = a.end_time ? a.end_time.substring(0, 5) : '';
             return s <= slot && e > slot;
           });
-          const isEmpty = !match;
-          rows += `<tr style="${isEmpty ? 'background: #fafafa;' : ''}">
-            <td style="${cellStyle}${isEmpty ? ' color: #bbb;' : ''}">${slot}</td>
-            <td style="${cellStyle}">${match ? match.patient_name : ''}</td>
-            <td style="${cellStyle}">${match ? (match.treatment_name || '') : ''}</td>
-            <td style="${cellStyle}">${match ? (match.notes || '') : ''}</td>
-            <td style="${cellStyle}">${match ? (match.status_label || '') : ''}</td>
-          </tr>`;
+          rows += `<td style="${cellStyle}${match ? '' : ' color:#ddd;'}">${match ? match.patient_name : '—'}</td>`;
         });
-        bodyHtml += `
-          <h2 style="font-size: 15px; margin: 24px 0 8px; padding-bottom: 4px; border-bottom: 2px solid #333; color: #1a1a1a;">${group.doctor_name}${group.doctor_specialty ? ' — ' + group.doctor_specialty : ''}</h2>
-          <table style="width: 100%; border-collapse: collapse; margin-bottom: 12px;">
-            <thead><tr>
-              <th style="${thStyle}width: 60px;">Hora</th>
-              <th style="${thStyle}">Paciente</th>
-              <th style="${thStyle}width: 120px;">Tratamiento</th>
-              <th style="${thStyle}">Notas</th>
-              <th style="${thStyle}width: 80px;">Estado</th>
-            </tr></thead>
-            <tbody>${rows}</tbody>
-          </table>`;
+        rows += `</tr>`;
       });
+
+      const bodyHtml = `
+        <table style="width: 100%; border-collapse: collapse;">
+          <thead><tr>${headerCells}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
 
       const printWindow = window.open('', '_blank');
       printWindow.document.write(`<!DOCTYPE html>
