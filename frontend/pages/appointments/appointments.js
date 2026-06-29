@@ -14,6 +14,37 @@ export class Appointments {
     this.filters = {};
     this.viewMode = 'month';
     this.currentDate = new Date();
+    this._initDelegation();
+  }
+
+  _initDelegation() {
+    this.container.addEventListener('click', (e) => {
+      const viewBtn = e.target.closest('.cal-view-btn');
+      if (viewBtn?.dataset.view) {
+        this.switchView(viewBtn.dataset.view);
+        return;
+      }
+      const calCell = e.target.closest('.calendar-cell');
+      if (calCell?.dataset.date && this.viewMode === 'month') {
+        this.currentDate = new Date(calCell.dataset.date + 'T12:00:00');
+        this.switchView('day');
+        return;
+      }
+      const eventEl = e.target.closest('.calendar-event, .cal-week-event, .cal-day-event');
+      if (eventEl?.dataset.id) {
+        this.showChangeStatusModal(eventEl.dataset.id);
+        return;
+      }
+      if (e.target.classList.contains('change-status-btn')) {
+        this.showChangeStatusModal(e.target.dataset.id);
+      }
+      if (e.target.id === 'add-appointment-btn') this.showAddAppointmentModal();
+      if (e.target.id === 'apply-filters-btn') this.applyFilters();
+      if (e.target.id === 'clear-filters-btn') this.clearFilters();
+      if (e.target.id === 'cal-prev-btn') this.navigate(-1);
+      if (e.target.id === 'cal-next-btn') this.navigate(1);
+      if (e.target.id === 'cal-today-btn') this.goToToday();
+    });
   }
 
   async render(filters = {}) {
@@ -112,7 +143,10 @@ export class Appointments {
   }
 
   getEventsForDate(dateStr) {
-    return this.appointmentsList.filter(a => a.appointment_date === dateStr);
+    return this.appointmentsList.filter(a => {
+      const aptDate = a.appointment_date ? String(a.appointment_date).substring(0, 10) : '';
+      return aptDate === dateStr;
+    });
   }
 
   renderView() {
@@ -244,11 +278,15 @@ export class Appointments {
       const isOtherMonth = dayNum < 1 || dayNum > daysInMonth;
       const cellDate = isOtherMonth ? '' : `${y}-${String(m + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
       const isToday = cellDate === todayStr;
+      const isWeekend = !isOtherMonth && (i % 7 >= 5);
       const events = cellDate ? this.getEventsForDate(cellDate) : [];
       const maxVisible = window.innerWidth < 480 ? 1 : 3;
 
-      html += `<div class="calendar-cell ${isOtherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''}" ${cellDate ? `data-date="${cellDate}"` : ''}>`;
+      html += `<div class="calendar-cell ${isOtherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''} ${isWeekend ? 'weekend' : ''}" ${cellDate ? `data-date="${cellDate}"` : ''}>`;
       html += `<div class="calendar-day-number">${isOtherMonth ? '' : dayNum}</div>`;
+      if (isWeekend && !isOtherMonth && events.length === 0) {
+        html += `<div class="weekend-badge" style="font-size: 9px; color: var(--color-danger, #e53e3e); text-align: center; padding: 4px 0;">Cerrado</div>`;
+      }
       events.slice(0, maxVisible).forEach(ev => {
         html += `<div class="calendar-event ${ev.status_name || ''}" title="${ev.patient_name} — ${formatTime(ev.start_time)}" data-id="${ev.id}" style="background-color: ${ev.status_color}; color: #fff; border-radius: 4px; padding: 1px 6px; margin: 1px 0; font-size: 11px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
           ${formatTime(ev.start_time)} ${ev.patient_name}
@@ -279,18 +317,20 @@ export class Appointments {
       const dayNum = date.getDate();
       const isWeekend = i >= 5;
 
-      html += `<div class="cal-week-col" style="background: var(--color-surface); min-height: 120px; ${isWeekend ? 'background: var(--color-bg-secondary);' : ''}">
+      html += `<div class="cal-week-col ${isWeekend ? 'weekend' : ''}" style="background: var(--color-surface); min-height: 120px; ${isWeekend ? 'background: var(--color-bg-secondary);' : ''}">
         <div class="cal-week-header" style="padding: 8px 6px; text-align: center; border-bottom: 1px solid var(--color-border-light); background: ${isToday ? 'var(--primary-50)' : 'transparent'};">
           <div style="font-size: 10px; color: var(--color-text-tertiary); text-transform: uppercase;">${dayNames[i].substring(0, 3)}</div>
           <div style="font-size: var(--text-lg); font-weight: ${isToday ? 'var(--font-bold)' : 'var(--font-medium)'}; color: ${isToday ? 'var(--primary-600)' : 'var(--color-text)'};">${dayNum}</div>
         </div>
         <div style="padding: 4px;">
-          ${this.getEventsForDate(dateStr).map(ev => `
-            <div class="cal-week-event" data-id="${ev.id}" style="background-color: ${ev.status_color}; color: #fff; border-radius: 4px; padding: 3px 6px; margin-bottom: 3px; font-size: 10px; cursor: pointer; line-height: 1.3;">
-              <div style="font-weight: 600;">${formatTime(ev.start_time)}</div>
-              <div>${ev.patient_name}</div>
-            </div>
-          `).join('') || '<div style="font-size: 10px; color: var(--color-text-tertiary); padding: 8px 4px; text-align: center;">—</div>'}
+          ${isWeekend
+            ? '<div style="font-size: 10px; color: var(--color-danger, #e53e3e); text-align: center; padding: 12px 4px; font-weight: var(--font-medium);">Cerrado</div>'
+            : (this.getEventsForDate(dateStr).map(ev => `
+              <div class="cal-week-event" data-id="${ev.id}" style="background-color: ${ev.status_color}; color: #fff; border-radius: 4px; padding: 3px 6px; margin-bottom: 3px; font-size: 10px; cursor: pointer; line-height: 1.3;">
+                <div style="font-weight: 600;">${formatTime(ev.start_time)}</div>
+                <div>${ev.patient_name}</div>
+              </div>
+            `).join('') || '<div style="font-size: 10px; color: var(--color-text-tertiary); padding: 8px 4px; text-align: center;">—</div>')}
         </div>
       </div>`;
     }
@@ -310,6 +350,7 @@ export class Appointments {
     const dayNum = this.currentDate.getDate();
 
     const events = this.getEventsForDate(dateStr);
+    const isWeekendDay = this.currentDate.getDay() === 0 || this.currentDate.getDay() === 6;
     const hours = [];
     for (let h = 8; h <= 20; h++) {
       hours.push(h);
@@ -318,6 +359,12 @@ export class Appointments {
     let html = `<div style="margin-bottom: var(--space-3); text-align: center;">
       <h3 style="margin: 0; font-size: var(--text-lg); font-weight: var(--font-bold); color: ${isToday ? 'var(--primary-600)' : 'var(--color-text)'};">${dayName}, ${dayNum} ${monthName}</h3>
     </div>`;
+
+    if (isWeekendDay) {
+      html += `<div style="text-align: center; padding: var(--space-3); background: #fff5f5; border: 1px solid #fecaca; border-radius: var(--radius-lg); margin-bottom: var(--space-4);">
+        <span style="color: var(--color-danger, #e53e3e); font-weight: var(--font-semibold); font-size: var(--text-sm);">Este día es fin de semana — solo el propietario puede agendar citas.</span>
+      </div>`;
+    }
 
     if (events.length === 0) {
       html += `<div style="text-align: center; padding: var(--space-8); color: var(--color-text-tertiary); font-size: var(--text-sm);">No hay citas programadas para este día.</div>`;
@@ -346,34 +393,7 @@ export class Appointments {
   }
 
   mount() {
-    this.container.querySelector('#add-appointment-btn')?.addEventListener('click', () => this.showAddAppointmentModal());
-    this.container.querySelector('#apply-filters-btn')?.addEventListener('click', () => this.applyFilters());
-    this.container.querySelector('#clear-filters-btn')?.addEventListener('click', () => this.clearFilters());
-
-    this.container.querySelector('#cal-prev-btn')?.addEventListener('click', () => this.navigate(-1));
-    this.container.querySelector('#cal-next-btn')?.addEventListener('click', () => this.navigate(1));
-    this.container.querySelector('#cal-today-btn')?.addEventListener('click', () => this.goToToday());
-
-    this.container.querySelectorAll('.cal-view-btn').forEach(btn => {
-      btn.addEventListener('click', () => this.switchView(btn.dataset.view));
-    });
-
-    this.container.addEventListener('click', (e) => {
-      const calCell = e.target.closest('.calendar-cell');
-      if (calCell?.dataset.date && this.viewMode === 'month') {
-        this.currentDate = new Date(calCell.dataset.date + 'T12:00:00');
-        this.switchView('day');
-        return;
-      }
-      const eventEl = e.target.closest('.calendar-event, .cal-week-event, .cal-day-event');
-      if (eventEl?.dataset.id) {
-        this.showChangeStatusModal(eventEl.dataset.id);
-        return;
-      }
-      if (e.target.classList.contains('change-status-btn')) {
-        this.showChangeStatusModal(e.target.dataset.id);
-      }
-    });
+    // All event listeners use delegation via _initDelegation
   }
 
   navigate(dir) {
@@ -410,6 +430,14 @@ export class Appointments {
   }
 
   showAddAppointmentModal() {
+    const userRole = state.get('user')?.role_name;
+    const dow = this.currentDate.getDay();
+    const isWeekendDay = dow === 0 || dow === 6;
+    if (isWeekendDay && userRole !== 'owner') {
+      toast.error('Solo el propietario puede agendar citas en fin de semana.');
+      return;
+    }
+
     const docOptions = this.doctorsList.map(d => `
       <option value="${d.id}">Dr/a. ${d.first_name} ${d.last_name} (${d.specialty})</option>
     `).join('');
@@ -497,6 +525,12 @@ export class Appointments {
         data.doctor_id = Number(data.doctor_id);
         if (!data.patient_id) { toast.error('Seleccione o cree un paciente'); return false; }
         if (!data.doctor_id) { toast.error('Seleccione un doctor'); return false; }
+        const selDate = new Date(data.appointment_date + 'T12:00:00');
+        const selDow = selDate.getDay();
+        if ((selDow === 0 || selDow === 6) && state.get('user')?.role_name !== 'owner') {
+          toast.error('Solo el propietario puede agendar citas en fin de semana.');
+          return false;
+        }
         try {
           await appointmentService.create(data);
           toast.success('Cita programada exitosamente');

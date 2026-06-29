@@ -1374,6 +1374,13 @@ tbody tr.clickable {
   background-color: rgba(6, 182, 212, 0.08);
 }
 
+.calendar-cell.weekend {
+  background-color: #fff5f5;
+}
+[data-theme='dark'] .calendar-cell.weekend {
+  background-color: rgba(229, 62, 62, 0.06);
+}
+
 .calendar-day-number {
   font-size: var(--text-sm);
   font-weight: var(--font-medium);
@@ -1428,6 +1435,12 @@ tbody tr.clickable {
 .cal-week-col {
   display: flex;
   flex-direction: column;
+}
+.cal-week-col.weekend {
+  background-color: #fff5f5;
+}
+[data-theme='dark'] .cal-week-col.weekend {
+  background-color: rgba(229, 62, 62, 0.06);
 }
 .cal-week-event {
   transition: opacity 0.15s ease;
