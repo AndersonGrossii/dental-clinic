@@ -1403,6 +1403,47 @@ tbody tr.clickable {
   opacity: 0.85;
 }
 
+/* ── Calendar Navigation ── */
+.cal-view-btn {
+  transition: all 0.15s ease;
+}
+.cal-view-btn:hover:not(.active) {
+  background-color: var(--color-surface-hover) !important;
+  color: var(--color-text) !important;
+}
+
+.cal-nav-title {
+  user-select: none;
+}
+
+/* ── Calendar cell clickable ── */
+.calendar-cell[data-date] {
+  cursor: pointer;
+}
+.calendar-cell[data-date]:hover {
+  background-color: var(--color-surface-hover);
+}
+
+/* ── Week view column ── */
+.cal-week-col {
+  display: flex;
+  flex-direction: column;
+}
+.cal-week-event {
+  transition: opacity 0.15s ease;
+}
+.cal-week-event:hover {
+  opacity: 0.85;
+}
+
+/* ── Day view event ── */
+.cal-day-event {
+  transition: opacity 0.15s ease;
+}
+.cal-day-event:hover {
+  opacity: 0.85;
+}
+
 .calendar-event.confirmed {
   background-color: var(--primary-100);
   color: var(--primary-700);

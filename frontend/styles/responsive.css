@@ -316,6 +316,91 @@
   }
 }
 
+/* Calendar responsive */
+@media (max-width: 768px) {
+  .calendar-grid {
+    font-size: var(--text-xs);
+  }
+  .calendar-cell {
+    min-height: 60px;
+    padding: 2px;
+  }
+  .calendar-day-number {
+    font-size: var(--text-xs);
+    padding: 2px;
+  }
+  .calendar-event {
+    font-size: 9px !important;
+    padding: 1px 3px !important;
+    margin: 1px 0 !important;
+  }
+  .cal-week-col {
+    min-height: 80px !important;
+  }
+  .cal-week-col .cal-week-header {
+    padding: 4px !important;
+  }
+  .cal-week-col .cal-week-header div:last-child {
+    font-size: var(--text-base) !important;
+  }
+  .cal-nav-title {
+    font-size: var(--text-sm) !important;
+    min-width: 120px !important;
+  }
+  .cal-nav-center {
+    flex: 1;
+    justify-content: center;
+  }
+  .cal-nav-bar {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+  .cal-view-tabs {
+    align-self: flex-start;
+  }
+  .cal-week-grid {
+    overflow-x: auto;
+    grid-template-columns: repeat(7, minmax(100px, 1fr)) !important;
+  }
+  .calendar-grid-header {
+    font-size: 10px;
+    padding: var(--space-1);
+  }
+  .calendar-day-grid {
+    grid-template-columns: 40px 1fr !important;
+  }
+  .calendar-time-slot {
+    font-size: 10px;
+    padding: var(--space-1);
+    height: 50px;
+  }
+  .calendar-slot-content {
+    min-height: 50px !important;
+    padding: 2px 4px !important;
+  }
+  .cal-day-event {
+    padding: 4px 6px !important;
+  }
+  .cal-day-event div:first-child {
+    font-size: var(--text-xs) !important;
+  }
+}
+
+/* Calendar on small phones */
+@media (max-width: 480px) {
+  .cal-week-grid {
+    grid-template-columns: repeat(7, minmax(85px, 1fr)) !important;
+  }
+  .cal-view-btn {
+    font-size: var(--text-xs) !important;
+    padding: 4px 10px !important;
+  }
+  .cal-nav-title {
+    font-size: var(--text-sm) !important;
+    min-width: 100px !important;
+  }
+}
+
 /* Teléfonos pequeños */
 @media (max-width: 480px) {
   :root {
