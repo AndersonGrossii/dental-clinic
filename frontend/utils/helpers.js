@@ -14,13 +14,13 @@ export function debounce(fn, delay) {
 }
 
 /**
- * Formatea un número como moneda local (MXN / USD).
+ * Formatea un número como moneda local (EUR).
  */
 export function formatCurrency(amount) {
   const num = parseFloat(amount || 0);
-  return new Intl.NumberFormat('es-MX', {
+  return new Intl.NumberFormat('es-ES', {
     style: 'currency',
-    currency: 'MXN',
+    currency: 'EUR',
   }).format(num);
 }
 
