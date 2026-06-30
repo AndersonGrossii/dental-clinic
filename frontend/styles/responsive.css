@@ -277,14 +277,30 @@
     gap: var(--space-3);
   }
 
-  .db-cal-hour-label {
-    width: 50px;
-    font-size: 10px;
-  }
-
   .db-cal-sidebar {
     border-right: none;
     border-bottom: 1px solid var(--color-border-light);
+  }
+
+  .db-wg-grid {
+    font-size: 9px;
+  }
+  .db-wg-time-label {
+    font-size: 8px;
+    padding: 2px 4px;
+  }
+  .db-wg-day-name {
+    font-size: 8px;
+  }
+  .db-wg-day-num {
+    font-size: var(--text-sm);
+  }
+  .db-wg-cell {
+    min-height: 24px;
+  }
+  .db-wg-event {
+    font-size: 8px;
+    padding: 1px 2px;
   }
 
   /* Settings */
@@ -462,7 +478,4 @@
     min-height: 60px;
   }
 
-  .db-cal-hour-row {
-    min-height: 60px;
-  }
 }

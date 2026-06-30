@@ -1,10 +1,7 @@
-// ============================================
-// Vista del Dashboard Principal con Calendario de Citas
-// ============================================
 import reportService from '../../services/report.service.js';
 import appointmentService from '../../services/appointment.service.js';
 import state from '../../scripts/state.js';
-import { formatCurrency, formatTime } from '../../utils/helpers.js';
+import { formatCurrency } from '../../utils/helpers.js';
 import toast from '../../components/toast/toast.js';
 
 export class Dashboard {
@@ -25,19 +22,68 @@ export class Dashboard {
     this.todayDate = this._todayStr();
   }
 
+  getMonday(date) {
+    const d = new Date(date);
+    const day = d.getDay();
+    d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  toDateStr(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  formatWeekRange() {
+    const mon = this.getMonday(new Date(this.currentDate + 'T12:00:00'));
+    const sun = new Date(mon);
+    sun.setDate(mon.getDate() + 6);
+    const monthNames = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+    const y = mon.getFullYear();
+    const monD = mon.getDate();
+    const monM = monthNames[mon.getMonth()];
+    const sunD = sun.getDate();
+    const sunM = monthNames[sun.getMonth()];
+    if (mon.getMonth() === sun.getMonth()) {
+      return `${monD} al ${sunD} de ${monM} de ${y}`;
+    }
+    return `${monD} de ${monM} al ${sunD} de ${sunM} de ${y}`;
+  }
+
+  async loadAppointmentsForWeek() {
+    try {
+      const mon = this.getMonday(new Date(this.currentDate + 'T12:00:00'));
+      const sun = new Date(mon);
+      sun.setDate(mon.getDate() + 6);
+      const user = state.get('user');
+      const params = {
+        date_from: this.toDateStr(mon),
+        date_to: this.toDateStr(sun),
+        limit: 999,
+        sortBy: 'a.start_time',
+        sortOrder: 'ASC'
+      };
+      if (this.role === 'doctor' && user?.doctor_id) {
+        params.doctor_id = user.doctor_id;
+      }
+      const list = await appointmentService.getAll(params);
+      this.appointmentsList = Array.isArray(list) ? list : [];
+    } catch (err) {
+      toast.error('Error al cargar citas de la semana');
+      this.appointmentsList = [];
+    }
+  }
+
   async render() {
     try {
-      // Cargar datos iniciales del dashboard (que contienen estadísticas de "Hoy")
       const dashboardData = await reportService.getDashboard();
       const stats = dashboardData.stats || {};
       this.role = dashboardData.role || '';
-      
-      this._updateTodayDate();
-      if (this.currentDate === this.todayDate) {
-        this.appointmentsList = dashboardData.todayAppointments || [];
-      } else {
-        await this.loadAppointmentsForDate();
-      }
+
+      await this.loadAppointmentsForWeek();
 
       const user = state.get('user');
       const roleDisplayName = this.role.charAt(0).toUpperCase() + this.role.slice(1);
@@ -61,8 +107,7 @@ export class Dashboard {
           <div class="card stat-card">
             <div class="stat-card-title">Citas de Hoy</div>
             <div class="stat-card-value">${stats.todayAppointmentsCount}</div>
-          </div>
-        `;
+          </div>`;
       } else if (this.role === 'recepcionista') {
         statsHtml = `
           <div class="card stat-card">
@@ -76,9 +121,8 @@ export class Dashboard {
           <div class="card stat-card">
             <div class="stat-card-title">Nuevos Pacientes Este Mes</div>
             <div class="stat-card-value">${stats.newPatientsThisMonth}</div>
-          </div>
-        `;
-      } else { // Doctor
+          </div>`;
+      } else {
         statsHtml = `
           <div class="card stat-card">
             <div class="stat-card-title">Mis Citas Hoy</div>
@@ -87,8 +131,7 @@ export class Dashboard {
           <div class="card stat-card">
             <div class="stat-card-title">Mis Pacientes Registrados</div>
             <div class="stat-card-value">${stats.myPatientsCount}</div>
-          </div>
-        `;
+          </div>`;
       }
 
       this.container.innerHTML = `
@@ -108,252 +151,174 @@ export class Dashboard {
           ${statsHtml}
         </div>
 
-        <!-- Sección de Calendario de Citas del Día -->
         <div class="db-cal-container">
           <div class="db-cal-header">
             <div class="db-cal-title-section">
-              <h3>Calendario de Citas</h3>
-              <p id="db-cal-subtitle">Agenda diaria de consultas</p>
+              <h3>Calendario Semanal</h3>
+              <p id="db-cal-subtitle">Vista semanal de consultas</p>
             </div>
             <div class="db-cal-nav">
-              <button id="db-cal-prev" class="db-cal-btn" title="Día Anterior">◀</button>
+              <button id="db-cal-prev" class="db-cal-btn" title="Semana Anterior">◀</button>
               <div class="db-cal-picker-wrapper">
-                <span id="db-cal-date-text" class="db-cal-date-display">Cargando fecha...</span>
-                <button class="db-cal-btn" title="Seleccionar Fecha">📅
+                <span id="db-cal-date-text" class="db-cal-date-display">Cargando...</span>
+                <button class="db-cal-btn" title="Seleccionar Semana">📅
                   <input type="date" id="db-cal-picker-input" class="db-cal-picker" />
                 </button>
               </div>
-              <button id="db-cal-next" class="db-cal-btn" title="Día Siguiente">▶</button>
+              <button id="db-cal-next" class="db-cal-btn" title="Semana Siguiente">▶</button>
             </div>
           </div>
           <div id="db-cal-layout-container" class="db-cal-layout">
-            <!-- El contenido dinámico del calendario se renderiza aquí -->
           </div>
-        </div>
-      `;
+        </div>`;
 
       this.renderCalendarContent();
     } catch (err) {
-      toast.error('Error al cargar datos del Dashboard');
+      toast.error('Error al cargar Dashboard');
       this.container.innerHTML = `<div class="empty-state"><h3>Error al cargar Dashboard</h3><p>${err.message}</p></div>`;
     }
   }
 
-  /**
-   * Carga las citas de una fecha seleccionada usando el servicio de citas,
-   * aplicando filtros basados en el rol (si es doctor, solo sus citas).
-   */
-  async loadAppointmentsForDate() {
-    try {
-      const user = state.get('user');
-      const params = {
-        date_from: this.currentDate,
-        date_to: this.currentDate,
-        limit: 999,
-        sortBy: 'a.start_time',
-        sortOrder: 'ASC'
-      };
-      if (this.role === 'doctor' && user?.doctor_id) {
-        params.doctor_id = user.doctor_id;
-      }
-      const list = await appointmentService.getAll(params);
-      this.appointmentsList = Array.isArray(list) ? list : [];
-    } catch (err) {
-      toast.error('Error al cargar citas de la fecha seleccionada');
-      this.appointmentsList = [];
-    }
-  }
-
-  /**
-   * Renderiza el contenido interno del calendario (sidebar y línea de tiempo).
-   */
   renderCalendarContent() {
     const layoutContainer = this.container.querySelector('#db-cal-layout-container');
     const dateText = this.container.querySelector('#db-cal-date-text');
     const pickerInput = this.container.querySelector('#db-cal-picker-input');
-    
+
     if (!layoutContainer) return;
 
-    // Actualizar texto de fecha visible y valor del date picker
-    dateText.textContent = this.formatDateFriendly(this.currentDate);
-    if (pickerInput) {
-      pickerInput.value = this.currentDate;
-    }
+    const mon = this.getMonday(new Date(this.currentDate + 'T12:00:00'));
+    const todayStr = this.toDateStr(new Date());
 
-    // Calcular estadísticas para el sidebar del calendario
-    const totalAppointments = this.appointmentsList.length;
-    const completedAppointments = this.appointmentsList.filter(
-      app => (app.status_name || '').toLowerCase() === 'completada'
+    dateText.textContent = `Semana del ${this.formatWeekRange()}`;
+    if (pickerInput) pickerInput.value = this.toDateStr(mon);
+
+    const total = this.appointmentsList.length;
+    const completed = this.appointmentsList.filter(
+      a => (a.status_name || '').toLowerCase() === 'completada'
     ).length;
-    const pendingAppointments = this.appointmentsList.filter(
-      app => (app.status_name || '').toLowerCase() === 'programada' || (app.status_name || '').toLowerCase() === 'confirmada'
+    const pending = this.appointmentsList.filter(
+      a => (a.status_name || '').toLowerCase() === 'programada' || (a.status_name || '').toLowerCase() === 'confirmada'
     ).length;
 
     const sidebarHtml = `
       <div class="db-cal-sidebar">
         <div class="db-cal-stat-box">
-          <div class="db-cal-stat-num">${totalAppointments}</div>
-          <div class="db-cal-stat-label">Citas Programadas</div>
+          <div class="db-cal-stat-num">${total}</div>
+          <div class="db-cal-stat-label">Citas de la Semana</div>
         </div>
         <div class="db-cal-stat-box">
-          <div class="db-cal-stat-num" style="color: var(--success-600);">${completedAppointments}</div>
+          <div class="db-cal-stat-num" style="color: var(--success-600);">${completed}</div>
           <div class="db-cal-stat-label">Completadas</div>
         </div>
         <div class="db-cal-stat-box">
-          <div class="db-cal-stat-num" style="color: var(--info-600);">${pendingAppointments}</div>
-          <div class="db-cal-stat-label">Pendientes / Activas</div>
+          <div class="db-cal-stat-num" style="color: var(--info-600);">${pending}</div>
+          <div class="db-cal-stat-label">Pendientes</div>
         </div>
-      </div>
-    `;
+      </div>`;
 
-    // Horas a mostrar en el timeline
-    const hours = ['08', '09', '10', '11', '12', '13', '14', '15', '16', '17', '18'];
-    
-    const timelineHtml = hours.map(hour => {
-      // Filtrar citas que inician en esta hora
-      const apptsInHour = this.appointmentsList.filter(app => {
-        if (!app.start_time) return false;
-        const appHour = app.start_time.split(':')[0];
-        return appHour === hour;
-      });
+    const dayNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+    const slotDuration = 30;
+    const slots = [];
+    for (let m = 540; m < 1200; m += slotDuration) {
+      slots.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
+    }
 
-      let eventsHtml = '';
-      if (apptsInHour.length === 0) {
-        eventsHtml = `<div class="db-cal-empty-slot">Sin citas programadas</div>`;
-      } else {
-        eventsHtml = apptsInHour.map(app => {
-          const doctorNameHtml = this.role !== 'doctor' 
-            ? `<span style="font-weight: var(--font-medium); opacity: 0.9;">Dr(a): ${app.doctor_name || 'Sin asignar'}</span>` 
-            : '';
-          
-          return `
-            <div class="db-cal-event-card" style="background-color: ${app.status_color || 'var(--primary-600)'};" data-id="${app.id}">
-              <div class="db-cal-event-time">
-                ${formatTime(app.start_time)} - ${formatTime(app.end_time)}
-              </div>
-              <div class="db-cal-event-patient">
-                ${app.patient_name || 'Paciente sin nombre'}
-              </div>
-              <div class="db-cal-event-details">
-                ${doctorNameHtml}
-                <span class="db-cal-event-badge">${app.status_label || 'Programada'}</span>
-              </div>
-            </div>
-          `;
-        }).join('');
+    const getDocName = (a) => a.doctor_name || a.doctor?.fullName || '';
+
+    let cells = '';
+
+    cells += `<div class="db-wg-time-header"></div>`;
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(mon);
+      date.setDate(mon.getDate() + i);
+      const dateStr = this.toDateStr(date);
+      const isToday = dateStr === todayStr;
+      const isWeekend = i >= 5;
+      cells += `<div class="db-wg-day-header ${isToday ? 'today' : ''} ${isWeekend ? 'weekend' : ''}">
+        <div class="db-wg-day-name">${dayNames[i]}</div>
+        <div class="db-wg-day-num ${isToday ? 'today' : ''}">${date.getDate()}</div>
+      </div>`;
+    }
+
+    slots.forEach(slot => {
+      cells += `<div class="db-wg-time-label">${slot}</div>`;
+      for (let i = 0; i < 7; i++) {
+        const date = new Date(mon);
+        date.setDate(mon.getDate() + i);
+        const dateStr = this.toDateStr(date);
+        const isWeekend = i >= 5;
+
+        const matches = this.appointmentsList.filter(a => {
+          if (String(a.appointment_date).substring(0, 10) !== dateStr) return false;
+          const s = a.start_time ? a.start_time.substring(0, 5) : '';
+          const e = a.end_time ? a.end_time.substring(0, 5) : '';
+          return s <= slot && e > slot;
+        });
+
+        if (matches.length === 0) {
+          cells += `<div class="db-wg-cell empty ${isWeekend ? 'weekend' : ''}"></div>`;
+        } else {
+          let inner = '';
+          matches.forEach(m => {
+            const patientName = m.patient_name || '—';
+            const doctorName = getDocName(m);
+            inner += `<div class="db-wg-event" style="background-color: ${m.status_color || '#0891b2'};">
+              <div class="db-wg-event-patient">${patientName}</div>
+              ${doctorName ? `<div class="db-wg-event-doctor">${doctorName}</div>` : ''}
+            </div>`;
+          });
+          cells += `<div class="db-wg-cell ${isWeekend ? 'weekend' : ''}">${inner}</div>`;
+        }
       }
+    });
 
-      const hourLabel = parseInt(hour, 10) >= 12 
-        ? `${hour}:00 PM` 
-        : `${hour}:00 AM`;
+    const gridHtml = `<div class="db-wg-grid">${cells}</div>`;
 
-      return `
-        <div class="db-cal-hour-row">
-          <div class="db-cal-hour-label">${hourLabel}</div>
-          <div class="db-cal-events">
-            ${eventsHtml}
-          </div>
-        </div>
-      `;
-    }).join('');
-
-    layoutContainer.innerHTML = `
-      ${sidebarHtml}
-      <div class="db-cal-timeline">
-        ${timelineHtml}
-      </div>
-    `;
+    layoutContainer.innerHTML = `${sidebarHtml}${gridHtml}`;
   }
 
-  /**
-   * Modifica la fecha actual sumando/restando días y refresca los datos del calendario.
-   */
-  async changeDate(daysOffset) {
-    const date = new Date(this.currentDate + 'T12:00:00'); // Evitar problemas de huso horario
-    date.setDate(date.getDate() + daysOffset);
-    this.currentDate = date.toISOString().split('T')[0];
+  async changeWeek(dir) {
+    const d = new Date(this.currentDate + 'T12:00:00');
+    d.setDate(d.getDate() + 7 * dir);
+    this.currentDate = this.toDateStr(d);
 
-    const subtitleElement = this.container.querySelector('#db-cal-subtitle');
-    if (subtitleElement) {
-      subtitleElement.textContent = 'Actualizando agenda...';
-    }
+    const subtitleEl = this.container.querySelector('#db-cal-subtitle');
+    if (subtitleEl) subtitleEl.textContent = 'Actualizando agenda...';
 
     this._updateTodayDate();
-    if (this.currentDate === this.todayDate) {
-      // Si volvemos a hoy, podemos re-cargar del dashboard o recargar directamente
-      const dashboardData = await reportService.getDashboard();
-      this.appointmentsList = dashboardData.todayAppointments || [];
-    } else {
-      await this.loadAppointmentsForDate();
-    }
+    await this.loadAppointmentsForWeek();
 
-    if (subtitleElement) {
-      subtitleElement.textContent = 'Agenda del día seleccionado';
-    }
-
+    if (subtitleEl) subtitleEl.textContent = 'Vista semanal';
     this.renderCalendarContent();
   }
 
-  /**
-   * Formatea un string YYYY-MM-DD a un texto amigable: "Lunes, 29 de junio de 2026"
-   */
-  formatDateFriendly(dateStr) {
-    const parts = dateStr.split('-');
-    const date = new Date(parts[0], parts[1] - 1, parts[2]);
-    return date.toLocaleDateString('es-MX', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    });
-  }
-
   mount() {
-    // Botón Día Anterior
     const prevBtn = this.container.querySelector('#db-cal-prev');
-    if (prevBtn) {
-      prevBtn.addEventListener('click', () => this.changeDate(-1));
-    }
+    if (prevBtn) prevBtn.addEventListener('click', () => this.changeWeek(-1));
 
-    // Botón Día Siguiente
     const nextBtn = this.container.querySelector('#db-cal-next');
-    if (nextBtn) {
-      nextBtn.addEventListener('click', () => this.changeDate(1));
-    }
+    if (nextBtn) nextBtn.addEventListener('click', () => this.changeWeek(1));
 
-    // Input Date Picker
     const pickerInput = this.container.querySelector('#db-cal-picker-input');
     if (pickerInput) {
       pickerInput.addEventListener('change', async (e) => {
         const val = e.target.value;
-        if (val) {
-          this.currentDate = val;
-          const subtitleElement = this.container.querySelector('#db-cal-subtitle');
-          if (subtitleElement) subtitleElement.textContent = 'Actualizando agenda...';
-          
-          this._updateTodayDate();
-          if (this.currentDate === this.todayDate) {
-            const dashboardData = await reportService.getDashboard();
-            this.appointmentsList = dashboardData.todayAppointments || [];
-          } else {
-            await this.loadAppointmentsForDate();
-          }
-          
-          if (subtitleElement) subtitleElement.textContent = 'Agenda del día seleccionado';
-          this.renderCalendarContent();
-        }
+        if (!val) return;
+        this.currentDate = val;
+        const subtitleEl = this.container.querySelector('#db-cal-subtitle');
+        if (subtitleEl) subtitleEl.textContent = 'Actualizando agenda...';
+        this._updateTodayDate();
+        await this.loadAppointmentsForWeek();
+        if (subtitleEl) subtitleEl.textContent = 'Vista semanal';
+        this.renderCalendarContent();
       });
     }
 
-    // Redirección al hacer click en una tarjeta de cita
     const layoutContainer = this.container.querySelector('#db-cal-layout-container');
     if (layoutContainer) {
       layoutContainer.addEventListener('click', (e) => {
-        const card = e.target.closest('.db-cal-event-card');
-        if (card) {
-          const apptId = card.getAttribute('data-id');
-          // Redirige a la página de citas
-          window.location.hash = `#/appointments`;
+        if (e.target.closest('.db-wg-event')) {
+          window.location.hash = '#/appointments';
         }
       });
     }
