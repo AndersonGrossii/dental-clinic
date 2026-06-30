@@ -20,6 +20,7 @@
   text-decoration: none;
   line-height: 1;
   user-select: none;
+  padding: 0 var(--space-5);
 }
 
 .btn:disabled {
