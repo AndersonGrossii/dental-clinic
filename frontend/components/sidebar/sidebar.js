@@ -38,13 +38,13 @@ export class Sidebar {
       { path: '#/', label: 'Dashboard', icon: icons.dashboard, roles: ['propietario', 'recepcionista', 'doctor'] },
       { path: '#/patients', label: 'Pacientes', icon: icons.patients, roles: ['propietario', 'recepcionista', 'doctor'] },
       { path: '#/appointments', label: 'Citas', icon: icons.appointments, roles: ['propietario', 'recepcionista', 'doctor'] },
-      { path: '#/doctors', label: 'Doctores', icon: icons.doctors, roles: ['propietario', 'recepcionista'] },
-      { path: '#/treatments', label: 'Tratamientos', icon: icons.treatments, roles: ['propietario', 'recepcionista', 'doctor'] },
-      { path: '#/quotations', label: 'Presupuestos', icon: icons.quotations, roles: ['propietario', 'recepcionista'] },
-      { path: '#/invoices', label: 'Facturación', icon: icons.invoices, roles: ['propietario', 'recepcionista'] },
-      { path: '#/payments', label: 'Pagos', icon: icons.payments, roles: ['propietario', 'recepcionista'] },
-      { path: '#/reports', label: 'Reportes', icon: icons.reports, roles: ['propietario'] },
-      { path: '#/settings', label: 'Configuración', icon: icons.settings, roles: ['propietario'] },
+      { path: '#/doctors', label: 'Doctores', icon: icons.doctors, roles: ['propietario', 'direccion', 'recepcionista'] },
+      { path: '#/treatments', label: 'Tratamientos', icon: icons.treatments, roles: ['propietario', 'direccion', 'recepcionista', 'doctor'] },
+      { path: '#/quotations', label: 'Presupuestos', icon: icons.quotations, roles: ['propietario', 'direccion', 'recepcionista'] },
+      { path: '#/invoices', label: 'Facturación', icon: icons.invoices, roles: ['propietario', 'direccion', 'recepcionista'] },
+      { path: '#/payments', label: 'Pagos', icon: icons.payments, roles: ['propietario', 'direccion', 'recepcionista'] },
+      { path: '#/reports', label: 'Reportes', icon: icons.reports, roles: ['propietario', 'direccion'] },
+      { path: '#/settings', label: 'Configuración', icon: icons.settings, roles: ['propietario', 'direccion'] },
     ];
 
     const activeHash = window.location.hash || '#/';

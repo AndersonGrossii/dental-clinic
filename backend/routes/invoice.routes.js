@@ -4,7 +4,7 @@
 import { Router } from 'express';
 import * as controller from '../controllers/invoice.controller.js';
 import { authMiddleware } from '../middlewares/auth.middleware.js';
-import { ownerOnly, staffOnly, allRoles } from '../middlewares/role.middleware.js';
+import { managementOnly, staffOnly, allRoles } from '../middlewares/role.middleware.js';
 import { validate } from '../middlewares/validation.middleware.js';
 import {
   createInvoiceRules,
@@ -17,7 +17,7 @@ const router = Router();
 router.use(authMiddleware);
 
 router.get('/', allRoles, controller.getAll);
-router.get('/stats', ownerOnly, controller.getStats);
+router.get('/stats', managementOnly, controller.getStats);
 router.get('/:id', allRoles, controller.getById);
 
 router.post('/', staffOnly, validate(createInvoiceRules), auditMiddleware('CREAR_FACTURA', 'invoices'), controller.create);

@@ -4,7 +4,7 @@
 import { Router } from 'express';
 import * as controller from '../controllers/settings.controller.js';
 import { authMiddleware } from '../middlewares/auth.middleware.js';
-import { ownerOnly } from '../middlewares/role.middleware.js';
+import { managementOnly } from '../middlewares/role.middleware.js';
 import { auditMiddleware } from '../middlewares/audit.middleware.js';
 
 const router = Router();
@@ -13,9 +13,9 @@ const router = Router();
 // puedan mostrar el nombre de la clínica sin autenticación
 router.get('/clinic', controller.getClinicInfo);
 
-// Todas las demás rutas requieren autenticación y rol de propietario
+// Todas las demás rutas requieren autenticación y rol de dirección/propietario
 router.use(authMiddleware);
-router.use(ownerOnly);
+router.use(managementOnly);
 
 router.put('/clinic', auditMiddleware('MODIFICAR_DATOS_CLINICA', 'clinic_information'), controller.updateClinicInfo);
 

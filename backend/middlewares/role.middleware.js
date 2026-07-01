@@ -29,16 +29,21 @@ export const roleMiddleware = (...allowedRoles) => {
 };
 
 /**
- * Solo propietarios.
+ * Solo propietarios (eliminación de cuentas de propietario).
  */
 export const ownerOnly = roleMiddleware('propietario');
 
 /**
- * Propietarios y recepcionistas.
+ * Dirección y propietarios (gestión completa excepto borrar propietario).
  */
-export const staffOnly = roleMiddleware('propietario', 'recepcionista');
+export const managementOnly = roleMiddleware('propietario', 'direccion');
+
+/**
+ * Dirección, propietarios y recepcionistas.
+ */
+export const staffOnly = roleMiddleware('propietario', 'direccion', 'recepcionista');
 
 /**
  * Todos los roles autenticados.
  */
-export const allRoles = roleMiddleware('propietario', 'recepcionista', 'doctor');
+export const allRoles = roleMiddleware('propietario', 'direccion', 'recepcionista', 'doctor');

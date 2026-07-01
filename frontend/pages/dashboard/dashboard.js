@@ -89,7 +89,7 @@ export class Dashboard {
       const roleDisplayName = this.role.charAt(0).toUpperCase() + this.role.slice(1);
 
       let statsHtml = '';
-      if (this.role === 'propietario') {
+      if (this.role === 'propietario' || this.role === 'direccion') {
         statsHtml = `
           <div class="card stat-card">
             <div class="stat-card-title">Ingresos Hoy</div>
@@ -138,7 +138,7 @@ export class Dashboard {
         <div class="page-header">
           <div>
             <h1 class="page-title">Dashboard</h1>
-            <p style="color: var(--text-secondary);">Bienvenido al Sistema de Gestión de ${state.get('clinicInfo')?.name || 'Clinica Dental'}</p>
+            <p style="color: var(--text-secondary);">Bienvenido, ${user?.first_name || 'Usuario'}, al Sistema de Gestión de ${state.get('clinicInfo')?.name || 'Clinica Dental'}</p>
           </div>
           <div style="text-align: right;">
             <span class="badge badge-success" style="padding: var(--space-2) var(--space-4); font-size: var(--text-xs);">

@@ -92,6 +92,14 @@ export const update = async (req, res, next) => {
  */
 export const remove = async (req, res, next) => {
   try {
+    // Dirección no puede eliminar cuentas de propietario
+    if (req.user.roleName === 'direccion') {
+      const targetUser = await userService.getById(parseInt(req.params.id, 10));
+      if (targetUser.role_name === 'propietario') {
+        return ApiResponse.error(res, 'No tiene permisos para eliminar cuentas de propietario.', 403);
+      }
+    }
+
     await userService.delete(parseInt(req.params.id, 10));
 
     return ApiResponse.success(res, null, 'Usuario eliminado exitosamente.');

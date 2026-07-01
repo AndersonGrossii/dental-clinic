@@ -4,6 +4,7 @@
 
 export const ROLES = {
   OWNER: 'propietario',
+  DIRECCION: 'direccion',
   RECEPTIONIST: 'recepcionista',
   DOCTOR: 'doctor',
 };

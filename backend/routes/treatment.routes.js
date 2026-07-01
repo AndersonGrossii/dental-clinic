@@ -4,7 +4,7 @@
 import { Router } from 'express';
 import * as controller from '../controllers/treatment.controller.js';
 import { authMiddleware } from '../middlewares/auth.middleware.js';
-import { ownerOnly, allRoles } from '../middlewares/role.middleware.js';
+import { managementOnly, allRoles } from '../middlewares/role.middleware.js';
 import { validate } from '../middlewares/validation.middleware.js';
 import {
   createTreatmentRules,
@@ -25,12 +25,12 @@ router.get('/', allRoles, controller.getAll);
 router.get('/categories', allRoles, controller.getCategories);
 router.get('/:id', allRoles, controller.getById);
 
-router.post('/', ownerOnly, validate(createTreatmentRules), auditMiddleware('CREAR_TRATAMIENTO', 'treatments'), controller.create);
-router.put('/:id', ownerOnly, validate(updateTreatmentRules), auditMiddleware('ACTUALIZAR_TRATAMIENTO', 'treatments'), controller.update);
-router.delete('/:id', ownerOnly, auditMiddleware('ELIMINAR_TRATAMIENTO', 'treatments'), controller.remove);
+router.post('/', managementOnly, validate(createTreatmentRules), auditMiddleware('CREAR_TRATAMIENTO', 'treatments'), controller.create);
+router.put('/:id', managementOnly, validate(updateTreatmentRules), auditMiddleware('ACTUALIZAR_TRATAMIENTO', 'treatments'), controller.update);
+router.delete('/:id', managementOnly, auditMiddleware('ELIMINAR_TRATAMIENTO', 'treatments'), controller.remove);
 
-router.post('/categories', ownerOnly, validate(createCategoryRules), auditMiddleware('CREAR_CATEGORIA_TRATAMIENTO', 'treatment_categories'), controller.createCategory);
-router.put('/categories/:id', ownerOnly, validate(updateCategoryRules), auditMiddleware('ACTUALIZAR_CATEGORIA_TRATAMIENTO', 'treatment_categories'), controller.updateCategory);
+router.post('/categories', managementOnly, validate(createCategoryRules), auditMiddleware('CREAR_CATEGORIA_TRATAMIENTO', 'treatment_categories'), controller.createCategory);
+router.put('/categories/:id', managementOnly, validate(updateCategoryRules), auditMiddleware('ACTUALIZAR_CATEGORIA_TRATAMIENTO', 'treatment_categories'), controller.updateCategory);
 
 // Tratamientos de pacientes (Historial de tratamientos clínicos)
 router.get('/patient/:patientId', allRoles, controller.getPatientTreatments);

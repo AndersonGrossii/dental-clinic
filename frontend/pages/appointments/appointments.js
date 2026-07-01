@@ -654,7 +654,7 @@ export class Appointments {
     const targetDate = date || this.toDateStr(this.currentDate);
     const targetDow = new Date(targetDate + 'T12:00:00').getDay();
     const isWeekendDay = targetDow === 0 || targetDow === 6;
-    if (isWeekendDay && userRole !== 'owner') {
+    if (isWeekendDay && userRole !== 'propietario' && userRole !== 'direccion') {
       toast.error('Solo el propietario puede agendar citas en fin de semana.');
       return;
     }
@@ -748,7 +748,7 @@ export class Appointments {
         if (!data.doctor_id) { toast.error('Seleccione un doctor'); return false; }
         const selDate = new Date(data.appointment_date + 'T12:00:00');
         const selDow = selDate.getDay();
-        if ((selDow === 0 || selDow === 6) && state.get('user')?.role_name !== 'owner') {
+        if ((selDow === 0 || selDow === 6) && state.get('user')?.role_name !== 'propietario' && state.get('user')?.role_name !== 'direccion') {
           toast.error('Solo el propietario puede agendar citas en fin de semana.');
           return false;
         }
