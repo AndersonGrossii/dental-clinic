@@ -35,9 +35,9 @@ export class Sidebar {
     const mobileOpen = state.get('mobileSidebarOpen') || false;
 
     const menuItems = [
-      { path: '#/', label: 'Dashboard', icon: icons.dashboard, roles: ['propietario', 'recepcionista', 'doctor'] },
-      { path: '#/patients', label: 'Pacientes', icon: icons.patients, roles: ['propietario', 'recepcionista', 'doctor'] },
-      { path: '#/appointments', label: 'Citas', icon: icons.appointments, roles: ['propietario', 'recepcionista', 'doctor'] },
+      { path: '#/', label: 'Dashboard', icon: icons.dashboard, roles: ['propietario', 'direccion', 'recepcionista', 'doctor'] },
+      { path: '#/patients', label: 'Pacientes', icon: icons.patients, roles: ['propietario', 'direccion', 'recepcionista', 'doctor'] },
+      { path: '#/appointments', label: 'Citas', icon: icons.appointments, roles: ['propietario', 'direccion', 'recepcionista', 'doctor'] },
       { path: '#/doctors', label: 'Doctores', icon: icons.doctors, roles: ['propietario', 'direccion', 'recepcionista'] },
       { path: '#/treatments', label: 'Tratamientos', icon: icons.treatments, roles: ['propietario', 'direccion', 'recepcionista', 'doctor'] },
       { path: '#/quotations', label: 'Presupuestos', icon: icons.quotations, roles: ['propietario', 'direccion', 'recepcionista'] },
