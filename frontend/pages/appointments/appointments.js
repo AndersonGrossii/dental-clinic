@@ -17,6 +17,9 @@ export class Appointments {
     this.isDoctor = false;
     this.doctorUnavail = {};
     this.doctorSchedule = null;
+    this.allDoctorUnavail = {};
+    this.allDoctorSchedules = {};
+    this.doctorColors = {};
     this._initDelegation();
   }
 
@@ -78,6 +81,8 @@ export class Appointments {
 
       this.doctorUnavail = {};
       this.doctorSchedule = null;
+      this.allDoctorUnavail = {};
+      this.allDoctorSchedules = {};
 
       const range = this.getVisibleRange();
       const params = { date_from: range.start, date_to: range.end };
@@ -90,12 +95,17 @@ export class Appointments {
       if (!this.isDoctor) {
         const docsResponse = await doctorService.getAll();
         this.doctorsList = docsResponse || [];
+        this.doctorColors = Object.fromEntries(
+          this.doctorsList.map(d => [d.id, d.color || '#0891b2'])
+        );
       }
 
+      // Fetch unavailability for the visible doctor(s)
       if (this.filters.doctor_id) {
+        const id = this.filters.doctor_id;
         const [unavail, schedule] = await Promise.all([
-          doctorService.getUnavailability(this.filters.doctor_id, range.start, range.end),
-          doctorService.getSchedule(this.filters.doctor_id),
+          doctorService.getUnavailability(id, range.start, range.end),
+          doctorService.getSchedule(id),
         ]);
         (unavail || []).forEach(rec => {
           const d = new Date(rec.start_date + 'T12:00:00');
@@ -108,6 +118,31 @@ export class Appointments {
           }
         });
         this.doctorSchedule = (schedule || []).find(s => s.is_active) || null;
+      } else if (!this.isDoctor && this.doctorsList.length > 0) {
+        // Fetch unavailability + schedules for ALL doctors (for colored dots)
+        const [unavailResults, scheduleResults] = await Promise.all([
+          Promise.all(this.doctorsList.map(d =>
+            doctorService.getUnavailability(d.id, range.start, range.end).catch(() => [])
+          )),
+          Promise.all(this.doctorsList.map(d =>
+            doctorService.getSchedule(d.id).catch(() => [])
+          )),
+        ]);
+        this.doctorsList.forEach((d, i) => {
+          const unavail = {};
+          (unavailResults[i] || []).forEach(rec => {
+            const cur = new Date(rec.start_date + 'T12:00:00');
+            const end = new Date(rec.end_date + 'T12:00:00');
+            while (cur <= end) {
+              const ds = this.toDateStr(cur);
+              if (!unavail[ds]) unavail[ds] = [];
+              unavail[ds].push({ reason: rec.reason || rec.type, type: rec.type });
+              cur.setDate(cur.getDate() + 1);
+            }
+          });
+          this.allDoctorUnavail[d.id] = unavail;
+          this.allDoctorSchedules[d.id] = (scheduleResults[i] || []).find(s => s.is_active) || null;
+        });
       }
     } catch (err) {
       toast.error('Error al cargar la agenda de citas');
@@ -222,6 +257,8 @@ export class Appointments {
       : this.viewMode === 'week' ? this.renderWeekView()
       : this.renderDayView();
 
+    const legendHtml = this._renderDoctorLegend();
+
     this.container.innerHTML = `
       <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4); flex-wrap: wrap; gap: var(--space-3);">
         <div>
@@ -270,6 +307,7 @@ export class Appointments {
               <button id="cal-today-btn" class="btn btn-outline btn-sm" style="margin-left: var(--space-2);">Hoy</button>
             </div>
           </div>
+          ${legendHtml}
           <div class="cal-view-container">
             ${calContent}
           </div>
@@ -412,19 +450,26 @@ export class Appointments {
           return s <= slot && e > slot;
         });
 
+        const availableDocs = this._getDoctorsAvailable(dateStr, slot);
+        const dotsHtml = this._renderDoctorDots(availableDocs);
+
         if (matches.length === 0) {
-          cells += `<div class="db-wg-cell empty" data-date="${dateStr}" data-time="${slot}"></div>`;
+          cells += `<div class="db-wg-cell empty" data-date="${dateStr}" data-time="${slot}">${dotsHtml}</div>`;
         } else {
           let inner = '';
           matches.forEach(m => {
+            const docColor = m.doctor?.color || this.doctorColors[m.doctor_id] || '#0891b2';
             const patientName = m.patient_name || '—';
             const doctorName = getDocName(m);
-            inner += `<div class="db-wg-event" data-id="${m.id}" style="background-color: ${m.status_color || '#0891b2'};">
-              <div class="db-wg-event-patient">${patientName}</div>
+            inner += `<div class="db-wg-event" data-id="${m.id}" style="background-color: ${m.status_color || '#0891b2'}; border-left: 3px solid ${docColor};">
+              <div class="db-wg-event-patient">
+                <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${docColor};vertical-align:middle;margin-right:3px;flex-shrink:0;"></span>
+                ${patientName}
+              </div>
               ${doctorName ? `<div class="db-wg-event-doctor">${doctorName}</div>` : ''}
             </div>`;
           });
-          cells += `<div class="db-wg-cell" data-date="${dateStr}" data-time="${slot}">${inner}</div>`;
+          cells += `<div class="db-wg-cell" data-date="${dateStr}" data-time="${slot}">${inner}${dotsHtml}</div>`;
         }
       }
     });
@@ -495,19 +540,26 @@ export class Appointments {
         return s <= slot && e > slot;
       });
 
+      const availableDocs = this._getDoctorsAvailable(dateStr, slot);
+      const dotsHtml = this._renderDoctorDots(availableDocs);
+
       if (matches.length === 0) {
-        html += `<div class="cal-dg-cell" data-date="${dateStr}" data-time="${slot}"></div>`;
+        html += `<div class="cal-dg-cell" data-date="${dateStr}" data-time="${slot}">${dotsHtml}</div>`;
       } else {
         let inner = '';
         matches.forEach(m => {
+          const docColor = m.doctor?.color || this.doctorColors[m.doctor_id] || '#0891b2';
           const patientName = m.patient_name || '—';
           const doctorName = getDocName(m);
-          inner += `<div class="cal-dg-event" data-id="${m.id}" style="background-color: ${m.status_color || '#0891b2'};">
-            <div class="cal-dg-event-patient">${formatTime(m.start_time)} ${patientName}</div>
+          inner += `<div class="cal-dg-event" data-id="${m.id}" style="background-color: ${m.status_color || '#0891b2'}; border-left: 3px solid ${docColor};">
+            <div class="cal-dg-event-patient">
+              <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${docColor};vertical-align:middle;margin-right:3px;flex-shrink:0;"></span>
+              ${formatTime(m.start_time)} ${patientName}
+            </div>
             ${doctorName ? `<div class="cal-dg-event-doctor">${doctorName}</div>` : ''}
           </div>`;
         });
-        html += `<div class="cal-dg-cell" data-date="${dateStr}" data-time="${slot}">${inner}</div>`;
+        html += `<div class="cal-dg-cell" data-date="${dateStr}" data-time="${slot}">${inner}${dotsHtml}</div>`;
       }
     });
 
@@ -840,6 +892,61 @@ export class Appointments {
     const d = new Date();
     d.setHours(h, m + mins, 0, 0);
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+
+  _getDoctorsAvailable(dateStr, slotTime) {
+    if (!this.doctorsList || this.doctorsList.length === 0) return [];
+    const dow = new Date(dateStr + 'T12:00:00').getDay();
+    if (dow === 0 || dow === 6) return [];
+    return this.doctorsList.filter(d => {
+      const unavail = this.allDoctorUnavail[d.id];
+      if (unavail && unavail[dateStr] && unavail[dateStr].length > 0) return false;
+      const schedule = this.allDoctorSchedules[d.id];
+      if (schedule && schedule.break_start && schedule.break_end) {
+        const bs = schedule.break_start.substring(0, 5);
+        const be = schedule.break_end.substring(0, 5);
+        if (slotTime >= bs && slotTime < be) return false;
+      }
+      const hasAppt = this.getEventsForDate(dateStr).some(a => {
+        if (a.doctor_id != d.id) return false;
+        const s = a.start_time ? a.start_time.substring(0, 5) : '';
+        const e = a.end_time ? a.end_time.substring(0, 5) : '';
+        return s <= slotTime && e > slotTime;
+      });
+      if (hasAppt) return false;
+      return true;
+    });
+  }
+
+  _renderDoctorDots(availableDoctors) {
+    if (!availableDoctors || availableDoctors.length === 0) return '';
+    const maxDots = 5;
+    const shown = availableDoctors.slice(0, maxDots);
+    const remaining = availableDoctors.length - maxDots;
+    const names = availableDoctors.map(d => `Dr/a. ${d.first_name} ${d.last_name}`).join(', ');
+    let html = `<div class="cal-avail-dots" title="Disponible: ${names}" style="display:flex;align-items:center;gap:3px;padding:2px 4px;flex-wrap:wrap;pointer-events:none;">`;
+    shown.forEach(d => {
+      html += `<span style="width:8px;height:8px;border-radius:50%;background:${d.color || '#0891b2'};display:inline-block;flex-shrink:0;" title="Dr/a. ${d.first_name} ${d.last_name}"></span>`;
+    });
+    if (remaining > 0) {
+      html += `<span style="font-size:9px;color:var(--text-secondary);line-height:1;">+${remaining}</span>`;
+    }
+    html += `</div>`;
+    return html;
+  }
+
+  _renderDoctorLegend() {
+    if (this.filters.doctor_id || this.isDoctor || this.doctorsList.length <= 1) return '';
+    let html = `<div class="cal-doctor-legend" style="display:flex;flex-wrap:wrap;gap:8px 16px;padding:8px 12px;margin-bottom:12px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md);">`;
+    html += `<span style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-right:4px;display:flex;align-items:center;">Doctores:</span>`;
+    this.doctorsList.forEach(d => {
+      html += `<span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary);">
+        <span style="width:10px;height:10px;border-radius:50%;background:${d.color || '#0891b2'};display:inline-block;"></span>
+        ${d.first_name} ${d.last_name}
+      </span>`;
+    });
+    html += `</div>`;
+    return html;
   }
 
   showChangeStatusModal(appointmentId) {
