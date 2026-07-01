@@ -17,6 +17,7 @@ router.get('/', allRoles, controller.getAll);
 router.get('/:id', allRoles, controller.getById);
 router.get('/:id/schedule', allRoles, controller.getSchedule);
 router.get('/:id/availability', allRoles, controller.getAvailability);
+router.get('/:id/unavailability', allRoles, controller.getUnavailability);
 
 router.post('/', ownerOnly, validate(createDoctorRules), auditMiddleware('CREAR_DOCTOR', 'doctors'), controller.create);
 router.put('/:id', ownerOnly, validate(updateDoctorRules), auditMiddleware('ACTUALIZAR_DOCTOR', 'doctors'), controller.update);

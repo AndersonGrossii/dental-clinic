@@ -400,6 +400,34 @@
   .cal-day-event div:first-child {
     font-size: var(--text-xs) !important;
   }
+  .cal-dg-grid {
+    grid-template-columns: 40px 1fr !important;
+  }
+  .cal-dg-time-label {
+    font-size: 8px;
+    padding: 2px 4px;
+  }
+  .cal-dg-cell {
+    min-height: 24px;
+  }
+  .cal-dg-event {
+    font-size: 8px;
+    padding: 1px 2px;
+  }
+  .db-wg-grid {
+    font-size: 9px;
+  }
+  .db-wg-time-label {
+    font-size: 8px;
+    padding: 2px 4px;
+  }
+  .db-wg-cell {
+    min-height: 24px;
+  }
+  .db-wg-event {
+    font-size: 8px;
+    padding: 1px 2px;
+  }
 }
 
 /* Calendar on small phones */
@@ -414,6 +442,17 @@
   .cal-nav-title {
     font-size: var(--text-sm) !important;
     min-width: 100px !important;
+  }
+  .cal-dg-time-label {
+    font-size: 7px;
+    padding: 1px 3px;
+  }
+  .cal-dg-cell {
+    min-height: 20px;
+  }
+  .cal-dg-event {
+    font-size: 7px;
+    padding: 0 2px;
   }
 }
 

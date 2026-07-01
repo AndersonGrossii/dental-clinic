@@ -14,6 +14,9 @@ export class Appointments {
     this.filters = {};
     this.viewMode = 'month';
     this.currentDate = new Date();
+    this.isDoctor = false;
+    this.doctorUnavail = {};
+    this.doctorSchedule = null;
     this._initDelegation();
   }
 
@@ -30,11 +33,24 @@ export class Appointments {
         this.switchView('day');
         return;
       }
-      const eventEl = e.target.closest('.calendar-event, .cal-week-event, .cal-day-event');
+      const eventEl = e.target.closest('.calendar-event, .cal-week-event, .cal-day-event, .db-wg-event, .cal-dg-event');
       if (eventEl?.dataset.id) {
         this.showChangeStatusModal(eventEl.dataset.id);
         return;
       }
+
+      const slotCell = e.target.closest('.db-wg-cell:not(.unavailable):not(.break), .cal-dg-cell:not(.unavailable):not(.break)');
+      if (slotCell && !e.target.closest('.db-wg-event, .cal-dg-event')) {
+        const date = slotCell.dataset.date;
+        const time = slotCell.dataset.time;
+        const docSelect = this.container.querySelector('#filter-doctor');
+        const doctorId = docSelect?.value || undefined;
+        if (date && time) {
+          this.showAddAppointmentModal({ date, startTime: time, doctorId });
+        }
+        return;
+      }
+
       if (e.target.classList.contains('change-status-btn')) {
         this.showChangeStatusModal(e.target.dataset.id);
       }
@@ -60,6 +76,9 @@ export class Appointments {
       this.filters = { ...this.filters, ...filters };
       if (this.isDoctor) this.filters.doctor_id = user.doctor_id;
 
+      this.doctorUnavail = {};
+      this.doctorSchedule = null;
+
       const range = this.getVisibleRange();
       const params = { date_from: range.start, date_to: range.end };
       if (this.filters.doctor_id) params.doctor_id = this.filters.doctor_id;
@@ -71,6 +90,24 @@ export class Appointments {
       if (!this.isDoctor) {
         const docsResponse = await doctorService.getAll();
         this.doctorsList = docsResponse || [];
+      }
+
+      if (this.filters.doctor_id) {
+        const [unavail, schedule] = await Promise.all([
+          doctorService.getUnavailability(this.filters.doctor_id, range.start, range.end),
+          doctorService.getSchedule(this.filters.doctor_id),
+        ]);
+        (unavail || []).forEach(rec => {
+          const d = new Date(rec.start_date + 'T12:00:00');
+          const end = new Date(rec.end_date + 'T12:00:00');
+          while (d <= end) {
+            const ds = this.toDateStr(d);
+            if (!this.doctorUnavail[ds]) this.doctorUnavail[ds] = [];
+            this.doctorUnavail[ds].push({ reason: rec.reason || rec.type, type: rec.type });
+            d.setDate(d.getDate() + 1);
+          }
+        });
+        this.doctorSchedule = (schedule || []).find(s => s.is_active) || null;
       }
     } catch (err) {
       toast.error('Error al cargar la agenda de citas');
@@ -314,38 +351,85 @@ export class Appointments {
   renderWeekView() {
     const mon = this.getMonday(this.currentDate);
     const todayStr = this.toDateStr(new Date());
-    const dayNames = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+    const dayNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
-    let html = `<div class="cal-week-grid" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background-color: var(--color-border-light); border-radius: var(--radius-lg); overflow: hidden;">`;
+    const slotDuration = 30;
+    const slots = [];
+    for (let m = 540; m < 1200; m += slotDuration) {
+      slots.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
+    }
 
+    const getDocName = (a) => a.doctor_name || a.doctor?.fullName || '';
+
+    let cells = '';
+
+    cells += `<div class="db-wg-time-header"></div>`;
     for (let i = 0; i < 7; i++) {
       const date = new Date(mon);
       date.setDate(mon.getDate() + i);
       const dateStr = this.toDateStr(date);
       const isToday = dateStr === todayStr;
-      const dayNum = date.getDate();
       const isWeekend = i >= 5;
-
-      html += `<div class="cal-week-col ${isWeekend ? 'weekend' : ''}" style="background: var(--color-surface); min-height: 120px; ${isWeekend ? 'background: var(--color-bg-secondary);' : ''}">
-        <div class="cal-week-header" style="padding: 8px 6px; text-align: center; border-bottom: 1px solid var(--color-border-light); background: ${isToday ? 'var(--primary-50)' : 'transparent'};">
-          <div style="font-size: 10px; color: var(--color-text-tertiary); text-transform: uppercase;">${dayNames[i].substring(0, 3)}</div>
-          <div style="font-size: var(--text-lg); font-weight: ${isToday ? 'var(--font-bold)' : 'var(--font-medium)'}; color: ${isToday ? 'var(--primary-600)' : 'var(--color-text)'};">${dayNum}</div>
-        </div>
-        <div style="padding: 4px;">
-          ${isWeekend
-            ? '<div style="font-size: 10px; color: var(--color-danger, #e53e3e); text-align: center; padding: 12px 4px; font-weight: var(--font-medium);">Cerrado</div>'
-            : (this.getEventsForDate(dateStr).map(ev => `
-              <div class="cal-week-event" data-id="${ev.id}" style="background-color: ${ev.status_color}; color: #fff; border-radius: 4px; padding: 3px 6px; margin-bottom: 3px; font-size: 10px; cursor: pointer; line-height: 1.3;">
-                <div style="font-weight: 600;">${formatTime(ev.start_time)}</div>
-                <div>${ev.patient_name}</div>
-              </div>
-            `).join('') || '<div style="font-size: 10px; color: var(--color-text-tertiary); padding: 8px 4px; text-align: center;">—</div>')}
-        </div>
+      cells += `<div class="db-wg-day-header ${isToday ? 'today' : ''} ${isWeekend ? 'weekend' : ''}">
+        <div class="db-wg-day-name">${dayNames[i]}</div>
+        <div class="db-wg-day-num ${isToday ? 'today' : ''}">${date.getDate()}</div>
       </div>`;
     }
 
-    html += `</div>`;
-    return html;
+    slots.forEach(slot => {
+      cells += `<div class="db-wg-time-label">${slot}</div>`;
+      for (let i = 0; i < 7; i++) {
+        const date = new Date(mon);
+        date.setDate(mon.getDate() + i);
+        const dateStr = this.toDateStr(date);
+        const isWeekend = i >= 5;
+
+        if (isWeekend) {
+          cells += `<div class="db-wg-cell weekend"></div>`;
+          continue;
+        }
+
+        const isUnavailable = this.doctorUnavail[dateStr] && this.doctorUnavail[dateStr].length > 0;
+        const isBreak = this.doctorSchedule &&
+          this.doctorSchedule.break_start && this.doctorSchedule.break_end &&
+          slot >= this.doctorSchedule.break_start.substring(0, 5) &&
+          slot < this.doctorSchedule.break_end.substring(0, 5);
+
+        if (isUnavailable) {
+          const reasons = this.doctorUnavail[dateStr].map(r => r.reason).join(', ');
+          cells += `<div class="db-wg-cell unavailable" title="Doctor no disponible: ${reasons}" data-date="${dateStr}" data-time="${slot}"></div>`;
+          continue;
+        }
+
+        if (isBreak) {
+          cells += `<div class="db-wg-cell break" data-date="${dateStr}" data-time="${slot}"><span class="cal-dg-cell-label">Descanso</span></div>`;
+          continue;
+        }
+
+        const matches = this.getEventsForDate(dateStr).filter(a => {
+          const s = a.start_time ? a.start_time.substring(0, 5) : '';
+          const e = a.end_time ? a.end_time.substring(0, 5) : '';
+          return s <= slot && e > slot;
+        });
+
+        if (matches.length === 0) {
+          cells += `<div class="db-wg-cell empty" data-date="${dateStr}" data-time="${slot}"></div>`;
+        } else {
+          let inner = '';
+          matches.forEach(m => {
+            const patientName = m.patient_name || '—';
+            const doctorName = getDocName(m);
+            inner += `<div class="db-wg-event" data-id="${m.id}" style="background-color: ${m.status_color || '#0891b2'};">
+              <div class="db-wg-event-patient">${patientName}</div>
+              ${doctorName ? `<div class="db-wg-event-doctor">${doctorName}</div>` : ''}
+            </div>`;
+          });
+          cells += `<div class="db-wg-cell" data-date="${dateStr}" data-time="${slot}">${inner}</div>`;
+        }
+      }
+    });
+
+    return `<div class="db-wg-grid">${cells}</div>`;
   }
 
   renderDayView() {
@@ -357,13 +441,15 @@ export class Appointments {
     const dayName = dayNames[this.currentDate.getDay()];
     const monthName = monthNames[this.currentDate.getMonth()];
     const dayNum = this.currentDate.getDate();
-
-    const events = this.getEventsForDate(dateStr);
     const isWeekendDay = this.currentDate.getDay() === 0 || this.currentDate.getDay() === 6;
-    const hours = [];
-    for (let h = 8; h <= 20; h++) {
-      hours.push(h);
+
+    const slotDuration = 30;
+    const slots = [];
+    for (let m = 540; m < 1200; m += slotDuration) {
+      slots.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
     }
+
+    const getDocName = (a) => a.doctor_name || a.doctor?.fullName || '';
 
     let html = `<div style="margin-bottom: var(--space-3); text-align: center;">
       <h3 style="margin: 0; font-size: var(--text-lg); font-weight: var(--font-bold); color: ${isToday ? 'var(--primary-600)' : 'var(--color-text)'};">${dayName}, ${dayNum} ${monthName}</h3>
@@ -373,31 +459,59 @@ export class Appointments {
       html += `<div style="text-align: center; padding: var(--space-3); background: #fff5f5; border: 1px solid #fecaca; border-radius: var(--radius-lg); margin-bottom: var(--space-4);">
         <span style="color: var(--color-danger, #e53e3e); font-weight: var(--font-semibold); font-size: var(--text-sm);">Este día es fin de semana — solo el propietario puede agendar citas.</span>
       </div>`;
+      const singleDate = new Date(this.currentDate);
+      html += `<div class="cal-dg-grid">`;
+      html += `<div class="cal-dg-time-label"></div><div class="cal-dg-cell weekend" style="text-align:center;padding:12px 4px;color:var(--color-danger,#e53e3e);font-weight:var(--font-medium);font-size:10px;">Cerrado</div>`;
+      html += `</div>`;
+      return html;
     }
 
-    if (events.length === 0) {
-      html += `<div style="text-align: center; padding: var(--space-8); color: var(--color-text-tertiary); font-size: var(--text-sm);">No hay citas programadas para este día.</div>`;
-    } else {
-      html += `<div class="calendar-day-grid">`;
-      hours.forEach(h => {
-        const hourStr = `${String(h).padStart(2, '0')}:00`;
-        const hourEvents = events.filter(ev => {
-          const startH = parseInt(ev.start_time?.split(':')[0] || '0', 10);
-          return startH === h;
-        });
-        html += `<div class="calendar-time-slot">${hourStr}</div>`;
-        html += `<div class="calendar-slot-content" style="padding: 4px 8px; min-height: 60px;">`;
-        hourEvents.forEach(ev => {
-          html += `<div class="cal-day-event" data-id="${ev.id}" style="background-color: ${ev.status_color}; color: #fff; border-radius: 6px; padding: 6px 10px; margin-bottom: 4px; cursor: pointer;">
-            <div style="font-weight: 600; font-size: var(--text-sm);">${formatTime(ev.start_time)} — ${ev.patient_name}</div>
-            <div style="font-size: var(--text-xs); opacity: 0.85;">${ev.doctor_name || ''}${ev.treatment_name ? ' · ' + ev.treatment_name : ''}</div>
+    const isUnavailable = this.doctorUnavail[dateStr] && this.doctorUnavail[dateStr].length > 0;
+
+    html += `<div class="cal-dg-grid">`;
+
+    slots.forEach(slot => {
+      html += `<div class="cal-dg-time-label">${slot}</div>`;
+
+      if (isUnavailable) {
+        const reasons = this.doctorUnavail[dateStr].map(r => r.reason).join(', ');
+        html += `<div class="cal-dg-cell unavailable" title="Doctor no disponible: ${reasons}" data-date="${dateStr}" data-time="${slot}"></div>`;
+        return;
+      }
+
+      const isBreak = this.doctorSchedule &&
+        this.doctorSchedule.break_start && this.doctorSchedule.break_end &&
+        slot >= this.doctorSchedule.break_start.substring(0, 5) &&
+        slot < this.doctorSchedule.break_end.substring(0, 5);
+
+      if (isBreak) {
+        html += `<div class="cal-dg-cell break" data-date="${dateStr}" data-time="${slot}"><span class="cal-dg-cell-label">Descanso</span></div>`;
+        return;
+      }
+
+      const matches = this.getEventsForDate(dateStr).filter(a => {
+        const s = a.start_time ? a.start_time.substring(0, 5) : '';
+        const e = a.end_time ? a.end_time.substring(0, 5) : '';
+        return s <= slot && e > slot;
+      });
+
+      if (matches.length === 0) {
+        html += `<div class="cal-dg-cell" data-date="${dateStr}" data-time="${slot}"></div>`;
+      } else {
+        let inner = '';
+        matches.forEach(m => {
+          const patientName = m.patient_name || '—';
+          const doctorName = getDocName(m);
+          inner += `<div class="cal-dg-event" data-id="${m.id}" style="background-color: ${m.status_color || '#0891b2'};">
+            <div class="cal-dg-event-patient">${formatTime(m.start_time)} ${patientName}</div>
+            ${doctorName ? `<div class="cal-dg-event-doctor">${doctorName}</div>` : ''}
           </div>`;
         });
-        html += `</div>`;
-      });
-      html += `</div>`;
-    }
+        html += `<div class="cal-dg-cell" data-date="${dateStr}" data-time="${slot}">${inner}</div>`;
+      }
+    });
 
+    html += `</div>`;
     return html;
   }
 
@@ -534,20 +648,22 @@ export class Appointments {
     }
   }
 
-  showAddAppointmentModal() {
+  showAddAppointmentModal(options = {}) {
+    const { date, startTime, endTime, doctorId } = options;
     const userRole = state.get('user')?.role_name;
-    const dow = this.currentDate.getDay();
-    const isWeekendDay = dow === 0 || dow === 6;
+    const targetDate = date || this.toDateStr(this.currentDate);
+    const targetDow = new Date(targetDate + 'T12:00:00').getDay();
+    const isWeekendDay = targetDow === 0 || targetDow === 6;
     if (isWeekendDay && userRole !== 'owner') {
       toast.error('Solo el propietario puede agendar citas en fin de semana.');
       return;
     }
 
     const docOptions = this.doctorsList.map(d => `
-      <option value="${d.id}">Dr/a. ${d.first_name} ${d.last_name} (${d.specialty})</option>
+      <option value="${d.id}" ${doctorId == d.id ? 'selected' : ''}>Dr/a. ${d.first_name} ${d.last_name} (${d.specialty})</option>
     `).join('');
 
-    const defaultDate = this.toDateStr(this.currentDate);
+    const defaultEnd = endTime || (startTime ? this._addMinutes(startTime, 30) : '');
 
     const content = `
       <form id="add-appointment-form">
@@ -598,16 +714,16 @@ export class Appointments {
         </div>
         <div class="form-group" style="margin-top: var(--space-3);">
           <label class="form-label">Fecha de la Cita</label>
-          <input type="date" name="appointment_date" class="form-input" value="${defaultDate}" required />
+          <input type="date" name="appointment_date" class="form-input" value="${targetDate}" required />
         </div>
         <div class="form-row-responsive">
           <div class="form-group" style="margin: 0;">
             <label class="form-label">Hora Inicio</label>
-            <input type="time" name="start_time" class="form-input" required />
+            <input type="time" name="start_time" class="form-input" value="${startTime || ''}" required />
           </div>
           <div class="form-group" style="margin: 0;">
             <label class="form-label">Hora Fin</label>
-            <input type="time" name="end_time" class="form-input" required />
+            <input type="time" name="end_time" class="form-input" value="${defaultEnd}" required />
           </div>
         </div>
         <div class="form-group" style="margin-top: var(--space-3);">
@@ -717,6 +833,13 @@ export class Appointments {
         toast.error(err.message || 'Error al crear paciente');
       }
     });
+  }
+
+  _addMinutes(time, mins) {
+    const [h, m] = time.split(':').map(Number);
+    const d = new Date();
+    d.setHours(h, m + mins, 0, 0);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   }
 
   showChangeStatusModal(appointmentId) {

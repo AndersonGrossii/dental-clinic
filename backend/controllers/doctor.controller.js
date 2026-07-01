@@ -46,6 +46,20 @@ export const updateSchedule = async (req, res, next) => {
   }
 };
 
+export const getUnavailability = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { date_from, date_to } = req.query;
+    if (!date_from || !date_to) {
+      return ApiResponse.error(res, 'date_from y date_to son requeridos', 400);
+    }
+    const records = await doctorService.getUnavailability(id, date_from, date_to);
+    return ApiResponse.success(res, records, 'No disponibilidad obtenida exitosamente');
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const addUnavailability = async (req, res, next) => {
   try {
     const { id } = req.params;

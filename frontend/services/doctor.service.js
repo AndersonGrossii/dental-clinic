@@ -24,6 +24,10 @@ class DoctorService {
     return await api.get(`/doctors/${id}/availability`, { date: dateString });
   }
 
+  async getUnavailability(id, dateFrom, dateTo) {
+    return await api.get(`/doctors/${id}/unavailability`, { date_from: dateFrom, date_to: dateTo });
+  }
+
   async addUnavailability(id, data) {
     return await api.post(`/doctors/${id}/unavailability`, data);
   }

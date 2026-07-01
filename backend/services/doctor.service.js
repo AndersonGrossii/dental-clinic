@@ -85,6 +85,14 @@ class DoctorService {
   }
 
   /**
+   * Obtiene la no disponibilidad de un doctor en un rango de fechas.
+   */
+  async getUnavailability(doctorId, dateFrom, dateTo) {
+    await this.getById(doctorId);
+    return await doctorRepository.getUnavailability(doctorId, dateFrom, dateTo);
+  }
+
+  /**
    * Crea un nuevo doctor con su cuenta de usuario.
    * @param {object} data - { firstName, lastName, email, password, phone, specialty, licenseNumber, bio, consultationDuration, color }
    * @returns {Promise<object>}
