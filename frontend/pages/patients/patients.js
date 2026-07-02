@@ -103,12 +103,16 @@ export class Patients {
     const searchBtn = this.container.querySelector('#search-btn');
     
     if (searchBtn && searchInput) {
-      searchBtn.addEventListener('click', () => {
-        this.loadPatients(searchInput.value.trim());
+      searchBtn.addEventListener('click', async () => {
+        searchBtn.disabled = true;
+        await this.loadPatients(searchInput.value.trim());
+        searchBtn.disabled = false;
       });
-      searchInput.addEventListener('keypress', (e) => {
+      searchInput.addEventListener('keypress', async (e) => {
         if (e.key === 'Enter') {
-          this.loadPatients(searchInput.value.trim());
+          searchBtn.disabled = true;
+          await this.loadPatients(searchInput.value.trim());
+          searchBtn.disabled = false;
         }
       });
     }
