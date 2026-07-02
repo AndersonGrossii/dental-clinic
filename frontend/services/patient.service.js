@@ -4,8 +4,8 @@
 import api from './api.service.js';
 
 class PatientService {
-  async getAll(params = {}) {
-    return await api.get('/patients', params);
+  async getAll(params = {}, options = {}) {
+    return await api.get('/patients', params, options);
   }
 
   async getById(id) {
@@ -24,8 +24,8 @@ class PatientService {
     return await api.delete(`/patients/${id}`);
   }
 
-  async search(term) {
-    return await api.get('/patients/search', { q: term });
+  async search(term, params = {}, options = {}) {
+    return await api.get('/patients/search', { q: term, ...params }, options);
   }
 
   async getHistory(id) {

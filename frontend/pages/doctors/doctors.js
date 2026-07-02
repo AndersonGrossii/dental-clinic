@@ -9,24 +9,57 @@ export class Doctors {
   constructor(container) {
     this.container = container;
     this.doctorsList = [];
+    this.searchQuery = '';
   }
 
   async render() {
     try {
       const response = await doctorService.getAll();
       this.doctorsList = response || [];
+      this.renderLayout();
       this.renderView();
     } catch (err) {
       toast.error('Error al cargar la lista de doctores');
     }
   }
 
+  renderLayout() {
+    this.container.innerHTML = `
+      <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-6);">
+        <div>
+          <h1 class="page-title">Personal Médico</h1>
+          <p style="color: var(--text-secondary);">Directorio de odontólogos especialistas y gestión de horarios</p>
+        </div>
+        <button id="add-doctor-btn" class="btn btn-primary">+ Nuevo Doctor</button>
+      </div>
+
+      <div class="card" style="margin-bottom: var(--space-4); padding: var(--space-4);">
+        <div style="display: flex; gap: var(--space-2);">
+          <input type="text" id="doctor-search" class="form-input" placeholder="Buscar por Nombre o Especialidad..." style="flex: 1;" value="${this.searchQuery}" />
+        </div>
+      </div>
+
+      <div id="doctors-cards-container" class="card-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-4);">
+        <!-- Cards will render here -->
+      </div>
+    `;
+  }
+
   renderView() {
-    let cards = this.doctorsList.map(doc => `
-      <div class="card" style="border-top: 4px solid ${doc.color || '#0891b2'};">
+    const container = this.container.querySelector('#doctors-cards-container');
+    if (!container) return;
+
+    const query = (this.searchQuery || '').toLowerCase().trim();
+    const filtered = this.doctorsList.filter(doc => 
+      `${doc.first_name} ${doc.last_name}`.toLowerCase().includes(query) ||
+      (doc.specialty || '').toLowerCase().includes(query)
+    );
+
+    let cards = filtered.map(doc => `
+      <div class="card" style="border-top: 4px solid ${doc.color || '#0891b2'}; ${doc.is_active === false ? 'opacity: 0.7;' : ''}">
         <div style="display: flex; flex-direction: column; align-items: center; text-align: center; padding: var(--space-4);">
-          <span style="font-size: 48px; background-color: var(--gray-100); width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--primary-600); margin-bottom: var(--space-3);">
-            👨‍⚕️
+          <span style="font-size: 24px; font-weight: bold; background-color: ${doc.color || '#0891b2'}; color: white; width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: var(--space-3);">
+            ${doc.first_name[0].toUpperCase()}${doc.last_name[0].toUpperCase()}
           </span>
           <h3 style="margin: 0;">Dr/a. ${doc.first_name} ${doc.last_name}</h3>
           <p style="color: var(--primary-600); font-weight: 500; font-size: var(--text-sm); margin: var(--space-1) 0;">${doc.specialty}</p>
@@ -38,32 +71,33 @@ export class Doctors {
           </div>
           <div style="width: 100%; display: flex; gap: var(--space-2); margin-top: var(--space-2);">
             <button class="btn btn-sm btn-primary edit-doctor-btn" data-id="${doc.id}" style="flex: 1;">Editar</button>
-            <button class="btn btn-sm btn-danger delete-doctor-btn" data-id="${doc.id}" style="flex: 1;">Eliminar</button>
+            <button class="btn btn-sm ${doc.is_active !== false ? 'btn-outline' : 'btn-success'} toggle-active-btn" data-id="${doc.id}" data-active="${doc.is_active !== false}" style="flex: 1;">
+              ${doc.is_active !== false ? 'Desactivar' : 'Activar'}
+            </button>
+          </div>
+          <div style="width: 100%; margin-top: var(--space-2);">
+            <button class="btn btn-sm btn-danger delete-doctor-btn" data-id="${doc.id}" style="width: 100%;">Eliminar</button>
           </div>
         </div>
       </div>
     `).join('');
 
-    if (this.doctorsList.length === 0) {
-      cards = `<p style="text-align: center; color: var(--text-secondary); grid-column: span 3;">No hay doctores registrados.</p>`;
+    if (filtered.length === 0) {
+      cards = `<p style="text-align: center; color: var(--text-secondary); grid-column: span 3; padding: var(--space-6);">No se encontraron doctores registrados.</p>`;
     }
 
-    this.container.innerHTML = `
-      <div class="page-header" style="display: flex; justify-content: between; align-items: center; margin-bottom: var(--space-6);">
-        <div>
-          <h1 class="page-title">Personal Médico</h1>
-          <p style="color: var(--text-secondary);">Directorio de odontólogos especialistas y gestión de horarios</p>
-        </div>
-        <button id="add-doctor-btn" class="btn btn-primary">+ Nuevo Doctor</button>
-      </div>
-
-      <div class="card-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-4);">
-        ${cards}
-      </div>
-    `;
+    container.innerHTML = cards;
   }
 
   mount() {
+    const searchInput = this.container.querySelector('#doctor-search');
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        this.searchQuery = searchInput.value;
+        this.renderView();
+      });
+    }
+
     this.addBtnClickListener = () => this.showDoctorModal();
     this.containerClickListener = async (e) => {
       if (e.target.classList.contains('view-schedule-btn')) {
@@ -81,6 +115,17 @@ export class Doctors {
       if (e.target.classList.contains('delete-doctor-btn')) {
         const id = e.target.getAttribute('data-id');
         this.showDeleteConfirm(id);
+      }
+      if (e.target.classList.contains('toggle-active-btn')) {
+        const id = e.target.getAttribute('data-id');
+        const isActive = e.target.getAttribute('data-active') === 'true';
+        try {
+          await doctorService.update(id, { isActive: !isActive });
+          toast.success(`Doctor ${!isActive ? 'activado' : 'desactivado'} con éxito`);
+          await this.render();
+        } catch (err) {
+          toast.error(err.message || 'Error al cambiar estado del doctor');
+        }
       }
     };
 

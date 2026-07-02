@@ -82,6 +82,7 @@ export class Dashboard {
       const dashboardData = await reportService.getDashboard();
       const stats = dashboardData.stats || {};
       this.role = dashboardData.role || '';
+      this.todayAppointments = dashboardData.todayAppointments || [];
 
       await this.loadAppointmentsForWeek();
 
@@ -115,8 +116,8 @@ export class Dashboard {
             <div class="stat-card-value">${stats.todayAppointmentsCount}</div>
           </div>
           <div class="card stat-card">
-            <div class="stat-card-title">Facturas Pendientes</div>
-            <div class="stat-card-value">${stats.pendingInvoicesCount}</div>
+            <div class="stat-card-title">Pacientes Activos</div>
+            <div class="stat-card-value">${stats.activePatients}</div>
           </div>
           <div class="card stat-card">
             <div class="stat-card-title">Nuevos Pacientes Este Mes</div>
@@ -200,6 +201,23 @@ export class Dashboard {
       a => (a.status_name || '').toLowerCase() === 'programada' || (a.status_name || '').toLowerCase() === 'confirmada'
     ).length;
 
+    let todayApptsHtml = '';
+    const todayAppts = this.todayAppointments || [];
+    if (todayAppts.length === 0) {
+      todayApptsHtml = `<div style="color: var(--text-secondary); font-size: var(--text-xs); text-align: center; padding: var(--space-4);">No hay citas para hoy</div>`;
+    } else {
+      todayApptsHtml = todayAppts.map(a => `
+        <div style="padding: var(--space-2); border-bottom: 1px solid var(--color-border-light); font-size: var(--text-xs);">
+          <div style="display: flex; justify-content: space-between; font-weight: 600; gap: 4px;">
+            <span style="white-space: nowrap;">${a.start_time.substring(0, 5)} - ${a.end_time.substring(0, 5)}</span>
+            <span style="color: ${a.status_color || 'var(--primary-600)'}; white-space: nowrap;">${a.status_label || 'Agendada'}</span>
+          </div>
+          <div style="color: var(--color-text); font-weight: 500; margin-top: 2px;">${a.patient_name}</div>
+          <div style="color: var(--color-text-secondary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${a.reason || 'Consulta'}</div>
+        </div>
+      `).join('');
+    }
+
     const sidebarHtml = `
       <div class="db-cal-sidebar">
         <div class="db-cal-stat-box">
@@ -214,6 +232,14 @@ export class Dashboard {
           <div class="db-cal-stat-num" style="color: var(--info-600);">${pending}</div>
           <div class="db-cal-stat-label">Pendientes</div>
         </div>
+
+        <div style="margin-top: var(--space-6); background: var(--color-bg-secondary); padding: var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--color-border);">
+          <h4 style="margin: 0 0 var(--space-2) 0; font-size: var(--text-xs); text-transform: uppercase; color: var(--primary-700); font-weight: 600;">Citas de Hoy</h4>
+          <div style="max-height: 200px; overflow-y: auto;">
+            ${todayApptsHtml}
+          </div>
+        </div>
+
       </div>`;
 
     const dayNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];

@@ -73,28 +73,29 @@ export class Appointments {
       if (e.target.id === 'cal-prev-btn') this.navigate(-1);
       if (e.target.id === 'cal-next-btn') this.navigate(1);
       if (e.target.id === 'cal-today-btn') this.goToToday();
+      if (e.target.classList.contains('status-filter-chip')) {
+        this.filters.status = e.target.dataset.status || undefined;
+        this.renderView();
+        return;
+      }
   }
 
-  destroy() {
-    this.container.removeEventListener('click', this.handleContainerClick);
-  }
-
-  async render(filters = {}) {
-    await this.loadData(filters);
+  async render(filters = {}, onlyRefreshAppointments = false) {
+    await this.loadData(filters, onlyRefreshAppointments);
     this.renderView();
+    const prefilled = state.get('prefilledAppointment');
+    if (prefilled) {
+      state.set('prefilledAppointment', null);
+      this.showAddAppointmentModal(prefilled);
+    }
   }
 
-  async loadData(filters = {}) {
+  async loadData(filters = {}, onlyRefreshAppointments = false) {
     try {
       const user = state.get('user');
       this.isDoctor = user?.role_name === 'doctor';
       this.filters = { ...this.filters, ...filters };
       if (this.isDoctor) this.filters.doctor_id = user.doctor_id;
-
-      this.doctorUnavail = {};
-      this.doctorSchedule = null;
-      this.allDoctorUnavail = {};
-      this.allDoctorSchedules = {};
 
       const range = this.getVisibleRange();
       const params = { date_from: range.start, date_to: range.end };
@@ -103,6 +104,15 @@ export class Appointments {
 
       const apptsResponse = await appointmentService.getAll(params);
       this.appointmentsList = apptsResponse || [];
+
+      if (onlyRefreshAppointments) {
+        return;
+      }
+
+      this.doctorUnavail = {};
+      this.doctorSchedule = null;
+      this.allDoctorUnavail = {};
+      this.allDoctorSchedules = {};
 
       if (!this.isDoctor) {
         const docsResponse = await doctorService.getAll();
@@ -224,14 +234,66 @@ export class Appointments {
       }
       return `${mon.getDate()} ${monM} - ${sun.getDate()} ${sunM} ${y}`;
     }
+    if (this.viewMode === 'list') {
+      return `Listado de Citas — ${monthNames[m]} ${y}`;
+    }
     return `${dayNames[d.getDay()]}, ${d.getDate()} ${monthNames[m]} ${y}`;
   }
 
-  getEventsForDate(dateStr) {
+  getFilteredAppointments() {
     return this.appointmentsList.filter(a => {
+      if (this.filters.status && (a.status_name || '').toLowerCase() !== this.filters.status) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  getEventsForDate(dateStr) {
+    return this.getFilteredAppointments().filter(a => {
       const aptDate = a.appointment_date ? String(a.appointment_date).substring(0, 10) : '';
       return aptDate === dateStr;
     });
+  }
+
+  renderListView() {
+    const filtered = this.getFilteredAppointments();
+    const rows = filtered.length
+      ? filtered.map(app => `
+          <tr>
+            <td><strong>${formatDate(app.appointment_date)}</strong></td>
+            <td>${formatTime(app.start_time)} - ${formatTime(app.end_time)}</td>
+            <td>${app.patient_name}</td>
+            <td>${app.doctor_name}</td>
+            <td>${app.treatment_name || 'Consulta general'}</td>
+            <td><span class="badge" style="background-color: ${app.status_color}; color: white;">${app.status_label}</span></td>
+            <td>
+              <button class="btn btn-sm btn-secondary change-status-btn" data-id="${app.id}">Cambiar Estado</button>
+            </td>
+          </tr>
+        `).join('')
+      : `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">No se encontraron citas.</td></tr>`;
+
+    return `
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Horario</th>
+              <th>Paciente</th>
+              <th>Doctor</th>
+              <th>Tratamiento</th>
+              <th>Estado</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      </div>
+    `;
   }
 
   renderView() {
@@ -249,27 +311,24 @@ export class Appointments {
            </select>
          </div>`;
 
-    const rows = this.appointmentsList.length
-      ? this.appointmentsList.map(app => `
-          <tr>
-            <td><strong>${formatDate(app.appointment_date)}</strong></td>
-            <td>${formatTime(app.start_time)} - ${formatTime(app.end_time)}</td>
-            <td>${app.patient_name}</td>
-            <td>${app.doctor_name}</td>
-            <td>${app.treatment_name || 'Consulta general'}</td>
-            <td><span class="badge" style="background-color: ${app.status_color}; color: white;">${app.status_label}</span></td>
-            <td>
-              <button class="btn btn-sm btn-secondary change-status-btn" data-id="${app.id}">Cambiar Estado</button>
-            </td>
-          </tr>
-        `).join('')
-      : `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">No hay citas programadas en la agenda.</td></tr>`;
-
     const calContent = this.viewMode === 'month' ? this.renderMonthView()
       : this.viewMode === 'week' ? this.renderWeekView()
-      : this.renderDayView();
+      : this.viewMode === 'day' ? this.renderDayView()
+      : this.renderListView();
 
     const legendHtml = this._renderDoctorLegend();
+
+    const statusFilterChipsHtml = `
+      <div style="display: flex; gap: var(--space-2); margin-top: var(--space-3); flex-wrap: wrap; align-items: center;">
+        <span style="font-size: var(--text-xs); font-weight: 600; color: var(--color-text-secondary); text-transform: uppercase;">Filtrar Estado:</span>
+        <button class="btn btn-sm ${!this.filters.status ? 'btn-primary' : 'btn-outline'} status-filter-chip" data-status="" style="padding: 2px 8px; border-radius: var(--radius-full); font-size: var(--text-xs);">Todos</button>
+        <button class="btn btn-sm ${this.filters.status === 'programada' ? 'btn-primary' : 'btn-outline'} status-filter-chip" data-status="programada" style="padding: 2px 8px; border-radius: var(--radius-full); font-size: var(--text-xs);">Programada</button>
+        <button class="btn btn-sm ${this.filters.status === 'confirmada' ? 'btn-primary' : 'btn-outline'} status-filter-chip" data-status="confirmada" style="padding: 2px 8px; border-radius: var(--radius-full); font-size: var(--text-xs);">Confirmada</button>
+        <button class="btn btn-sm ${this.filters.status === 'en_consulta' ? 'btn-primary' : 'btn-outline'} status-filter-chip" data-status="en_consulta" style="padding: 2px 8px; border-radius: var(--radius-full); font-size: var(--text-xs);">En Consulta</button>
+        <button class="btn btn-sm ${this.filters.status === 'completada' ? 'btn-primary' : 'btn-outline'} status-filter-chip" data-status="completada" style="padding: 2px 8px; border-radius: var(--radius-full); font-size: var(--text-xs);">Completada</button>
+        <button class="btn btn-sm ${this.filters.status === 'cancelada' ? 'btn-primary' : 'btn-outline'} status-filter-chip" data-status="cancelada" style="padding: 2px 8px; border-radius: var(--radius-full); font-size: var(--text-xs);">Cancelada</button>
+      </div>
+    `;
 
     this.container.innerHTML = `
       <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4); flex-wrap: wrap; gap: var(--space-3);">
@@ -301,6 +360,7 @@ export class Appointments {
               <button id="clear-filters-btn" class="btn btn-outline btn-sm">Limpiar</button>
             </div>
           </div>
+          ${statusFilterChipsHtml}
         </div>
       </div>
 
@@ -311,6 +371,7 @@ export class Appointments {
               <button class="cal-view-btn btn-cal-view btn-sm ${this.viewMode === 'day' ? 'active' : ''}" data-view="day" style="border: none; border-radius: 0; padding: 6px 14px; cursor: pointer; font-size: var(--text-sm); font-weight: var(--font-medium); background: ${this.viewMode === 'day' ? 'var(--primary-600)' : 'transparent'}; color: ${this.viewMode === 'day' ? '#fff' : 'var(--color-text-secondary)'}; transition: all 0.15s;">Día</button>
               <button class="cal-view-btn btn-cal-view btn-sm ${this.viewMode === 'week' ? 'active' : ''}" data-view="week" style="border: none; border-radius: 0; padding: 6px 14px; cursor: pointer; font-size: var(--text-sm); font-weight: var(--font-medium); background: ${this.viewMode === 'week' ? 'var(--primary-600)' : 'transparent'}; color: ${this.viewMode === 'week' ? '#fff' : 'var(--color-text-secondary)'}; transition: all 0.15s; border-left: 1px solid var(--color-border);">Semana</button>
               <button class="cal-view-btn btn-cal-view btn-sm ${this.viewMode === 'month' ? 'active' : ''}" data-view="month" style="border: none; border-radius: 0; padding: 6px 14px; cursor: pointer; font-size: var(--text-sm); font-weight: var(--font-medium); background: ${this.viewMode === 'month' ? 'var(--primary-600)' : 'transparent'}; color: ${this.viewMode === 'month' ? '#fff' : 'var(--color-text-secondary)'}; transition: all 0.15s; border-left: 1px solid var(--color-border);">Mes</button>
+              <button class="cal-view-btn btn-cal-view btn-sm ${this.viewMode === 'list' ? 'active' : ''}" data-view="list" style="border: none; border-radius: 0; padding: 6px 14px; cursor: pointer; font-size: var(--text-sm); font-weight: var(--font-medium); background: ${this.viewMode === 'list' ? 'var(--primary-600)' : 'transparent'}; color: ${this.viewMode === 'list' ? '#fff' : 'var(--color-text-secondary)'}; transition: all 0.15s; border-left: 1px solid var(--color-border);">Listado</button>
             </div>
             <div class="cal-nav-center" style="display: flex; align-items: center; gap: var(--space-2);">
               <button id="cal-prev-btn" class="btn btn-ghost btn-icon btn-sm" title="Anterior">◀</button>
@@ -323,30 +384,6 @@ export class Appointments {
           <div class="cal-view-container">
             ${calContent}
           </div>
-        </div>
-      </div>
-
-      <div class="card" style="margin-top: var(--space-4);">
-        <div class="card-header">
-          <h3>Listado General de Citas</h3>
-        </div>
-        <div class="card-body table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Fecha</th>
-                <th>Horario</th>
-                <th>Paciente</th>
-                <th>Doctor</th>
-                <th>Tratamiento</th>
-                <th>Estado</th>
-                <th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows}
-            </tbody>
-          </table>
         </div>
       </div>
     `;
@@ -579,9 +616,7 @@ export class Appointments {
     return html;
   }
 
-  mount() {
-    // All event listeners use delegation via _initDelegation
-  }
+
 
   navigate(dir) {
     const d = new Date(this.currentDate);
@@ -819,8 +854,7 @@ export class Appointments {
         try {
           await appointmentService.create(data);
           toast.success('Cita programada exitosamente');
-          await this.render();
-          this.mount();
+          this.render({}, true);
           return true;
         } catch (err) {
           toast.error(err.message || 'Error al programar la cita');
@@ -831,6 +865,22 @@ export class Appointments {
 
     const overlay = document.querySelector('.modal-overlay');
     if (!overlay) return;
+
+    if (options.patientId && options.patientName) {
+      const pIdInput = overlay.querySelector('[name="patient_id"]');
+      const pSelLabel = overlay.querySelector('#appointment-selected-patient');
+      if (pIdInput && pSelLabel) {
+        pIdInput.value = options.patientId;
+        pSelLabel.innerHTML = `<strong>Paciente seleccionado:</strong> ${options.patientName}`;
+      }
+    }
+    if (options.reason) {
+      const rInput = overlay.querySelector('[name="reason"]');
+      if (rInput) {
+        rInput.value = options.reason;
+      }
+    }
+
     const patientIdInput = overlay.querySelector('[name="patient_id"]');
     const searchInput = overlay.querySelector('#appointment-patient-search');
     const searchBtn = overlay.querySelector('#appointment-patient-search-btn');
@@ -1027,8 +1077,7 @@ export class Appointments {
         try {
           await appointmentService.updateStatus(appointmentId, status, reason || null);
           toast.success('Estado de la cita actualizado');
-          await this.render();
-          this.mount();
+          this.render({}, true);
           return true;
         } catch (err) {
           toast.error(err.message || 'Error al actualizar estado');

@@ -11,10 +11,12 @@ export class Treatments {
     this.container = container;
     this.treatmentsList = [];
     this.categoriesList = [];
+    this.searchQuery = '';
   }
 
   async render() {
     await this.loadData();
+    this.renderLayout();
     this.renderView();
   }
 
@@ -28,32 +30,25 @@ export class Treatments {
     }
   }
 
-  renderView() {
-    let rows = this.treatmentsList.map(t => `
-      <tr>
-        <td><strong>${t.code || 'N/A'}</strong></td>
-        <td>${t.name}</td>
-        <td>${t.description || 'Sin descripción'}</td>
-        <td>${t.duration_minutes} min</td>
-        <td><strong>${formatCurrency(t.default_price)}</strong></td>
-        <td><span class="badge ${t.is_active ? 'badge-success' : 'badge-danger'}">${t.is_active ? 'Activo' : 'Inactivo'}</span></td>
-        <td>
-          <button class="btn btn-sm btn-secondary edit-treatment-btn" data-id="${t.id}">Editar</button>
-        </td>
-      </tr>
-    `).join('');
+  getCategoryName(id) {
+    const cat = this.categoriesList.find(c => c.id === id);
+    return cat ? cat.name : 'General';
+  }
 
-    if (this.treatmentsList.length === 0) {
-      rows = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No hay tratamientos registrados.</td></tr>`;
-    }
-
+  renderLayout() {
     this.container.innerHTML = `
-      <div class="page-header" style="display: flex; justify-content: between; align-items: center; margin-bottom: var(--space-6);">
+      <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-6);">
         <div>
           <h1 class="page-title">Catálogo de Tratamientos</h1>
           <p style="color: var(--text-secondary);">Catálogo de servicios odontológicos ofrecidos</p>
         </div>
         <button id="add-treatment-btn" class="btn btn-primary">+ Nuevo Tratamiento</button>
+      </div>
+
+      <div class="card" style="margin-bottom: var(--space-4); padding: var(--space-4);">
+        <div style="display: flex; gap: var(--space-2);">
+          <input type="text" id="treatment-search" class="form-input" placeholder="Buscar por Nombre o Código..." style="flex: 1;" value="${this.searchQuery}" />
+        </div>
       </div>
 
       <div class="card">
@@ -63,15 +58,19 @@ export class Treatments {
               <tr>
                 <th>Código</th>
                 <th>Nombre del Tratamiento</th>
-                <th>Descripción</th>
+                <th>Categoría</th>
                 <th>Duración Estimada</th>
                 <th>Precio Base</th>
                 <th>Estado</th>
                 <th>Acciones</th>
               </tr>
             </thead>
-            <tbody>
-              ${rows}
+            <tbody id="treatments-table-body">
+              <tr>
+                <td colspan="7" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
+                  Cargando tratamientos...
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -79,28 +78,79 @@ export class Treatments {
     `;
   }
 
+  renderView() {
+    const tbody = this.container.querySelector('#treatments-table-body');
+    if (!tbody) return;
+
+    const query = (this.searchQuery || '').toLowerCase().trim();
+    const filtered = this.treatmentsList.filter(t => 
+      t.name.toLowerCase().includes(query) || 
+      (t.code || '').toLowerCase().includes(query)
+    );
+
+    let rows = filtered.map(t => `
+      <tr>
+        <td><strong>${t.code || 'N/A'}</strong></td>
+        <td>${t.name}</td>
+        <td>${this.getCategoryName(t.category_id)}</td>
+        <td>${t.duration_minutes} min</td>
+        <td><strong>${formatCurrency(t.default_price)}</strong></td>
+        <td><span class="badge ${t.is_active ? 'badge-success' : 'badge-danger'}">${t.is_active ? 'Activo' : 'Inactivo'}</span></td>
+        <td>
+          <div style="display: flex; gap: var(--space-2);">
+            <button class="btn btn-sm btn-secondary edit-treatment-btn" data-id="${t.id}">Editar</button>
+            <button class="btn btn-sm ${t.is_active ? 'btn-outline' : 'btn-primary'} toggle-active-btn" data-id="${t.id}" data-active="${t.is_active}">
+              ${t.is_active ? 'Desactivar' : 'Activar'}
+            </button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+
+    if (filtered.length === 0) {
+      rows = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">No se encontraron tratamientos.</td></tr>`;
+    }
+
+    tbody.innerHTML = rows;
+  }
+
   mount() {
-    this.addBtnClickListener = () => this.showTreatmentModal();
-    this.containerClickListener = (e) => {
+    const searchInput = this.container.querySelector('#treatment-search');
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        this.searchQuery = searchInput.value;
+        this.renderView();
+      });
+    }
+
+    const addBtn = this.container.querySelector('#add-treatment-btn');
+    if (addBtn) {
+      addBtn.addEventListener('click', () => this.showTreatmentModal());
+    }
+
+    this.containerClickListener = async (e) => {
       if (e.target.classList.contains('edit-treatment-btn')) {
         const id = e.target.getAttribute('data-id');
         this.showTreatmentModal(id);
       }
+      if (e.target.classList.contains('toggle-active-btn')) {
+        const id = e.target.getAttribute('data-id');
+        const isActive = e.target.getAttribute('data-active') === 'true';
+        try {
+          await treatmentService.update(id, { is_active: !isActive });
+          toast.success(`Tratamiento ${!isActive ? 'activado' : 'desactivado'} con éxito`);
+          await this.loadData();
+          this.renderView();
+        } catch (err) {
+          toast.error(err.message || 'Error al cambiar estado del tratamiento');
+        }
+      }
     };
-
-    const addBtn = this.container.querySelector('#add-treatment-btn');
-    if (addBtn) {
-      addBtn.addEventListener('click', this.addBtnClickListener);
-    }
 
     this.container.addEventListener('click', this.containerClickListener);
   }
 
   destroy() {
-    const addBtn = this.container.querySelector('#add-treatment-btn');
-    if (addBtn) {
-      addBtn.removeEventListener('click', this.addBtnClickListener);
-    }
     this.container.removeEventListener('click', this.containerClickListener);
   }
 
@@ -170,8 +220,8 @@ export class Treatments {
             await treatmentService.create(data);
             toast.success('Tratamiento creado exitosamente');
           }
-          await this.render();
-          this.mount();
+          await this.loadData();
+          this.renderView();
           return true;
         } catch (err) {
           toast.error(err.message || 'Error al procesar tratamiento');

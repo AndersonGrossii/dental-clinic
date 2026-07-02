@@ -3,6 +3,8 @@
 // ============================================
 import patientService from '../../services/patient.service.js';
 import treatmentService from '../../services/treatment.service.js';
+import appointmentService from '../../services/appointment.service.js';
+import quotationService from '../../services/quotation.service.js';
 import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
 import { formatDate, formatCurrency } from '../../utils/helpers.js';
@@ -13,6 +15,8 @@ export class PatientProfile {
     this.patientId = params.id;
     this.patient = null;
     this.clinicalTreatments = [];
+    this.appointments = [];
+    this.quotations = [];
     this.activeTab = 'info';
   }
 
@@ -20,10 +24,14 @@ export class PatientProfile {
     try {
       this.patient = await patientService.getById(this.patientId);
       this.clinicalTreatments = await treatmentService.getPatientTreatments(this.patientId);
+      this.appointments = await appointmentService.getAll({ patient_id: this.patientId, limit: 999 });
+      const quotesRes = await quotationService.getAll({ patient_id: this.patientId, limit: 999 });
+      this.quotations = Array.isArray(quotesRes) ? quotesRes : (quotesRes.rows || []);
+      
       this.renderProfile();
     } catch (err) {
       toast.error('Error al cargar expediente del paciente');
-      this.container.innerHTML = `<p>Error: ${err.message}</p>`;
+      this.container.innerHTML = `<div class="empty-state"><h3>Error al cargar el expediente</h3><p>${err.message}</p></div>`;
     }
   }
 
@@ -93,7 +101,7 @@ export class PatientProfile {
       }
 
       tabContent = `
-        <div style="display: flex; justify-content: between; align-items: center; margin-bottom: var(--space-4);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
           <h3>Historial Dental de Tratamientos</h3>
           <button id="add-treatment-history-btn" class="btn btn-sm btn-primary">+ Agregar Tratamiento</button>
         </div>
@@ -115,10 +123,116 @@ export class PatientProfile {
           </table>
         </div>
       `;
+    } else if (this.activeTab === 'appointments') {
+      let appointmentRows = (this.appointments || []).map(a => `
+        <tr>
+          <td>${a.appointment_date ? formatDate(a.appointment_date) : 'N/A'}</td>
+          <td>${a.start_time ? a.start_time.substring(0, 5) : ''} - ${a.end_time ? a.end_time.substring(0, 5) : ''}</td>
+          <td>Dr/a. ${a.doctor_name || ''}</td>
+          <td>${a.reason || ''}</td>
+          <td><span class="badge" style="background-color: ${a.status_color || '#cbd5e1'}; color: white;">${a.status_label || ''}</span></td>
+        </tr>
+      `).join('');
+
+      if (!this.appointments || this.appointments.length === 0) {
+        appointmentRows = `
+          <tr>
+            <td colspan="5" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
+              No se han registrado citas para este paciente.
+            </td>
+          </tr>
+        `;
+      }
+
+      tabContent = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
+          <h3>Historial de Citas</h3>
+          <a href="#/appointments" class="btn btn-sm btn-primary">+ Agendar Cita</a>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Horario</th>
+                <th>Doctor</th>
+                <th>Motivo</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${appointmentRows}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } else if (this.activeTab === 'quotations') {
+      const STATUS_LABELS = {
+        borrador: 'Borrador',
+        enviada: 'Enviada',
+        aceptada: 'Aceptada',
+        rechazada: 'Rechazada',
+        expirada: 'Expirada',
+      };
+
+      const STATUS_BADGES = {
+        borrador: 'badge-secondary',
+        enviada: 'badge-info',
+        aceptada: 'badge-success',
+        rechazada: 'badge-danger',
+        expirada: 'badge-warning',
+      };
+
+      let quotationRows = (this.quotations || []).map(q => `
+        <tr>
+          <td><strong># ${q.quote_number}</strong></td>
+          <td>Dr/a. ${q.doctor_name || 'Sin asignar'}</td>
+          <td><strong>${formatCurrency(q.total)}</strong></td>
+          <td><span class="badge ${STATUS_BADGES[q.status] || 'badge-secondary'}">${STATUS_LABELS[q.status] || q.status}</span></td>
+          <td>${q.created_at ? formatDate(q.created_at) : 'N/A'}</td>
+          <td>
+            <a href="#/quotations" class="btn btn-sm btn-outline">Ver Detalle</a>
+          </td>
+        </tr>
+      `).join('');
+
+      if (!this.quotations || this.quotations.length === 0) {
+        quotationRows = `
+          <tr>
+            <td colspan="6" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
+              No se han registrado presupuestos para este paciente.
+            </td>
+          </tr>
+        `;
+      }
+
+      tabContent = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
+          <h3>Presupuestos / Cotizaciones</h3>
+          <a href="#/quotations" class="btn btn-sm btn-primary">+ Nuevo Presupuesto</a>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>No. Presupuesto</th>
+                <th>Doctor</th>
+                <th>Monto Total</th>
+                <th>Estado</th>
+                <th>Fecha de Creación</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${quotationRows}
+            </tbody>
+          </table>
+        </div>
+      `;
     }
 
     this.container.innerHTML = `
-      <div class="page-header" style="display: flex; justify-content: between; align-items: center; margin-bottom: var(--space-6);">
+      <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-6);">
         <div style="display: flex; align-items: center; gap: var(--space-4);">
           <span style="font-size: 64px; background-color: var(--primary-100); border-radius: 50%; width: 80px; height: 80px; display: flex; align-items: center; justify-content: center; color: var(--primary-800);">
             ${pat.first_name[0].toUpperCase()}${pat.last_name[0].toUpperCase()}
@@ -128,12 +242,17 @@ export class PatientProfile {
             <p style="color: var(--text-secondary); margin: 0;">Expediente Clínico #EXP-${pat.id.toString().padStart(5, '0')}</p>
           </div>
         </div>
-        <a href="#/patients" class="btn btn-outline">⬅ Volver al Directorio</a>
+        <div style="display: flex; gap: var(--space-2);">
+          <button id="edit-patient-profile-btn" class="btn btn-secondary">Editar Datos</button>
+          <a href="#/patients" class="btn btn-outline">⬅ Volver al Directorio</a>
+        </div>
       </div>
 
       <div class="tabs" style="display: flex; gap: var(--space-2); margin-bottom: var(--space-4); border-bottom: 1px solid var(--border-color); padding-bottom: var(--space-2);">
         ${tabLink('info', 'Ficha Técnica')}
         ${tabLink('treatments', 'Historial Odontológico')}
+        ${tabLink('appointments', 'Historial de Citas')}
+        ${tabLink('quotations', 'Presupuestos')}
       </div>
 
       <div class="card" style="padding: var(--space-6);">
@@ -158,16 +277,198 @@ export class PatientProfile {
     if (addHistoryBtn) {
       addHistoryBtn.addEventListener('click', () => this.showAddTreatmentModal());
     }
+
+    // Editar datos del paciente
+    const editBtn = this.container.querySelector('#edit-patient-profile-btn');
+    if (editBtn) {
+      editBtn.addEventListener('click', () => this.showPatientModal());
+    }
   }
 
-  showAddTreatmentModal() {
-    // Aquí cargaríamos un dropdown de tratamientos activos.
-    // Para simplificar, permitimos ingresar un formulario de registro.
+  async showPatientModal() {
+    let patientData = {};
+    try {
+      patientData = await patientService.getById(this.patientId);
+    } catch {
+      toast.error('Error al cargar los datos del paciente');
+      return;
+    }
+
+    const sectionTitle = (label) => `
+      <div style="grid-column: span 2; border-bottom: 1px solid var(--border-color); margin: var(--space-2) 0 var(--space-1) 0; padding-bottom: var(--space-1);">
+        <h4 style="margin: 0; color: var(--primary-700); font-size: var(--text-sm); text-transform: uppercase; letter-spacing: 0.5px;">${label}</h4>
+      </div>`;
+
+    const content = `
+      <form id="patient-modal-form" class="patient-form-grid">
+        ${sectionTitle('Información Personal')}
+        <div class="form-group">
+          <label class="form-label">Nombres</label>
+          <input type="text" name="first_name" class="form-input" value="${patientData.first_name || ''}" required />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Apellidos</label>
+          <input type="text" name="last_name" class="form-input" value="${patientData.last_name || ''}" required />
+        </div>
+        <div class="form-group">
+          <label class="form-label">DNI / ID</label>
+          <input type="text" name="dni" class="form-input" value="${patientData.dni || ''}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Pasaporte</label>
+          <input type="text" name="passport" class="form-input" value="${patientData.passport || ''}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Fecha de Nacimiento</label>
+          <input type="date" name="birth_date" class="form-input" value="${patientData.birth_date ? patientData.birth_date.split('T')[0] : ''}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Género</label>
+          <select name="gender" class="form-select">
+            <option value="">Seleccione</option>
+            <option value="masculino" ${patientData.gender === 'masculino' ? 'selected' : ''}>Masculino</option>
+            <option value="femenino" ${patientData.gender === 'femenino' ? 'selected' : ''}>Femenino</option>
+            <option value="otro" ${patientData.gender === 'otro' ? 'selected' : ''}>Otro</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Ocupación</label>
+          <input type="text" name="occupation" class="form-input" value="${patientData.occupation || ''}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Estado</label>
+          <select name="is_active" class="form-select">
+            <option value="true" ${patientData.is_active !== false ? 'selected' : ''}>Activo</option>
+            <option value="false" ${patientData.is_active === false ? 'selected' : ''}>Inactivo</option>
+          </select>
+        </div>
+
+        ${sectionTitle('Contacto')}
+        <div class="form-group">
+          <label class="form-label">Teléfono</label>
+          <input type="text" name="phone" class="form-input" value="${patientData.phone || ''}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Celular</label>
+          <input type="text" name="mobile" class="form-input" value="${patientData.mobile || ''}" />
+        </div>
+        <div class="form-group" style="grid-column: span 2;">
+          <label class="form-label">Email</label>
+          <input type="email" name="email" class="form-input" value="${patientData.email || ''}" />
+        </div>
+
+        ${sectionTitle('Dirección')}
+        <div class="form-group" style="grid-column: span 2;">
+          <label class="form-label">Dirección</label>
+          <input type="text" name="address" class="form-input" value="${patientData.address || ''}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Ciudad</label>
+          <input type="text" name="city" class="form-input" value="${patientData.city || ''}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Estado / Provincia</label>
+          <input type="text" name="state" class="form-input" value="${patientData.state || ''}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Código Postal</label>
+          <input type="text" name="postal_code" class="form-input" value="${patientData.postal_code || ''}" />
+        </div>
+
+        ${sectionTitle('Seguro Médico')}
+        <div class="form-group">
+          <label class="form-label">Aseguradora</label>
+          <input type="text" name="insurance_provider" class="form-input" value="${patientData.insurance_provider || ''}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">No. Póliza</label>
+          <input type="text" name="insurance_number" class="form-input" value="${patientData.insurance_number || ''}" />
+        </div>
+
+        ${sectionTitle('Contacto de Emergencia')}
+        <div class="form-group" style="grid-column: span 2;">
+          <label class="form-label">Nombre Completo</label>
+          <input type="text" name="emergency_contact_name" class="form-input" value="${patientData.emergency_contact_name || ''}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Teléfono</label>
+          <input type="text" name="emergency_contact_phone" class="form-input" value="${patientData.emergency_contact_phone || ''}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Parentesco / Relación</label>
+          <input type="text" name="emergency_contact_relationship" class="form-input" value="${patientData.emergency_contact_relationship || ''}" />
+        </div>
+
+        ${sectionTitle('Información Médica')}
+        <div class="form-group" style="grid-column: span 2;">
+          <label class="form-label">Alergias Conocidas</label>
+          <textarea name="allergies" class="form-textarea" rows="2">${patientData.allergies || ''}</textarea>
+        </div>
+        <div class="form-group" style="grid-column: span 2;">
+          <label class="form-label">Condiciones Médicas</label>
+          <textarea name="medical_conditions" class="form-textarea" rows="2">${patientData.medical_conditions || ''}</textarea>
+        </div>
+        <div class="form-group" style="grid-column: span 2;">
+          <label class="form-label">Medicamentos Actuales</label>
+          <textarea name="current_medications" class="form-textarea" rows="2">${patientData.current_medications || ''}</textarea>
+        </div>
+
+        ${sectionTitle('Notas')}
+        <div class="form-group" style="grid-column: span 2;">
+          <textarea name="notes" class="form-textarea" rows="3">${patientData.notes || ''}</textarea>
+        </div>
+      </form>
+    `;
+
+    Modal.show({
+      title: 'Editar Expediente de Paciente',
+      content: content,
+      confirmText: 'Guardar Cambios',
+      size: 'lg',
+      onConfirm: async (modalBody) => {
+        const formElement = modalBody.querySelector('#patient-modal-form');
+        const formData = new FormData(formElement);
+        const data = Object.fromEntries(formData.entries());
+
+        if (data.is_active === 'true') data.is_active = true;
+        if (data.is_active === 'false') data.is_active = false;
+
+        try {
+          await patientService.update(this.patientId, data);
+          toast.success('Expediente del paciente actualizado con éxito');
+          await this.render();
+          this.mount();
+          return true;
+        } catch (err) {
+          toast.error(err.message || 'Error al actualizar el expediente del paciente');
+          return false;
+        }
+      }
+    });
+  }
+
+  async showAddTreatmentModal() {
+    let treatments = [];
+    try {
+      treatments = await treatmentService.getAll();
+    } catch (err) {
+      toast.error('Error al cargar catálogo de tratamientos');
+      return;
+    }
+
+    const options = treatments
+      .filter(t => t.is_active)
+      .map(t => `<option value="${t.id}" data-price="${t.default_price}">${t.name} (${t.code}) - ${formatCurrency(t.default_price)}</option>`)
+      .join('');
+
     const content = `
       <form id="add-treatment-history-form">
         <div class="form-group">
-          <label class="form-label">ID de Tratamiento (Catálogo)</label>
-          <input type="number" name="treatment_id" class="form-input" placeholder="Ej: 1" required />
+          <label class="form-label">Tratamiento</label>
+          <select name="treatment_id" id="treatment-select" class="form-select" required>
+            <option value="">Seleccione un tratamiento...</option>
+            ${options}
+          </select>
         </div>
         <div class="form-group" style="margin-top: var(--space-3);">
           <label class="form-label">Diente / Pieza (Opcional)</label>
@@ -175,7 +476,7 @@ export class PatientProfile {
         </div>
         <div class="form-group" style="margin-top: var(--space-3);">
           <label class="form-label">Precio Cobrado</label>
-          <input type="number" name="price" class="form-input" placeholder="Ej: 1200" required />
+          <input type="number" name="price" id="treatment-price" class="form-input" placeholder="Ej: 1200" required />
         </div>
         <div class="form-group" style="margin-top: var(--space-3);">
           <label class="form-label">Notas Clínicas</label>
@@ -194,6 +495,9 @@ export class PatientProfile {
         const data = Object.fromEntries(formData.entries());
         data.patient_id = this.patientId;
         data.status = 'completado'; // completado por defecto al registrar manualmente
+        data.treatment_id = Number(data.treatment_id);
+        data.price = Number(data.price);
+        if (data.tooth_number) data.tooth_number = Number(data.tooth_number);
 
         try {
           await treatmentService.addPatientTreatment(data);
@@ -207,5 +511,16 @@ export class PatientProfile {
         }
       }
     });
+
+    // Auto-fill price when treatment select changes
+    const select = document.getElementById('treatment-select');
+    const priceInput = document.getElementById('treatment-price');
+    if (select && priceInput) {
+      select.addEventListener('change', () => {
+        const selectedOption = select.options[select.selectedIndex];
+        const price = selectedOption.dataset.price || '';
+        priceInput.value = price;
+      });
+    }
   }
 }

@@ -214,8 +214,8 @@ class ReportService {
 
     // 2. Estadísticas para Recepcionista
     if (role === 'recepcionista') {
-      const pendingInvoices = await query(
-        `SELECT COUNT(*) AS count FROM invoices WHERE status = 'pendiente' AND deleted_at IS NULL`
+      const activePatients = await query(
+        `SELECT COUNT(*) AS count FROM patients WHERE is_active = TRUE AND deleted_at IS NULL`
       );
       const newPatients = await query(
         `SELECT COUNT(*) AS count FROM patients
@@ -225,11 +225,11 @@ class ReportService {
         `SELECT COUNT(*) AS count FROM appointments WHERE appointment_date = $1 AND deleted_at IS NULL`,
         [today]
       );
-
+ 
       return {
         role,
         stats: {
-          pendingInvoicesCount: parseInt(pendingInvoices.rows[0].count, 10),
+          activePatients: parseInt(activePatients.rows[0].count, 10),
           newPatientsThisMonth: parseInt(newPatients.rows[0].count, 10),
           todayAppointmentsCount: parseInt(todayAppointments.rows[0].count, 10),
         },

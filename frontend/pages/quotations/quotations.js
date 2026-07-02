@@ -37,49 +37,43 @@ export class Quotations {
   constructor(container) {
     this.container = container;
     this.quotationsList = [];
+    this.searchQuery = '';
+    this.statusFilter = '';
   }
 
   async render() {
     try {
       const response = await quotationService.getAll();
       this.quotationsList = Array.isArray(response) ? response : (response.rows || []);
+      this.renderLayout();
       this.renderView();
     } catch (err) {
       toast.error('Error al cargar presupuestos');
     }
   }
 
-  renderView() {
-    let rows = this.quotationsList.map(q => `
-      <tr>
-        <td><strong># ${q.quote_number}</strong></td>
-        <td>${q.patient_name || '—'}</td>
-        <td>${q.doctor_name || 'Sin asignar'}</td>
-        <td><strong>${formatCurrency(q.total)}</strong></td>
-        <td><span class="badge ${STATUS_BADGES[q.status] || 'badge-secondary'}">${STATUS_LABELS[q.status] || q.status}</span></td>
-        <td>${formatDate(q.created_at)}</td>
-        <td>
-          <div style="display: flex; gap: var(--space-1); flex-wrap: nowrap;">
-            <button class="btn btn-sm btn-outline view-quote-btn" data-id="${q.id}" title="Ver / Imprimir">👁</button>
-            <button class="btn btn-sm btn-primary edit-quote-btn" data-id="${q.id}" title="Editar">✎</button>
-            <button class="btn btn-sm btn-secondary status-quote-btn" data-id="${q.id}" title="Cambiar estado">⇄</button>
-            <button class="btn btn-sm btn-danger delete-quote-btn" data-id="${q.id}" title="Eliminar">✕</button>
-          </div>
-        </td>
-      </tr>
-    `).join('');
-
-    if (this.quotationsList.length === 0) {
-      rows = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No hay presupuestos registrados.</td></tr>`;
-    }
-
+  renderLayout() {
     this.container.innerHTML = `
-      <div class="page-header" style="display: flex; justify-content: between; align-items: center; margin-bottom: var(--space-6);">
+      <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-6);">
         <div>
           <h1 class="page-title">Presupuestos</h1>
           <p style="color: var(--text-secondary);">Cotización de tratamientos para pacientes</p>
         </div>
         <button id="add-quote-btn" class="btn btn-primary">+ Nuevo Presupuesto</button>
+      </div>
+
+      <div class="card" style="margin-bottom: var(--space-4); padding: var(--space-4);">
+        <div style="display: flex; gap: var(--space-3); flex-wrap: wrap;">
+          <input type="text" id="quote-search" class="form-input" placeholder="Buscar por Paciente o Doctor..." style="flex: 1; min-width: 200px;" value="${this.searchQuery}" />
+          <select id="quote-filter-status" class="form-select" style="width: auto; min-width: 150px;">
+            <option value="">Todos los estados</option>
+            <option value="borrador" ${this.statusFilter === 'borrador' ? 'selected' : ''}>Borrador</option>
+            <option value="enviada" ${this.statusFilter === 'enviada' ? 'selected' : ''}>Enviada</option>
+            <option value="aceptada" ${this.statusFilter === 'aceptada' ? 'selected' : ''}>Aceptada</option>
+            <option value="rechazada" ${this.statusFilter === 'rechazada' ? 'selected' : ''}>Rechazada</option>
+            <option value="expirada" ${this.statusFilter === 'expirada' ? 'selected' : ''}>Expirada</option>
+          </select>
+        </div>
       </div>
 
       <div class="card">
@@ -96,13 +90,56 @@ export class Quotations {
                 <th>Acciones</th>
               </tr>
             </thead>
-            <tbody>
-              ${rows}
+            <tbody id="quotations-table-body">
+              <tr>
+                <td colspan="7" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">Cargando presupuestos...</td>
+              </tr>
             </tbody>
           </table>
         </div>
       </div>
     `;
+  }
+
+  renderView() {
+    const tbody = this.container.querySelector('#quotations-table-body');
+    if (!tbody) return;
+
+    const query = (this.searchQuery || '').toLowerCase().trim();
+    const filtered = this.quotationsList.filter(q => {
+      const matchesSearch = !query || 
+        (q.patient_name || '').toLowerCase().includes(query) ||
+        (q.doctor_name || '').toLowerCase().includes(query) ||
+        (q.quote_number || '').toLowerCase().includes(query);
+      const matchesStatus = !this.statusFilter || q.status === this.statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+
+    let rows = filtered.map(q => `
+      <tr>
+        <td><strong># ${q.quote_number}</strong></td>
+        <td>${q.patient_name || '—'}</td>
+        <td>${q.doctor_name || 'Sin asignar'}</td>
+        <td><strong>${formatCurrency(q.total)}</strong></td>
+        <td><span class="badge ${STATUS_BADGES[q.status] || 'badge-secondary'}">${STATUS_LABELS[q.status] || q.status}</span></td>
+        <td>${formatDate(q.created_at)}</td>
+        <td>
+          <div style="display: flex; gap: var(--space-1); flex-wrap: nowrap;">
+            <button class="btn btn-sm btn-outline view-quote-btn" data-id="${q.id}" title="Ver / Imprimir">👁</button>
+            ${q.status === 'aceptada' ? `<button class="btn btn-sm btn-success convert-appointment-btn" data-id="${q.id}" title="Agendar Cita">📅</button>` : ''}
+            <button class="btn btn-sm btn-primary edit-quote-btn" data-id="${q.id}" title="Editar">✎</button>
+            <button class="btn btn-sm btn-secondary status-quote-btn" data-id="${q.id}" title="Cambiar estado">⇄</button>
+            <button class="btn btn-sm btn-danger delete-quote-btn" data-id="${q.id}" title="Eliminar">✕</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+
+    if (filtered.length === 0) {
+      rows = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">No se encontraron presupuestos.</td></tr>`;
+    }
+
+    tbody.innerHTML = rows;
   }
 
   mount() {
@@ -111,18 +148,49 @@ export class Quotations {
       addBtn.addEventListener('click', () => this.showQuoteModal());
     }
 
+    const searchInput = this.container.querySelector('#quote-search');
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        this.searchQuery = searchInput.value;
+        this.renderView();
+      });
+    }
+
+    const statusFilter = this.container.querySelector('#quote-filter-status');
+    if (statusFilter) {
+      statusFilter.addEventListener('change', () => {
+        this.statusFilter = statusFilter.value;
+        this.renderView();
+      });
+    }
+
     this.container.addEventListener('click', async (e) => {
-      const id = e.target.getAttribute('data-id');
-      if (e.target.classList.contains('view-quote-btn')) {
+      const targetBtn = e.target.closest('button');
+      if (!targetBtn) return;
+      const id = targetBtn.getAttribute('data-id');
+
+      if (targetBtn.classList.contains('view-quote-btn')) {
         this.printQuote(id);
       }
-      if (e.target.classList.contains('edit-quote-btn')) {
+      if (targetBtn.classList.contains('convert-appointment-btn')) {
+        const q = this.quotationsList.find(item => item.id == id);
+        if (q) {
+          state.set('prefilledAppointment', {
+            patientId: q.patient_id,
+            patientName: q.patient_name,
+            doctorId: q.doctor_id,
+            reason: `Tratamientos de Presupuesto #${q.quote_number}`
+          });
+          window.location.hash = '#/appointments';
+        }
+      }
+      if (targetBtn.classList.contains('edit-quote-btn')) {
         this.showQuoteModal(id);
       }
-      if (e.target.classList.contains('status-quote-btn')) {
+      if (targetBtn.classList.contains('status-quote-btn')) {
         this.showStatusModal(id);
       }
-      if (e.target.classList.contains('delete-quote-btn')) {
+      if (targetBtn.classList.contains('delete-quote-btn')) {
         this.showDeleteConfirm(id);
       }
     });

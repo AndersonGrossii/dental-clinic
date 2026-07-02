@@ -76,6 +76,14 @@ export const create = async (req, res, next) => {
  */
 export const update = async (req, res, next) => {
   try {
+    // Dirección no puede modificar cuentas de propietario
+    if (req.user.roleName === 'direccion') {
+      const targetUser = await userService.getById(parseInt(req.params.id, 10));
+      if (targetUser.role_name === 'propietario') {
+        return ApiResponse.error(res, 'No tiene permisos para modificar cuentas de propietario.', 403);
+      }
+    }
+
     const user = await userService.update(parseInt(req.params.id, 10), req.body);
 
     return ApiResponse.success(res, user, 'Usuario actualizado exitosamente.');
@@ -116,6 +124,14 @@ export const remove = async (req, res, next) => {
  */
 export const toggleStatus = async (req, res, next) => {
   try {
+    // Dirección no puede desactivar o activar cuentas de propietario
+    if (req.user.roleName === 'direccion') {
+      const targetUser = await userService.getById(parseInt(req.params.id, 10));
+      if (targetUser.role_name === 'propietario') {
+        return ApiResponse.error(res, 'No tiene permisos para modificar cuentas de propietario.', 403);
+      }
+    }
+
     const user = await userService.toggleStatus(parseInt(req.params.id, 10));
     const statusMsg = user.is_active ? 'activado' : 'desactivado';
 
@@ -133,6 +149,14 @@ export const toggleStatus = async (req, res, next) => {
  */
 export const resetPassword = async (req, res, next) => {
   try {
+    // Dirección no puede restablecer contraseñas de cuentas de propietario
+    if (req.user.roleName === 'direccion') {
+      const targetUser = await userService.getById(parseInt(req.params.id, 10));
+      if (targetUser.role_name === 'propietario') {
+        return ApiResponse.error(res, 'No tiene permisos para restablecer la contraseña de cuentas de propietario.', 403);
+      }
+    }
+
     await userService.resetPassword(parseInt(req.params.id, 10), req.body.newPassword);
 
     return ApiResponse.success(res, null, 'Contraseña del usuario restablecida exitosamente.');

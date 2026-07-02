@@ -164,6 +164,7 @@ class DoctorService {
     if (data.lastName !== undefined) userData.last_name = data.lastName;
     if (data.email !== undefined) userData.email = data.email;
     if (data.phone !== undefined) userData.phone = data.phone;
+    if (data.isActive !== undefined) userData.is_active = data.isActive;
 
     const doctorData = {};
     if (data.specialty !== undefined) doctorData.specialty = data.specialty;

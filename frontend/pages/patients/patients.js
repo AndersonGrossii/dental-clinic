@@ -10,29 +10,117 @@ export class Patients {
   constructor(container) {
     this.container = container;
     this.patientsList = [];
+    this.currentPage = 1;
+    this.totalPages = 1;
+    this.limit = 10;
+    this.searchQuery = '';
+    this.statusFilter = 'all';
+    this.searchTimeout = null;
   }
 
   async render() {
+    this.renderLayout();
     await this.loadPatients();
   }
 
-  async loadPatients(searchQuery = '') {
+  async loadPatients() {
     try {
-      let data;
-      if (searchQuery) {
-        data = await patientService.search(searchQuery);
+      let result;
+      const params = {
+        page: this.currentPage,
+        limit: this.limit,
+      };
+
+      if (this.searchQuery) {
+        result = await patientService.search(this.searchQuery, params, { returnFullResponse: true });
       } else {
-        const response = await patientService.getAll();
-        data = response || [];
+        if (this.statusFilter === 'active') params.isActive = 'true';
+        if (this.statusFilter === 'inactive') params.isActive = 'false';
+        result = await patientService.getAll(params, { returnFullResponse: true });
       }
-      this.patientsList = data;
+
+      if (result && result.data) {
+        this.patientsList = result.data || [];
+        this.totalPages = result.pagination?.totalPages || 1;
+        this.currentPage = result.pagination?.page || 1;
+      } else {
+        this.patientsList = result || [];
+        this.totalPages = 1;
+        this.currentPage = 1;
+      }
       this.renderTable();
     } catch (err) {
       toast.error('Error al cargar la lista de pacientes');
     }
   }
 
+  renderLayout() {
+    this.container.innerHTML = `
+      <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
+        <div>
+          <h1 class="page-title">Gestión de Pacientes</h1>
+          <p style="color: var(--text-secondary);">Directorio de expedientes clínicos</p>
+        </div>
+        <button id="add-patient-btn" class="btn btn-primary">+ Nuevo Paciente</button>
+      </div>
+
+      <div class="card" style="margin-bottom: var(--space-4); padding: var(--space-4);">
+        <div style="display: flex; gap: var(--space-2); align-items: center;">
+          <input type="text" id="patient-search" class="form-input" placeholder="Buscar por Nombre, DNI, Teléfono o Correo..." style="flex: 1;" value="${this.searchQuery}" />
+          <select id="patient-status-filter" class="form-select" style="width: 180px;">
+            <option value="all" ${this.statusFilter === 'all' ? 'selected' : ''}>Todos los Estados</option>
+            <option value="active" ${this.statusFilter === 'active' ? 'selected' : ''}>Activos</option>
+            <option value="inactive" ${this.statusFilter === 'inactive' ? 'selected' : ''}>Inactivos</option>
+          </select>
+          <button id="search-btn" class="btn btn-secondary">Buscar</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Nombre Completo</th>
+                <th>DNI / Pasaporte</th>
+                <th>Teléfono</th>
+                <th>Correo Electrónico</th>
+                <th>Fecha Nacimiento</th>
+                <th>Estado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="patients-table-body">
+              <tr>
+                <td colspan="7" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
+                  Cargando pacientes...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card-footer" style="display: flex; justify-content: space-between; align-items: center; padding: var(--space-4); border-top: 1px solid var(--color-border-light);">
+          <div style="color: var(--text-secondary); font-size: var(--text-sm);">
+            Mostrando página <span id="current-page-text">1</span> de <span id="total-pages-text">1</span>
+          </div>
+          <div style="display: flex; gap: var(--space-2);">
+            <button id="prev-page-btn" class="btn btn-sm btn-outline" disabled>Anterior</button>
+            <button id="next-page-btn" class="btn btn-sm btn-outline" disabled>Siguiente</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   renderTable() {
+    const tbody = this.container.querySelector('#patients-table-body');
+    const currentPageText = this.container.querySelector('#current-page-text');
+    const totalPagesText = this.container.querySelector('#total-pages-text');
+    const prevBtn = this.container.querySelector('#prev-page-btn');
+    const nextBtn = this.container.querySelector('#next-page-btn');
+
+    if (!tbody) return;
+
     let rows = this.patientsList.map(pat => `
       <tr>
         <td><strong>${pat.first_name} ${pat.last_name}</strong></td>
@@ -58,61 +146,65 @@ export class Patients {
       `;
     }
 
-    this.container.innerHTML = `
-      <div class="page-header" style="display: flex; justify-content: between; align-items: center; margin-bottom: var(--space-4);">
-        <div>
-          <h1 class="page-title">Gestión de Pacientes</h1>
-          <p style="color: var(--text-secondary);">Directorio de expedientes clínicos</p>
-        </div>
-        <button id="add-patient-btn" class="btn btn-primary">+ Nuevo Paciente</button>
-      </div>
-
-      <div class="card" style="margin-bottom: var(--space-4); padding: var(--space-4);">
-        <div style="display: flex; gap: var(--space-2);">
-          <input type="text" id="patient-search" class="form-input" placeholder="Buscar por Nombre, DNI, Teléfono o Correo..." style="flex: 1;" />
-          <button id="search-btn" class="btn btn-secondary">Buscar</button>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-body table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Nombre Completo</th>
-                <th>DNI / Pasaporte</th>
-                <th>Teléfono</th>
-                <th>Correo Electrónico</th>
-                <th>Fecha Nacimiento</th>
-                <th>Estado</th>
-                <th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody id="patients-table-body">
-              ${rows}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `;
+    tbody.innerHTML = rows;
+    if (currentPageText) currentPageText.textContent = this.currentPage;
+    if (totalPagesText) totalPagesText.textContent = this.totalPages;
+    if (prevBtn) prevBtn.disabled = this.currentPage <= 1;
+    if (nextBtn) nextBtn.disabled = this.currentPage >= this.totalPages;
   }
 
   mount() {
-    // Escuchar búsqueda
     const searchInput = this.container.querySelector('#patient-search');
     const searchBtn = this.container.querySelector('#search-btn');
-    
-    if (searchBtn && searchInput) {
-      searchBtn.addEventListener('click', async () => {
-        searchBtn.disabled = true;
-        await this.loadPatients(searchInput.value.trim());
-        searchBtn.disabled = false;
+    const statusSelect = this.container.querySelector('#patient-status-filter');
+    const prevBtn = this.container.querySelector('#prev-page-btn');
+    const nextBtn = this.container.querySelector('#next-page-btn');
+
+    const handleSearch = async () => {
+      this.searchQuery = searchInput.value.trim();
+      this.currentPage = 1;
+      await this.loadPatients();
+    };
+
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        clearTimeout(this.searchTimeout);
+        this.searchTimeout = setTimeout(handleSearch, 300);
       });
       searchInput.addEventListener('keypress', async (e) => {
         if (e.key === 'Enter') {
-          searchBtn.disabled = true;
-          await this.loadPatients(searchInput.value.trim());
-          searchBtn.disabled = false;
+          clearTimeout(this.searchTimeout);
+          await handleSearch();
+        }
+      });
+    }
+
+    if (searchBtn) {
+      searchBtn.addEventListener('click', handleSearch);
+    }
+
+    if (statusSelect) {
+      statusSelect.addEventListener('change', async () => {
+        this.statusFilter = statusSelect.value;
+        this.currentPage = 1;
+        await this.loadPatients();
+      });
+    }
+
+    if (prevBtn) {
+      prevBtn.addEventListener('click', async () => {
+        if (this.currentPage > 1) {
+          this.currentPage--;
+          await this.loadPatients();
+        }
+      });
+    }
+
+    if (nextBtn) {
+      nextBtn.addEventListener('click', async () => {
+        if (this.currentPage < this.totalPages) {
+          this.currentPage++;
+          await this.loadPatients();
         }
       });
     }
@@ -137,6 +229,7 @@ export class Patients {
     if (this.handleEditClick) {
       this.container.removeEventListener('click', this.handleEditClick);
     }
+    clearTimeout(this.searchTimeout);
   }
 
   async showPatientModal(patientId = null) {

@@ -2,8 +2,9 @@
 // Vista de Reportes Estadísticos (Solo Propietario)
 // ============================================
 import reportService from '../../services/report.service.js';
+import state from '../../scripts/state.js';
 import toast from '../../components/toast/toast.js';
-import { formatCurrency } from '../../utils/helpers.js';
+import { formatCurrency, formatDate } from '../../utils/helpers.js';
 
 export class Reports {
   constructor(container) {
@@ -13,7 +14,30 @@ export class Reports {
   }
 
   async render() {
-    this.renderLayout();
+    const userRole = state.get('user')?.role_name;
+    if (userRole !== 'propietario' && userRole !== 'direccion') {
+      toast.error('Acceso denegado: Solo propietarios y directores pueden ver los reportes.');
+      window.location.hash = '#/dashboard';
+      return;
+    }
+
+    try {
+      await this.loadChartJs();
+      this.renderLayout();
+    } catch (err) {
+      toast.error('Error al iniciar el módulo de reportes');
+    }
+  }
+
+  async loadChartJs() {
+    if (window.Chart) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('No se pudo cargar Chart.js'));
+      document.head.appendChild(script);
+    });
   }
 
   renderLayout() {
@@ -109,8 +133,11 @@ export class Reports {
               <span style="font-size: 36px; font-weight: 700; color: var(--success-800);">${formatCurrency(data.total)}</span>
             </div>
 
-            <div class="card">
+            <div class="card" style="display: flex; flex-direction: column;">
               <div class="card-header"><h3>Ingresos por Método de Pago</h3></div>
+              <div style="padding: var(--space-4); display: flex; justify-content: center; align-items: center; border-bottom: 1px solid var(--color-border);">
+                <canvas id="revenue-method-chart" style="max-height: 220px; max-width: 220px;"></canvas>
+              </div>
               <div class="card-body table-container">
                 <table>
                   <thead><tr><th>Método</th><th>Monto</th></tr></thead>
@@ -119,8 +146,11 @@ export class Reports {
               </div>
             </div>
 
-            <div class="card">
+            <div class="card" style="display: flex; flex-direction: column;">
               <div class="card-header"><h3>Ingresos por Médico</h3></div>
+              <div style="padding: var(--space-4); border-bottom: 1px solid var(--color-border);">
+                <canvas id="revenue-doctor-chart" style="max-height: 220px;"></canvas>
+              </div>
               <div class="card-body table-container">
                 <table>
                   <thead><tr><th>Médico</th><th>Monto</th></tr></thead>
@@ -130,6 +160,9 @@ export class Reports {
             </div>
           </div>
         `;
+
+        this.initRevenueCharts(data);
+
       } else if (type === 'citas') {
         const data = await reportService.getAppointments(from, to);
         this.reportData = data;
@@ -155,8 +188,11 @@ export class Reports {
               <span style="font-size: 36px; font-weight: 700; color: var(--primary-800);">${data.total} citas</span>
             </div>
 
-            <div class="card">
+            <div class="card" style="display: flex; flex-direction: column;">
               <div class="card-header"><h3>Citas por Estado</h3></div>
+              <div style="padding: var(--space-4); display: flex; justify-content: center; align-items: center; border-bottom: 1px solid var(--color-border);">
+                <canvas id="appointments-status-chart" style="max-height: 220px; max-width: 220px;"></canvas>
+              </div>
               <div class="card-body table-container">
                 <table>
                   <thead><tr><th>Estado</th><th>Cantidad</th></tr></thead>
@@ -165,8 +201,11 @@ export class Reports {
               </div>
             </div>
 
-            <div class="card">
+            <div class="card" style="display: flex; flex-direction: column;">
               <div class="card-header"><h3>Citas por Médico</h3></div>
+              <div style="padding: var(--space-4); border-bottom: 1px solid var(--color-border);">
+                <canvas id="appointments-doctor-chart" style="max-height: 220px;"></canvas>
+              </div>
               <div class="card-body table-container">
                 <table>
                   <thead><tr><th>Médico</th><th>Cantidad</th></tr></thead>
@@ -176,6 +215,9 @@ export class Reports {
             </div>
           </div>
         `;
+
+        this.initAppointmentCharts(data);
+
       } else if (type === 'tratamientos') {
         const data = await reportService.getTreatments(from, to);
         this.reportData = data;
@@ -194,25 +236,36 @@ export class Reports {
         }
 
         resultsContainer.innerHTML = `
-          <div class="card">
-            <div class="card-header"><h3>Tratamientos más Solicitados</h3></div>
-            <div class="card-body table-container">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Ranking</th>
-                    <th>Servicio / Tratamiento</th>
-                    <th>Frecuencia</th>
-                    <th>Ingresos Producidos</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${rows}
-                </tbody>
-              </table>
+          <div style="display: grid; grid-template-columns: 1fr; gap: var(--space-6);">
+            <div class="card" style="grid-column: span 2;">
+              <div class="card-header"><h3>Popularidad de Tratamientos</h3></div>
+              <div style="padding: var(--space-4); border-bottom: 1px solid var(--color-border);">
+                <canvas id="treatments-popularity-chart" style="max-height: 260px;"></canvas>
+              </div>
+            </div>
+
+            <div class="card" style="grid-column: span 2;">
+              <div class="card-header"><h3>Tratamientos más Solicitados</h3></div>
+              <div class="card-body table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ranking</th>
+                      <th>Servicio / Tratamiento</th>
+                      <th>Frecuencia</th>
+                      <th>Ingresos Producidos</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${rows}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         `;
+
+        this.initTreatmentCharts(data);
       }
 
       // Mostrar botón de exportar
@@ -220,6 +273,129 @@ export class Reports {
     } catch (err) {
       toast.error('Error al generar el reporte.');
       resultsContainer.innerHTML = `<p style="color: var(--danger-600);">Error: ${err.message}</p>`;
+    }
+  }
+
+  initRevenueCharts(data) {
+    const methodCtx = document.getElementById('revenue-method-chart')?.getContext('2d');
+    if (methodCtx) {
+      new Chart(methodCtx, {
+        type: 'doughnut',
+        data: {
+          labels: data.byMethod.map(m => m.method),
+          datasets: [{
+            data: data.byMethod.map(m => Number(m.total)),
+            backgroundColor: ['#0ea5e9', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#64748b']
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { position: 'bottom' }
+          }
+        }
+      });
+    }
+
+    const docCtx = document.getElementById('revenue-doctor-chart')?.getContext('2d');
+    if (docCtx) {
+      new Chart(docCtx, {
+        type: 'bar',
+        data: {
+          labels: data.byDoctor.map(d => d.doctor),
+          datasets: [{
+            label: 'Ingresos ($)',
+            data: data.byDoctor.map(d => Number(d.total)),
+            backgroundColor: '#0f766e'
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            y: { beginAtZero: true }
+          },
+          plugins: {
+            legend: { display: false }
+          }
+        }
+      });
+    }
+  }
+
+  initAppointmentCharts(data) {
+    const statusCtx = document.getElementById('appointments-status-chart')?.getContext('2d');
+    if (statusCtx) {
+      new Chart(statusCtx, {
+        type: 'doughnut',
+        data: {
+          labels: data.byStatus.map(s => s.status),
+          datasets: [{
+            data: data.byStatus.map(s => Number(s.count)),
+            backgroundColor: data.byStatus.map(s => s.color || '#64748b')
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { position: 'bottom' }
+          }
+        }
+      });
+    }
+
+    const docCtx = document.getElementById('appointments-doctor-chart')?.getContext('2d');
+    if (docCtx) {
+      new Chart(docCtx, {
+        type: 'bar',
+        data: {
+          labels: data.byDoctor.map(d => d.doctor),
+          datasets: [{
+            label: 'Citas',
+            data: data.byDoctor.map(d => Number(d.count)),
+            backgroundColor: '#4f46e5'
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            y: { beginAtZero: true, ticks: { stepSize: 1 } }
+          },
+          plugins: {
+            legend: { display: false }
+          }
+        }
+      });
+    }
+  }
+
+  initTreatmentCharts(data) {
+    const treatCtx = document.getElementById('treatments-popularity-chart')?.getContext('2d');
+    if (treatCtx) {
+      new Chart(treatCtx, {
+        type: 'bar',
+        data: {
+          labels: data.popular.map(t => t.treatment),
+          datasets: [
+            {
+              label: 'Frecuencia (veces)',
+              data: data.popular.map(t => Number(t.count)),
+              backgroundColor: '#3b82f6'
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: false }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: { stepSize: 1 }
+            }
+          }
+        }
+      });
     }
   }
 

@@ -72,6 +72,9 @@ class ApiService {
         throw error;
       }
 
+      if (options.returnFullResponse) {
+        return responseData;
+      }
       return responseData.data; // Retornar solo el objeto "data" de la API estandarizada
     } catch (error) {
       console.error(`Error en petición API [${options.method || 'GET'}] ${endpoint}:`, error.message);
@@ -109,7 +112,7 @@ class ApiService {
   }
 
   // Métodos abreviados convenientes
-  async get(endpoint, params = null) {
+  async get(endpoint, params = null, options = {}) {
     let url = endpoint;
     if (params) {
       const queryStr = Object.entries(params)
@@ -118,7 +121,7 @@ class ApiService {
         .join('&');
       if (queryStr) url += `?${queryStr}`;
     }
-    return this.request(url, { method: 'GET' });
+    return this.request(url, { method: 'GET', ...options });
   }
 
   async post(endpoint, data) {
