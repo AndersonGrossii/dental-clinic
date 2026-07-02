@@ -20,11 +20,20 @@ export class Appointments {
     this.allDoctorUnavail = {};
     this.allDoctorSchedules = {};
     this.doctorColors = {};
-    this._initDelegation();
+    
+    // Bind handler
+    this.handleContainerClick = this._handleContainerClick.bind(this);
   }
 
-  _initDelegation() {
-    this.container.addEventListener('click', (e) => {
+  mount() {
+    this.container.addEventListener('click', this.handleContainerClick);
+  }
+
+  destroy() {
+    this.container.removeEventListener('click', this.handleContainerClick);
+  }
+
+  _handleContainerClick(e) {
       const viewBtn = e.target.closest('.cal-view-btn');
       if (viewBtn?.dataset.view) {
         this.switchView(viewBtn.dataset.view);
@@ -64,7 +73,10 @@ export class Appointments {
       if (e.target.id === 'cal-prev-btn') this.navigate(-1);
       if (e.target.id === 'cal-next-btn') this.navigate(1);
       if (e.target.id === 'cal-today-btn') this.goToToday();
-    });
+  }
+
+  destroy() {
+    this.container.removeEventListener('click', this.handleContainerClick);
   }
 
   async render(filters = {}) {

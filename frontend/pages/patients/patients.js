@@ -123,13 +123,20 @@ export class Patients {
       addBtn.addEventListener('click', () => this.showPatientModal());
     }
 
-    // Botones de editar
-    this.container.addEventListener('click', (e) => {
+    // Botones de editar (usando delegación de eventos)
+    this.handleEditClick = (e) => {
       if (e.target.classList.contains('edit-patient-btn')) {
         const id = e.target.getAttribute('data-id');
         this.showPatientModal(id);
       }
-    });
+    };
+    this.container.addEventListener('click', this.handleEditClick);
+  }
+
+  destroy() {
+    if (this.handleEditClick) {
+      this.container.removeEventListener('click', this.handleEditClick);
+    }
   }
 
   async showPatientModal(patientId = null) {
