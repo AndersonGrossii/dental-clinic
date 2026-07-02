@@ -69,6 +69,7 @@ export const toAppointmentDTO = (row) => {
     patient_name: row.patient_name,
     doctor_name: row.doctor_name,
     treatment_name: row.treatment_name,
+    status_name: row.status_name,
     status_color: row.status_color,
     status_label: row.status_label,
     cancellation_reason: row.cancellation_reason,
