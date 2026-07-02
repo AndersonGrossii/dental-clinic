@@ -4,8 +4,15 @@
 
 class Modal {
   /**
+   * Cierra cualquier modal abierto.
+   */
+  static closeAll() {
+    const modals = document.querySelectorAll('.modal-overlay');
+    modals.forEach(m => m.remove());
+  }
+
+  /**
    * Muestra un modal dinámico.
-   * @param {object} options - { title, content, size, confirmText, cancelText, onConfirm, onCancel }
    */
   static show({
     title,
@@ -17,10 +24,7 @@ class Modal {
     onCancel = null,
   }) {
     // 1. Verificar y cerrar cualquier modal existente
-    const existingModal = document.querySelector('.modal-overlay');
-    if (existingModal) {
-      existingModal.remove();
-    }
+    this.closeAll();
 
     // 2. Crear el overlay y el contenedor
     const overlay = document.createElement('div');

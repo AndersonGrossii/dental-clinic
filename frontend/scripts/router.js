@@ -1,6 +1,7 @@
 // ============================================
 // Enrutador SPA basado en Hash
 // ============================================
+import Modal from '../components/modal/modal.js';
 
 class Router {
   constructor() {
@@ -91,6 +92,9 @@ class Router {
     if (this.currentView && typeof this.currentView.destroy === 'function') {
       this.currentView.destroy();
     }
+    
+    // Cerrar cualquier modal abierto
+    Modal.closeAll();
 
     // Instanciar y renderizar la nueva página
     try {
