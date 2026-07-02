@@ -2150,13 +2150,18 @@ tbody tr.clickable {
 
 .db-wg-cell {
   min-height: 28px;
-  padding: 1px;
+  height: auto;
+  padding: 2px;
   border-bottom: 1px solid var(--color-border-light);
   border-right: 1px solid var(--color-border-light);
   background: var(--color-surface);
+  display: flex;
+  flex-direction: row;
+  gap: 2px;
+  align-items: stretch;
 }
 .db-wg-cell.empty {
-  background: #fafafa;
+  background: var(--color-bg-secondary);
 }
 .db-wg-cell.weekend {
   background: #fff5f5;
@@ -2248,10 +2253,15 @@ tbody tr.clickable {
 
 .cal-dg-cell {
   min-height: 28px;
-  padding: 1px;
+  height: auto;
+  padding: 2px;
   border-bottom: 1px solid var(--color-border-light);
   background: var(--color-surface);
   cursor: pointer;
+  display: flex;
+  flex-direction: row;
+  gap: 2px;
+  align-items: stretch;
 }
 .cal-dg-cell:hover {
   background: var(--color-surface-hover);
@@ -2284,4 +2294,40 @@ tbody tr.clickable {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Sub-slots styling for daily/weekly appointment views */
+.empty-sub-slot {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin: 0;
+}
+.empty-sub-slot:hover,
+.sub-slot-event:hover {
+  filter: brightness(0.94);
+  box-shadow: var(--shadow-md) !important;
+  opacity: 1 !important;
+}
+[data-theme='dark'] .empty-sub-slot:hover,
+[data-theme='dark'] .sub-slot-event:hover {
+  filter: brightness(1.12);
+}
+
+.sub-slot-event {
+  flex: 1;
+  min-width: 0;
+  border-radius: 4px;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: all 0.2s;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }

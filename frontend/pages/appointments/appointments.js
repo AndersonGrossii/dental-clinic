@@ -55,8 +55,8 @@ export class Appointments {
       if (slotCell && !e.target.closest('.db-wg-event, .cal-dg-event')) {
         const date = slotCell.dataset.date;
         const time = slotCell.dataset.time;
-        const docSelect = this.container.querySelector('#filter-doctor');
-        const doctorId = docSelect?.value || undefined;
+        const subSlot = e.target.closest('.sub-slot');
+        const doctorId = subSlot?.dataset.doctorId || this.container.querySelector('#filter-doctor')?.value || undefined;
         if (date && time) {
           this.showAddAppointmentModal({ date, startTime: time, doctorId });
         }
@@ -476,50 +476,74 @@ export class Appointments {
           continue;
         }
 
-        const isUnavailable = this.doctorUnavail[dateStr] && this.doctorUnavail[dateStr].length > 0;
-        const isBreak = this.doctorSchedule &&
-          this.doctorSchedule.break_start && this.doctorSchedule.break_end &&
-          slot >= this.doctorSchedule.break_start.substring(0, 5) &&
-          slot < this.doctorSchedule.break_end.substring(0, 5);
+        const displayedDoctors = this.filters.doctor_id
+          ? this.doctorsList.filter(d => String(d.id) === String(this.filters.doctor_id))
+          : this.doctorsList;
 
-        if (isUnavailable) {
-          const reasons = this.doctorUnavail[dateStr].map(r => r.reason).join(', ');
-          cells += `<div class="db-wg-cell unavailable" title="Doctor no disponible: ${reasons}" data-date="${dateStr}" data-time="${slot}"></div>`;
-          continue;
-        }
-
-        if (isBreak) {
-          cells += `<div class="db-wg-cell break" data-date="${dateStr}" data-time="${slot}"><span class="cal-dg-cell-label">Descanso</span></div>`;
-          continue;
-        }
-
-        const matches = this.getEventsForDate(dateStr).filter(a => {
-          const s = a.start_time ? a.start_time.substring(0, 5) : '';
-          const e = a.end_time ? a.end_time.substring(0, 5) : '';
-          return s <= slot && e > slot;
+        const activeDoctors = displayedDoctors.filter(d => {
+          const unavail = this.filters.doctor_id ? this.doctorUnavail : this.allDoctorUnavail[d.id];
+          if (unavail && unavail[dateStr] && unavail[dateStr].length > 0) return false;
+          const schedule = this.filters.doctor_id ? this.doctorSchedule : this.allDoctorSchedules[d.id];
+          if (schedule && schedule.break_start && schedule.break_end) {
+            const bs = schedule.break_start.substring(0, 5);
+            const be = schedule.break_end.substring(0, 5);
+            if (slot >= bs && slot < be) return false;
+          }
+          return true;
         });
 
-        const availableDocs = this._getDoctorsAvailable(dateStr, slot);
-        const dotsHtml = this._renderDoctorDots(availableDocs);
+        const isBreak = activeDoctors.length === 0 && displayedDoctors.some(d => {
+          const schedule = this.filters.doctor_id ? this.doctorSchedule : this.allDoctorSchedules[d.id];
+          if (schedule && schedule.break_start && schedule.break_end) {
+            const bs = schedule.break_start.substring(0, 5);
+            const be = schedule.break_end.substring(0, 5);
+            return slot >= bs && slot < be;
+          }
+          return false;
+        });
 
-        if (matches.length === 0) {
-          cells += `<div class="db-wg-cell empty" data-date="${dateStr}" data-time="${slot}">${dotsHtml}</div>`;
-        } else {
-          let inner = '';
-          matches.forEach(m => {
-            const docColor = m.doctor?.color || this.doctorColors[m.doctor_id] || '#0891b2';
-            const patientName = m.patient_name || '—';
-            const doctorName = getDocName(m);
-            inner += `<div class="db-wg-event" data-id="${m.id}" style="background-color: ${m.status_color || '#0891b2'}; border-left: 3px solid ${docColor};">
-              <div class="db-wg-event-patient">
-                <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${docColor};vertical-align:middle;margin-right:3px;flex-shrink:0;"></span>
-                ${patientName}
-              </div>
-              ${doctorName ? `<div class="db-wg-event-doctor">${doctorName}</div>` : ''}
-            </div>`;
-          });
-          cells += `<div class="db-wg-cell" data-date="${dateStr}" data-time="${slot}">${inner}${dotsHtml}</div>`;
+        if (activeDoctors.length === 0) {
+          if (isBreak) {
+            cells += `<div class="db-wg-cell break" data-date="${dateStr}" data-time="${slot}"><span class="cal-dg-cell-label">Descanso</span></div>`;
+          } else {
+            cells += `<div class="db-wg-cell unavailable" title="No hay doctores disponibles" data-date="${dateStr}" data-time="${slot}"></div>`;
+          }
+          continue;
         }
+
+        let subSlotsHtml = '';
+        activeDoctors.forEach(d => {
+          const docColor = d.color || '#0891b2';
+          const appt = this.getEventsForDate(dateStr).find(a => {
+            if (a.doctor_id != d.id) return false;
+            const s = a.start_time ? a.start_time.substring(0, 5) : '';
+            const e = a.end_time ? a.end_time.substring(0, 5) : '';
+            return s <= slot && e > slot;
+          });
+
+          if (appt) {
+            const patientName = appt.patient_name || '—';
+            subSlotsHtml += `
+              <div class="db-wg-event sub-slot-event" data-id="${appt.id}" style="background-color: color-mix(in srgb, ${docColor} 15%, var(--color-surface)) !important; border: 1px solid color-mix(in srgb, ${docColor} 30%, var(--color-border-light)) !important; padding: 4px; display: flex; flex-direction: column; justify-content: space-between; min-height: 36px;" title="Cita: ${patientName} con Dr/a. ${d.first_name} ${d.last_name} (${appt.status_label || appt.status_name})">
+                <div class="db-wg-event-patient" style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 2px;">
+                  <span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 10px); font-size: 9px; color: var(--color-text);">${patientName}</span>
+                  <span style="width: 7px; height: 7px; border-radius: 50%; background: ${appt.status_color || '#0891b2'}; border: 1.5px solid #fff; display: inline-block; flex-shrink: 0;" title="${appt.status_label || appt.status_name}"></span>
+                </div>
+                <div class="db-wg-event-doctor" style="font-size: 8px; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  Dr. ${d.last_name}
+                </div>
+              </div>
+            `;
+          } else {
+            subSlotsHtml += `
+              <div class="sub-slot empty-sub-slot" data-doctor-id="${d.id}" style="background-color: color-mix(in srgb, ${docColor} 8%, var(--color-surface)) !important; border: 1px dashed color-mix(in srgb, ${docColor} 25%, var(--color-border-light)) !important; padding: 4px; display: flex; flex-direction: column; justify-content: center; min-height: 36px;" title="Disponible: Dr/a. ${d.first_name} ${d.last_name}">
+                <span style="font-size: 8px; color: var(--color-text-secondary); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;">Dr. ${d.last_name}</span>
+              </div>
+            `;
+          }
+        });
+
+        cells += `<div class="db-wg-cell" data-date="${dateStr}" data-time="${slot}">${subSlotsHtml}</div>`;
       }
     });
 
@@ -560,56 +584,82 @@ export class Appointments {
       return html;
     }
 
-    const isUnavailable = this.doctorUnavail[dateStr] && this.doctorUnavail[dateStr].length > 0;
+    const displayedDoctors = this.filters.doctor_id
+      ? this.doctorsList.filter(d => String(d.id) === String(this.filters.doctor_id))
+      : this.doctorsList;
 
     html += `<div class="cal-dg-grid">`;
 
     slots.forEach(slot => {
       html += `<div class="cal-dg-time-label">${slot}</div>`;
 
-      if (isUnavailable) {
-        const reasons = this.doctorUnavail[dateStr].map(r => r.reason).join(', ');
-        html += `<div class="cal-dg-cell unavailable" title="Doctor no disponible: ${reasons}" data-date="${dateStr}" data-time="${slot}"></div>`;
-        return;
-      }
-
-      const isBreak = this.doctorSchedule &&
-        this.doctorSchedule.break_start && this.doctorSchedule.break_end &&
-        slot >= this.doctorSchedule.break_start.substring(0, 5) &&
-        slot < this.doctorSchedule.break_end.substring(0, 5);
-
-      if (isBreak) {
-        html += `<div class="cal-dg-cell break" data-date="${dateStr}" data-time="${slot}"><span class="cal-dg-cell-label">Descanso</span></div>`;
-        return;
-      }
-
-      const matches = this.getEventsForDate(dateStr).filter(a => {
-        const s = a.start_time ? a.start_time.substring(0, 5) : '';
-        const e = a.end_time ? a.end_time.substring(0, 5) : '';
-        return s <= slot && e > slot;
+      const activeDoctors = displayedDoctors.filter(d => {
+        const unavail = this.filters.doctor_id ? this.doctorUnavail : this.allDoctorUnavail[d.id];
+        if (unavail && unavail[dateStr] && unavail[dateStr].length > 0) return false;
+        const schedule = this.filters.doctor_id ? this.doctorSchedule : this.allDoctorSchedules[d.id];
+        if (schedule && schedule.break_start && schedule.break_end) {
+          const bs = schedule.break_start.substring(0, 5);
+          const be = schedule.break_end.substring(0, 5);
+          if (slot >= bs && slot < be) return false;
+        }
+        return true;
       });
 
-      const availableDocs = this._getDoctorsAvailable(dateStr, slot);
-      const dotsHtml = this._renderDoctorDots(availableDocs);
+      const isBreak = activeDoctors.length === 0 && displayedDoctors.some(d => {
+        const schedule = this.filters.doctor_id ? this.doctorSchedule : this.allDoctorSchedules[d.id];
+        if (schedule && schedule.break_start && schedule.break_end) {
+          const bs = schedule.break_start.substring(0, 5);
+          const be = schedule.break_end.substring(0, 5);
+          return slot >= bs && slot < be;
+        }
+        return false;
+      });
 
-      if (matches.length === 0) {
-        html += `<div class="cal-dg-cell" data-date="${dateStr}" data-time="${slot}">${dotsHtml}</div>`;
-      } else {
-        let inner = '';
-        matches.forEach(m => {
-          const docColor = m.doctor?.color || this.doctorColors[m.doctor_id] || '#0891b2';
-          const patientName = m.patient_name || '—';
-          const doctorName = getDocName(m);
-          inner += `<div class="cal-dg-event" data-id="${m.id}" style="background-color: ${m.status_color || '#0891b2'}; border-left: 3px solid ${docColor};">
-            <div class="cal-dg-event-patient">
-              <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${docColor};vertical-align:middle;margin-right:3px;flex-shrink:0;"></span>
-              ${formatTime(m.start_time)} ${patientName}
-            </div>
-            ${doctorName ? `<div class="cal-dg-event-doctor">${doctorName}</div>` : ''}
-          </div>`;
-        });
-        html += `<div class="cal-dg-cell" data-date="${dateStr}" data-time="${slot}">${inner}${dotsHtml}</div>`;
+      if (activeDoctors.length === 0) {
+        if (isBreak) {
+          html += `<div class="cal-dg-cell break" data-date="${dateStr}" data-time="${slot}"><span class="cal-dg-cell-label">Descanso</span></div>`;
+        } else {
+          html += `<div class="cal-dg-cell unavailable" title="No hay doctores disponibles" data-date="${dateStr}" data-time="${slot}"></div>`;
+        }
+        return;
       }
+
+      let subSlotsHtml = '';
+      activeDoctors.forEach(d => {
+        const docColor = d.color || '#0891b2';
+        const appt = this.getEventsForDate(dateStr).find(a => {
+          if (a.doctor_id != d.id) return false;
+          const s = a.start_time ? a.start_time.substring(0, 5) : '';
+          const e = a.end_time ? a.end_time.substring(0, 5) : '';
+          return s <= slot && e > slot;
+        });
+
+        if (appt) {
+          const patientName = appt.patient_name || '—';
+          subSlotsHtml += `
+            <div class="cal-dg-event sub-slot-event" data-id="${appt.id}" style="background-color: color-mix(in srgb, ${docColor} 15%, var(--color-surface)) !important; border: 1px solid color-mix(in srgb, ${docColor} 30%, var(--color-border-light)) !important; padding: 6px 8px; display: flex; flex-direction: column; justify-content: space-between; min-height: 48px;" title="Cita: ${patientName} con Dr/a. ${d.first_name} ${d.last_name}">
+              <div class="cal-dg-event-patient" style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 6px;">
+                <span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 14px); color: var(--color-text);">${formatTime(appt.start_time)} ${patientName}</span>
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: ${appt.status_color || '#0891b2'}; border: 1.5px solid #fff; display: inline-block; flex-shrink: 0;" title="${appt.status_label || appt.status_name}"></span>
+              </div>
+              <div class="cal-dg-event-doctor" style="font-size: 10px; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                Dr/a. ${d.first_name} ${d.last_name}
+              </div>
+            </div>
+          `;
+        } else {
+          subSlotsHtml += `
+            <div class="sub-slot empty-sub-slot" data-doctor-id="${d.id}" style="background-color: color-mix(in srgb, ${docColor} 8%, var(--color-surface)) !important; border: 1px dashed color-mix(in srgb, ${docColor} 25%, var(--color-border-light)) !important; padding: 6px 8px; display: flex; flex-direction: column; justify-content: space-between; min-height: 48px;" title="Disponible: Dr/a. ${d.first_name} ${d.last_name}">
+              <span style="font-size: 10px; color: var(--color-text-secondary); font-weight: 500;">Dr/a. ${d.first_name} ${d.last_name}</span>
+              <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <span style="font-size: 9px; color: var(--color-text-tertiary);">Disponible</span>
+              </div>
+            </div>
+          `;
+        }
+      });
+
+      html += `<div class="cal-dg-cell" data-date="${dateStr}" data-time="${slot}">${subSlotsHtml}</div>`;
     });
 
     html += `</div>`;
