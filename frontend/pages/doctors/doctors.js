@@ -226,42 +226,103 @@ export class Doctors {
   async showScheduleModal(doctorId) {
     try {
       const schedule = await doctorService.getSchedule(doctorId);
-      const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-      
-      let rows = schedule.map(s => `
-        <tr>
-          <td><strong>${days[s.day_of_week]}</strong></td>
-          <td>${s.start_time.substring(0, 5)} - ${s.end_time.substring(0, 5)}</td>
-          <td>${s.break_start ? `${s.break_start.substring(0, 5)} - ${s.break_end.substring(0, 5)}` : 'Sin descanso'}</td>
-          <td><span class="badge badge-success">Activo</span></td>
-        </tr>
-      `).join('');
+      const days = [
+        { value: 0, label: 'Domingo' },
+        { value: 1, label: 'Lunes' },
+        { value: 2, label: 'Martes' },
+        { value: 3, label: 'Miércoles' },
+        { value: 4, label: 'Jueves' },
+        { value: 5, label: 'Viernes' },
+        { value: 6, label: 'Sábado' },
+      ];
 
-      if (schedule.length === 0) {
-        rows = `<tr><td colspan="4" style="text-align: center; color: var(--text-secondary);">No hay horarios configurados.</td></tr>`;
-      }
+      const getVal = (dow, field) => {
+        const s = schedule.find(s => s.day_of_week === dow);
+        return s ? s[field] : '';
+      };
+      const isActive = (dow) => {
+        const s = schedule.find(s => s.day_of_week === dow);
+        return s ? s.is_active : false;
+      };
+
+      const rows = days.map(d => {
+        const bs = getVal(d.value, 'break_start');
+        const be = getVal(d.value, 'break_end');
+        return `
+          <tr>
+            <td style="padding: 8px 12px; font-weight: 600; font-size: var(--text-sm); color: var(--color-text); white-space: nowrap;">${d.label}</td>
+            <td style="padding: 4px 6px;"><input type="time" name="start_${d.value}" class="form-input schedule-time" value="${getVal(d.value, 'start_time')?.substring(0, 5) || ''}" style="width: 110px;" /></td>
+            <td style="padding: 4px 6px;"><input type="time" name="end_${d.value}" class="form-input schedule-time" value="${getVal(d.value, 'end_time')?.substring(0, 5) || ''}" style="width: 110px;" /></td>
+            <td style="padding: 4px 6px; display: flex; gap: 4px; align-items: center;">
+              <input type="time" name="break_start_${d.value}" class="form-input schedule-time" value="${bs ? bs.substring(0, 5) : ''}" style="width: 110px;" placeholder="Inicio" />
+              <span style="color: var(--text-tertiary); font-size: 11px;">—</span>
+              <input type="time" name="break_end_${d.value}" class="form-input schedule-time" value="${be ? be.substring(0, 5) : ''}" style="width: 110px;" placeholder="Fin" />
+            </td>
+            <td style="padding: 4px 6px; text-align: center;">
+              <input type="checkbox" name="active_${d.value}" ${isActive(d.value) ? 'checked' : ''} style="width: 18px; height: 18px; cursor: pointer;" />
+            </td>
+          </tr>`;
+      }).join('');
 
       Modal.show({
-        title: 'Horario Semanal de Consulta',
+        title: 'Editar Horario Semanal',
         content: `
-          <div class="table-container">
-            <table>
+          <form id="schedule-form" style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; min-width: 600px;">
               <thead>
-                <tr>
-                  <th>Día</th>
-                  <th>Jornada</th>
-                  <th>Descanso (Comida)</th>
-                  <th>Estado</th>
+                <tr style="background: var(--color-bg-secondary, #f8f9fa);">
+                  <th style="padding: 8px 12px; text-align: left; font-size: var(--text-xs); color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Día</th>
+                  <th style="padding: 8px 6px; text-align: left; font-size: var(--text-xs); color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Entrada</th>
+                  <th style="padding: 8px 6px; text-align: left; font-size: var(--text-xs); color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Salida</th>
+                  <th style="padding: 8px 6px; text-align: left; font-size: var(--text-xs); color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Descanso</th>
+                  <th style="padding: 8px 6px; text-align: center; font-size: var(--text-xs); color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Activo</th>
                 </tr>
               </thead>
               <tbody>
                 ${rows}
               </tbody>
             </table>
-          </div>
+          </form>
+          <p style="margin: 12px 0 0; font-size: var(--text-xs); color: var(--text-tertiary);">Marque "Activo" y configure entrada/salida para los días laborales. Deje en blanco los días no laborales.</p>
         `,
-        confirmText: 'Cerrar',
-        cancelText: '',
+        confirmText: 'Guardar Horario',
+        onConfirm: async (modalBody) => {
+          const scheduleArray = [];
+          for (const d of days) {
+            const start = modalBody.querySelector(`[name="start_${d.value}"]`)?.value;
+            const end = modalBody.querySelector(`[name="end_${d.value}"]`)?.value;
+            const active = modalBody.querySelector(`[name="active_${d.value}"]`)?.checked;
+            const breakStart = modalBody.querySelector(`[name="break_start_${d.value}"]`)?.value || null;
+            const breakEnd = modalBody.querySelector(`[name="break_end_${d.value}"]`)?.value || null;
+            if (active && start && end) {
+              scheduleArray.push({
+                day_of_week: d.value,
+                start_time: start,
+                end_time: end,
+                break_start: breakStart,
+                break_end: breakEnd,
+                is_active: true,
+              });
+            } else {
+              scheduleArray.push({
+                day_of_week: d.value,
+                start_time: start || '00:00',
+                end_time: end || '00:00',
+                break_start: null,
+                break_end: null,
+                is_active: false,
+              });
+            }
+          }
+          try {
+            await doctorService.updateSchedule(doctorId, scheduleArray);
+            toast.success('Horario guardado exitosamente');
+            return true;
+          } catch (err) {
+            toast.error(err.message || 'Error al guardar horario');
+            return false;
+          }
+        },
       });
     } catch {
       toast.error('Error al cargar el horario del doctor');
