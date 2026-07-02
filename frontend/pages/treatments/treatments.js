@@ -80,17 +80,28 @@ export class Treatments {
   }
 
   mount() {
-    const addBtn = this.container.querySelector('#add-treatment-btn');
-    if (addBtn) {
-      addBtn.addEventListener('click', () => this.showTreatmentModal());
-    }
-
-    this.container.addEventListener('click', (e) => {
+    this.addBtnClickListener = () => this.showTreatmentModal();
+    this.containerClickListener = (e) => {
       if (e.target.classList.contains('edit-treatment-btn')) {
         const id = e.target.getAttribute('data-id');
         this.showTreatmentModal(id);
       }
-    });
+    };
+
+    const addBtn = this.container.querySelector('#add-treatment-btn');
+    if (addBtn) {
+      addBtn.addEventListener('click', this.addBtnClickListener);
+    }
+
+    this.container.addEventListener('click', this.containerClickListener);
+  }
+
+  destroy() {
+    const addBtn = this.container.querySelector('#add-treatment-btn');
+    if (addBtn) {
+      addBtn.removeEventListener('click', this.addBtnClickListener);
+    }
+    this.container.removeEventListener('click', this.containerClickListener);
   }
 
   showTreatmentModal(treatmentId = null) {

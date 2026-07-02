@@ -64,12 +64,8 @@ export class Doctors {
   }
 
   mount() {
-    const addBtn = this.container.querySelector('#add-doctor-btn');
-    if (addBtn) {
-      addBtn.addEventListener('click', () => this.showDoctorModal());
-    }
-
-    this.container.addEventListener('click', async (e) => {
+    this.addBtnClickListener = () => this.showDoctorModal();
+    this.containerClickListener = async (e) => {
       if (e.target.classList.contains('view-schedule-btn')) {
         const id = e.target.getAttribute('data-id');
         this.showScheduleModal(id);
@@ -86,7 +82,22 @@ export class Doctors {
         const id = e.target.getAttribute('data-id');
         this.showDeleteConfirm(id);
       }
-    });
+    };
+
+    const addBtn = this.container.querySelector('#add-doctor-btn');
+    if (addBtn) {
+      addBtn.addEventListener('click', this.addBtnClickListener);
+    }
+
+    this.container.addEventListener('click', this.containerClickListener);
+  }
+
+  destroy() {
+    const addBtn = this.container.querySelector('#add-doctor-btn');
+    if (addBtn) {
+      addBtn.removeEventListener('click', this.addBtnClickListener);
+    }
+    this.container.removeEventListener('click', this.containerClickListener);
   }
 
   async showDoctorModal(doctorId = null) {
