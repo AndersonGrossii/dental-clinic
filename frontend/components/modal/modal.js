@@ -63,11 +63,14 @@ class Modal {
       close();
     });
 
-    overlay.querySelector('.modal-btn-confirm').addEventListener('click', async () => {
+    overlay.querySelector('.modal-btn-confirm').addEventListener('click', async (e) => {
       if (onConfirm) {
+        const btn = e.target;
+        btn.disabled = true;
         const bodyContent = overlay.querySelector('.modal-body');
         // Ejecutar callback (que puede ser asíncrono)
         const shouldClose = await onConfirm(bodyContent);
+        btn.disabled = false;
         if (shouldClose !== false) close();
       } else {
         close();
