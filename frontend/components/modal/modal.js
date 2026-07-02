@@ -10,13 +10,19 @@ class Modal {
   static show({
     title,
     content,
-    size = 'md', // sm, md, lg, xl
+    size = 'lg', // sm, md, lg, xl
     confirmText = 'Confirmar',
     cancelText = 'Cancelar',
     onConfirm = null,
     onCancel = null,
   }) {
-    // 1. Crear el overlay y el contenedor
+    // 1. Verificar y cerrar cualquier modal existente
+    const existingModal = document.querySelector('.modal-overlay');
+    if (existingModal) {
+      existingModal.remove();
+    }
+
+    // 2. Crear el overlay y el contenedor
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay animate-fade-in';
     
