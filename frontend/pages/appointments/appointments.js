@@ -1096,7 +1096,14 @@ export class Appointments {
 
   showChangeStatusModal(appointmentId) {
     const appt = this.appointmentsList.find(a => String(a.id) === String(appointmentId));
-    const currentStatus = appt?.status_name || '';
+    if (!appt) {
+      toast.error('No se encontró la cita.');
+      return;
+    }
+    const currentStatus = appt.status_name || '';
+    const targetDate = appt.appointment_date ? String(appt.appointment_date).substring(0, 10) : '';
+    const startTime = appt.start_time ? String(appt.start_time).substring(0, 5) : '';
+    const endTime = appt.end_time ? String(appt.end_time).substring(0, 5) : '';
 
     const statuses = [
       { value: 'programada',  label: 'Programada',   color: '#0891b2', icon: '📅', desc: 'Cita agendada y pendiente' },
@@ -1119,16 +1126,23 @@ export class Appointments {
       </label>
     `).join('');
 
+    const docOptions = this.doctorsList.map(d => `
+      <option value="${d.id}" ${appt.doctor_id == d.id ? 'selected' : ''}>Dr/a. ${d.first_name} ${d.last_name} (${d.specialty})</option>
+    `).join('');
+
     const content = `
       <style>
-        .status-option-card { display:flex; align-items:center; gap:12px; padding:12px 14px; border:2px solid var(--color-border-light); border-radius:var(--radius-md); cursor:pointer; margin-bottom:8px; transition:all 0.18s ease; position:relative; background:var(--color-surface); }
+        .manage-appt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-6); align-items: start; }
+        @media (max-width: 768px) { .manage-appt-grid { grid-template-columns: 1fr; gap: var(--space-4); } }
+        .manage-section-title { font-size: 0.75rem; font-weight: 700; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid var(--primary-500); padding-bottom: 4px; margin-bottom: 16px; display: inline-block; }
+        .status-option-card { display:flex; align-items:center; gap:12px; padding:10px 12px; border:2px solid var(--color-border-light); border-radius:var(--radius-md); cursor:pointer; margin-bottom:8px; transition:all 0.18s ease; position:relative; background:var(--color-surface); }
         .status-option-card:hover { border-color:var(--status-color); background:color-mix(in srgb, var(--status-color) 5%, transparent); }
         .status-option-card:has(input:checked), .status-option-card--selected { border-color:var(--status-color); background:color-mix(in srgb, var(--status-color) 8%, transparent); box-shadow:0 0 0 3px color-mix(in srgb, var(--status-color) 15%, transparent); }
         .status-option-card--current { border-color:var(--status-color); }
-        .status-option-icon { font-size:20px; width:36px; height:36px; display:flex; align-items:center; justify-content:center; background:color-mix(in srgb, var(--status-color) 12%, transparent); border-radius:8px; flex-shrink:0; }
+        .status-option-icon { font-size:20px; width:34px; height:34px; display:flex; align-items:center; justify-content:center; background:color-mix(in srgb, var(--status-color) 12%, transparent); border-radius:8px; flex-shrink:0; }
         .status-option-info { flex:1; display:flex; flex-direction:column; }
         .status-option-info strong { font-size:0.875rem; color:var(--color-text); font-weight:600; }
-        .status-option-info span { font-size:0.75rem; color:var(--color-text-tertiary); margin-top:1px; }
+        .status-option-info span { font-size:0.725rem; color:var(--color-text-tertiary); margin-top:1px; }
         .status-option-check { color:var(--status-color); opacity:0; transition:opacity 0.15s; flex-shrink:0; }
         .status-option-card:has(input:checked) .status-option-check { opacity:1; }
         #cancellation-reason-group { margin-top:12px; padding:14px; background:rgba(220,38,38,0.05); border:1px solid rgba(220,38,38,0.2); border-radius:var(--radius-md); animation:fadeIn 0.2s ease; }
@@ -1136,34 +1150,116 @@ export class Appointments {
         .current-status-badge { display:inline-flex; align-items:center; gap:6px; font-size:0.75rem; font-weight:600; color:var(--color-text-secondary); background:var(--color-bg-secondary); border:1px solid var(--color-border-light); padding:4px 10px; border-radius:999px; margin-bottom:16px; }
       </style>
       <form id="change-status-form">
-        ${appt ? `<div class="current-status-badge">Estado actual: <span style="color:${appt.status_color};">${appt.status_label || currentStatus}</span></div>` : ''}
-        <div style="display: flex; flex-direction: column; gap: 0;">${statusCards}</div>
-        <div id="cancellation-reason-group" style="display: none;">
-          <label class="form-label" style="color: #dc2626; font-weight: 600;">⚠️ Motivo de Cancelación <span style="color: #dc2626;">*</span></label>
-          <input type="text" name="cancellation_reason" class="form-input" placeholder="Ej: Paciente solicitó reprogramar..." style="margin-top: 6px; border-color: rgba(220,38,38,0.4);" />
+        <div style="margin-bottom: var(--space-3); border-bottom: 1px solid var(--color-border-light); padding-bottom: var(--space-3);">
+          <div style="font-size: var(--text-lg); font-weight: 700; color: var(--color-text);">Paciente: ${appt.patient_name || '—'}</div>
+          ${appt.treatment_name ? `<div style="font-size: var(--text-sm); color: var(--color-text-secondary); margin-top: 2px;">Tratamiento: ${appt.treatment_name}</div>` : ''}
+        </div>
+        <div class="manage-appt-grid">
+          <!-- Columna Izquierda: Reprogramar -->
+          <div style="border-right: 1px solid var(--color-border-light); padding-right: var(--space-4);">
+            <div class="manage-section-title">Reprogramar / Editar Cita</div>
+            
+            <div class="form-group">
+              <label class="form-label" style="font-size: var(--text-xs);">Doctor</label>
+              <select name="doctor_id" class="form-select" required>
+                ${docOptions}
+              </select>
+            </div>
+            
+            <div class="form-group" style="margin-top: var(--space-3);">
+              <label class="form-label" style="font-size: var(--text-xs);">Fecha de la Cita</label>
+              <input type="date" name="appointment_date" class="form-input" value="${targetDate}" required />
+            </div>
+
+            <div class="form-row-responsive" style="margin-top: var(--space-3);">
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" style="font-size: var(--text-xs);">Hora Inicio</label>
+                <input type="time" name="start_time" class="form-input" value="${startTime}" required />
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" style="font-size: var(--text-xs);">Hora Fin</label>
+                <input type="time" name="end_time" class="form-input" value="${endTime}" required />
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-top: var(--space-3);">
+              <label class="form-label" style="font-size: var(--text-xs);">Motivo de la Cita</label>
+              <textarea name="reason" class="form-textarea" rows="3" placeholder="Escriba el motivo...">${appt.reason || ''}</textarea>
+            </div>
+          </div>
+
+          <!-- Columna Derecha: Cambiar Estado -->
+          <div>
+            <div class="manage-section-title">Actualizar Estado</div>
+            <div class="current-status-badge">Estado actual: <span style="color:${appt.status_color};">${appt.status_label || currentStatus}</span></div>
+            <div style="display: flex; flex-direction: column; gap: 0;">${statusCards}</div>
+            <div id="cancellation-reason-group" style="display: none;">
+              <label class="form-label" style="color: #dc2626; font-weight: 600;">⚠️ Motivo de Cancelación <span style="color: #dc2626;">*</span></label>
+              <input type="text" name="cancellation_reason" class="form-input" placeholder="Ej: Paciente solicitó reprogramar..." style="margin-top: 6px; border-color: rgba(220,38,38,0.4);" />
+            </div>
+          </div>
         </div>
       </form>
     `;
 
     Modal.show({
-      title: 'Cambiar Estado de la Cita',
+      title: 'Gestionar Cita Médica',
       content: content,
-      confirmText: 'Actualizar Estado',
-      size: 'md',
+      confirmText: 'Guardar Cambios',
+      size: 'lg',
       onConfirm: async (modalBody) => {
         const form = modalBody.querySelector('#change-status-form');
         const selected = form.querySelector('[name="status_name"]:checked');
         if (!selected) { toast.error('Seleccione un estado'); return false; }
         const status = selected.value;
-        const reason = form.querySelector('[name="cancellation_reason"]')?.value?.trim();
-        if (status === 'cancelada' && !reason) { toast.error('El motivo de cancelación es requerido'); return false; }
+        const cancellationReason = form.querySelector('[name="cancellation_reason"]')?.value?.trim();
+        if (status === 'cancelada' && !cancellationReason) { toast.error('El motivo de cancelación es requerido'); return false; }
+
+        const doctorId = Number(form.querySelector('[name="doctor_id"]').value);
+        const appointmentDate = form.querySelector('[name="appointment_date"]').value;
+        const startTimeInput = form.querySelector('[name="start_time"]').value;
+        const endTimeInput = form.querySelector('[name="end_time"]').value;
+        const reason = form.querySelector('[name="reason"]').value.trim();
+
+        // Validar fin de semana para nueva fecha
+        const selDate = new Date(appointmentDate + 'T12:00:00');
+        const selDow = selDate.getDay();
+        const userRole = state.get('user')?.role_name;
+        const isWeekendDay = selDow === 0 || selDow === 6;
+        if (isWeekendDay && userRole !== 'propietario' && userRole !== 'direccion') {
+          toast.error('Solo el propietario puede agendar citas en fin de semana.');
+          return false;
+        }
+
+        const originalStartTime = appt.start_time ? String(appt.start_time).substring(0, 5) : '';
+        const originalEndTime = appt.end_time ? String(appt.end_time).substring(0, 5) : '';
+        const originalReason = appt.reason || '';
+
+        const hasRescheduled =
+          doctorId !== appt.doctor_id ||
+          appointmentDate !== targetDate ||
+          startTimeInput !== originalStartTime ||
+          endTimeInput !== originalEndTime ||
+          reason !== originalReason;
+
         try {
-          await appointmentService.updateStatus(appointmentId, status, reason || null);
-          toast.success('Estado de la cita actualizado');
+          if (hasRescheduled) {
+            await appointmentService.update(appointmentId, {
+              doctor_id: doctorId,
+              appointment_date: appointmentDate,
+              start_time: startTimeInput,
+              end_time: endTimeInput,
+              reason: reason || null
+            });
+          }
+          if (status !== currentStatus || (status === 'cancelada' && cancellationReason !== appt.cancellation_reason)) {
+            await appointmentService.updateStatus(appointmentId, status, cancellationReason || null);
+          }
+          toast.success('Cita actualizada exitosamente');
           this.render({}, true);
           return true;
         } catch (err) {
-          toast.error(err.message || 'Error al actualizar estado');
+          toast.error(err.message || 'Error al actualizar la cita');
           return false;
         }
       }
