@@ -7,6 +7,7 @@ import appointmentService from '../../services/appointment.service.js';
 import quotationService from '../../services/quotation.service.js';
 import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
+import state from '../../scripts/state.js';
 import { formatDate, formatCurrency } from '../../utils/helpers.js';
 
 export class PatientProfile {
@@ -37,6 +38,7 @@ export class PatientProfile {
 
   renderProfile() {
     const pat = this.patient;
+    const isDoctor = state.get('user')?.role_name === 'doctor';
 
     // Tabs links
     const tabLink = (id, label) => `
@@ -66,15 +68,38 @@ export class PatientProfile {
             <p><strong>Dirección:</strong> ${pat.address || 'N/A'}</p>
             <p><strong>Contacto de Emergencia:</strong> ${pat.emergency_contact_name || 'N/A'} (${pat.emergency_contact_phone || 'N/A'})</p>
           </div>
-          <div style="grid-column: span 2; margin-top: var(--space-4);">
-            <h3 style="margin-bottom: var(--space-4); border-bottom: 2px solid var(--gray-100); padding-bottom: 4px;">Historial Médico & Alergias</h3>
-            <div style="background-color: var(--danger-50); border-left: 4px solid var(--danger-500); padding: var(--space-3); border-radius: var(--radius-sm); margin-bottom: var(--space-3);">
-              <p style="color: var(--danger-900); font-weight: 600; margin-bottom: 2px;">⚠️ Alergias Registradas</p>
-              <p style="color: var(--danger-800); margin: 0;">${pat.allergies || 'Ninguna alergia conocida registrada.'}</p>
+          <div style="grid-column: span 2; margin-top: var(--space-4); display: grid; grid-template-columns: ${isDoctor ? '1fr' : '1fr 1fr'}; gap: var(--space-6);">
+            <div style="${isDoctor ? 'grid-column: span 2;' : ''}">
+              <h3 style="margin-bottom: var(--space-4); border-bottom: 2px solid var(--gray-100); padding-bottom: 4px;">Historial Médico & Alergias</h3>
+              <div style="background-color: var(--danger-50); border-left: 4px solid var(--danger-500); padding: var(--space-3); border-radius: var(--radius-sm); margin-bottom: var(--space-3);">
+                <p style="color: var(--danger-900); font-weight: 600; margin-bottom: 2px;">⚠️ Alergias Registradas</p>
+                <p style="color: var(--danger-800); margin: 0;">${pat.allergies || 'Ninguna alergia conocida registrada.'}</p>
+              </div>
+              <p><strong>Condiciones Médicas:</strong> ${pat.medical_conditions || 'Ninguna condición registrada.'}</p>
+              <p><strong>Medicamentos Actuales:</strong> ${pat.current_medications || 'Ninguno.'}</p>
+              <p><strong>Aseguradora:</strong> ${pat.insurance_provider || 'Ninguna'} (No. Póliza: ${pat.insurance_number || 'N/A'})</p>
             </div>
-            <p><strong>Condiciones Médicas:</strong> ${pat.medical_conditions || 'Ninguna condición registrada.'}</p>
-            <p><strong>Medicamentos Actuales:</strong> ${pat.current_medications || 'Ninguno.'}</p>
-            <p><strong>Aseguradora:</strong> ${pat.insurance_provider || 'Ninguna'} (No. Póliza: ${pat.insurance_number || 'N/A'})</p>
+            ${isDoctor ? '' : `
+              <div>
+                <h3 style="margin-bottom: var(--space-4); border-bottom: 2px solid var(--gray-100); padding-bottom: 4px;">Resumen Financiero</h3>
+                <div style="display: flex; flex-direction: column; gap: var(--space-3); background-color: var(--gray-50); padding: var(--space-4); border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="color: var(--text-secondary); font-weight: 500;">Total Facturado (Débito):</span>
+                    <span style="font-weight: 600; color: var(--text-primary);">${formatCurrency(pat.total_debit || pat.financial?.totalDebit || 0)}</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="color: var(--text-secondary); font-weight: 500;">Total Pagado (Crédito):</span>
+                    <span style="font-weight: 600; color: var(--success-600);">${formatCurrency(pat.total_credit || pat.financial?.totalCredit || 0)}</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding-top: var(--space-2); margin-top: var(--space-1);">
+                    <span style="font-weight: 700; color: var(--text-primary);">Saldo Pendiente:</span>
+                    <span style="font-weight: 700; color: ${parseFloat(pat.balance || 0) > 0 ? 'var(--danger-600)' : 'var(--success-600)'};">
+                      ${formatCurrency(pat.balance || pat.financial?.balance || 0)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            `}
           </div>
         </div>
       `;
@@ -147,7 +172,7 @@ export class PatientProfile {
       tabContent = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
           <h3>Historial de Citas</h3>
-          <a href="#/appointments" class="btn btn-sm btn-primary">+ Agendar Cita</a>
+          <button id="profile-add-appointment-btn" class="btn btn-sm btn-primary">+ Agendar Cita</button>
         </div>
         <div class="table-container">
           <table>
@@ -239,10 +264,19 @@ export class PatientProfile {
           </span>
           <div>
             <h1 class="page-title">${pat.first_name} ${pat.last_name}</h1>
-            <p style="color: var(--text-secondary); margin: 0;">Expediente Clínico #EXP-${pat.id.toString().padStart(5, '0')}</p>
+            <div style="display: flex; gap: var(--space-2); align-items: center; margin-top: 4px;">
+              <span class="badge badge-info" style="font-size: var(--text-sm); font-weight: 600; padding: 2px 8px;">ID: ${pat.custom_id || 'N/A'}</span>
+              ${isDoctor ? '' : `
+                <span class="badge ${parseFloat(pat.balance || 0) > 0 ? 'badge-danger' : 'badge-success'}" style="font-size: var(--text-sm); font-weight: 600; padding: 2px 8px;">
+                  ${parseFloat(pat.balance || 0) > 0 ? `Pendiente: ${formatCurrency(pat.balance)}` : 'Al corriente'}
+                </span>
+              `}
+              <p style="color: var(--text-secondary); margin: 0; font-size: var(--text-sm);">Expediente Clínico #EXP-${pat.id.toString().padStart(5, '0')}</p>
+            </div>
           </div>
         </div>
         <div style="display: flex; gap: var(--space-2);">
+          <button id="schedule-appointment-btn" class="btn btn-primary">📅 Agendar Cita</button>
           <button id="edit-patient-profile-btn" class="btn btn-secondary">Editar Datos</button>
           <a href="#/patients" class="btn btn-outline">⬅ Volver al Directorio</a>
         </div>
@@ -282,6 +316,26 @@ export class PatientProfile {
     const editBtn = this.container.querySelector('#edit-patient-profile-btn');
     if (editBtn) {
       editBtn.addEventListener('click', () => this.showPatientModal());
+    }
+
+    // Agendar cita
+    const prefillAndGo = () => {
+      state.set('prefilledAppointment', {
+        patientId: this.patient.id,
+        patientName: `${this.patient.first_name} ${this.patient.last_name}`,
+        patientCustomId: this.patient.custom_id || null
+      });
+      window.location.hash = '#/appointments';
+    };
+
+    const scheduleBtn = this.container.querySelector('#schedule-appointment-btn');
+    if (scheduleBtn) {
+      scheduleBtn.addEventListener('click', prefillAndGo);
+    }
+
+    const tabScheduleBtn = this.container.querySelector('#profile-add-appointment-btn');
+    if (tabScheduleBtn) {
+      tabScheduleBtn.addEventListener('click', prefillAndGo);
     }
   }
 

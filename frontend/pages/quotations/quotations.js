@@ -2,7 +2,9 @@
 // Vista de Gestión de Presupuestos (Cotizaciones)
 // ============================================
 import quotationService from '../../services/quotation.service.js';
+import invoiceService from '../../services/invoice.service.js';
 import patientService from '../../services/patient.service.js';
+import treatmentService from '../../services/treatment.service.js';
 import doctorService from '../../services/doctor.service.js';
 import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
@@ -121,12 +123,16 @@ export class Quotations {
         <td>${q.patient_name || '—'}</td>
         <td>${q.doctor_name || 'Sin asignar'}</td>
         <td><strong>${formatCurrency(q.total)}</strong></td>
-        <td><span class="badge ${STATUS_BADGES[q.status] || 'badge-secondary'}">${STATUS_LABELS[q.status] || q.status}</span></td>
+        <td>
+          <span class="badge ${STATUS_BADGES[q.status] || 'badge-secondary'}">${STATUS_LABELS[q.status] || q.status}</span>
+          ${q.invoice_id ? `<span class="badge" style="background-color: var(--primary-100); color: var(--primary-800); font-size: 10px; margin-left: 4px; padding: 2px 4px;">Facturado</span>` : ''}
+        </td>
         <td>${formatDate(q.created_at)}</td>
         <td>
           <div style="display: flex; gap: var(--space-1); flex-wrap: nowrap;">
             <button class="btn btn-sm btn-outline view-quote-btn" data-id="${q.id}" title="Ver / Imprimir">👁</button>
             ${q.status === 'aceptada' ? `<button class="btn btn-sm btn-success convert-appointment-btn" data-id="${q.id}" title="Agendar Cita">📅</button>` : ''}
+            ${q.status === 'aceptada' && !q.invoice_id ? `<button class="btn btn-sm btn-info convert-invoice-btn" data-id="${q.id}" title="Generar Factura">📄</button>` : ''}
             <button class="btn btn-sm btn-primary edit-quote-btn" data-id="${q.id}" title="Editar">✎</button>
             <button class="btn btn-sm btn-secondary status-quote-btn" data-id="${q.id}" title="Cambiar estado">⇄</button>
             <button class="btn btn-sm btn-danger delete-quote-btn" data-id="${q.id}" title="Eliminar">✕</button>
@@ -193,7 +199,31 @@ export class Quotations {
       if (targetBtn.classList.contains('delete-quote-btn')) {
         this.showDeleteConfirm(id);
       }
+      if (targetBtn.classList.contains('convert-invoice-btn')) {
+        this.showConvertInvoiceConfirm(id);
+      }
     });
+  }
+
+  showConvertInvoiceConfirm(quotationId) {
+    const q = this.quotationsList.find(q => q.id == quotationId);
+    const label = q ? `# ${q.quote_number}` : 'este presupuesto';
+
+    Modal.confirm(
+      'Generar Factura',
+      `¿Está seguro de generar la factura para el presupuesto ${label}?`,
+      async () => {
+        try {
+          await invoiceService.createFromQuotation(quotationId);
+          toast.success('Factura generada exitosamente');
+          window.location.hash = '#/invoices';
+          return true;
+        } catch (err) {
+          toast.error(err.message || 'Error al generar la factura');
+          return false;
+        }
+      }
+    );
   }
 
   async showQuoteModal(quoteId = null) {
@@ -209,21 +239,26 @@ export class Quotations {
       }
     }
 
-    // Fetch patients and doctors for dropdowns
+    // Fetch patients, doctors and treatments for dropdowns
     let patients = [];
     let doctors = [];
+    let treatments = [];
     try {
-      patients = await patientService.getAll({ limit: 200 });
-      doctors = await doctorService.getAll();
+      [patients, doctors, treatments] = await Promise.all([
+        patientService.getAll({ limit: 200 }),
+        doctorService.getAll(),
+        treatmentService.getAll({ limit: 500, is_active: true }),
+      ]);
     } catch {
-      // Fallback: show empty selects
+      // Fallback: show empty selects / lists
     }
     // api.get returns data array directly
     const patientList = Array.isArray(patients) ? patients : [];
     const doctorList = Array.isArray(doctors) ? doctors : [];
+    const treatmentList = Array.isArray(treatments) ? treatments : [];
 
     const patientOptions = patientList.map(p =>
-      `<option value="${p.id}" ${p.id == q.patient_id ? 'selected' : ''}>${p.first_name} ${p.last_name}</option>`
+      `<option value="${p.id}" ${p.id == q.patient_id ? 'selected' : ''}>[${p.custom_id || 'N/A'}] ${p.first_name} ${p.last_name}</option>`
     ).join('');
     const doctorOptions = doctorList.map(d =>
       `<option value="${d.id}" ${d.id == q.doctor_id ? 'selected' : ''}>${d.first_name} ${d.last_name} (${d.specialty || ''})</option>`
@@ -231,7 +266,10 @@ export class Quotations {
 
     const itemsHtml = (q.items || [{ description: '', quantity: 1, unit_price: 0, discount: 0 }]).map((item, i) => `
       <div class="quote-item-row" style="margin-top: ${i > 0 ? 'var(--space-2)' : '0'};">
-        <input type="text" name="item_desc_${i}" class="form-input quote-item-desc" placeholder="Descripción" value="${item.description || ''}" required />
+        <div class="treatment-autocomplete-wrapper">
+          <input type="text" name="item_desc_${i}" class="form-input quote-item-desc" placeholder="Buscar tratamiento..." value="${item.description || ''}" autocomplete="off" required />
+          <ul class="treatment-autocomplete-list"></ul>
+        </div>
         <input type="number" name="item_qty_${i}" class="form-input" placeholder="Cant." value="${item.quantity || 1}" min="1" required />
         <input type="number" step="0.01" name="item_price_${i}" class="form-input" placeholder="Precio $" value="${item.unit_price || 0}" min="0" required />
         <input type="number" step="0.01" name="item_discount_${i}" class="form-input" placeholder="Desc. %" value="${item.discount || 0}" min="0" max="100" />
@@ -362,8 +400,155 @@ export class Quotations {
       },
     });
 
-    // Defer add-item handler until modal is in DOM
+    // Defer event handlers and autocomplete init until modal is in DOM
     setTimeout(() => {
+      // ---- Inject autocomplete CSS (once) ----
+      if (!document.getElementById('treatment-autocomplete-styles')) {
+        const style = document.createElement('style');
+        style.id = 'treatment-autocomplete-styles';
+        style.textContent = `
+          .treatment-autocomplete-wrapper {
+            position: relative;
+            flex: 1;
+            min-width: 0;
+          }
+          .treatment-autocomplete-list {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            z-index: 1050;
+            max-height: 220px;
+            overflow-y: auto;
+            margin: 4px 0 0 0;
+            padding: 0;
+            list-style: none;
+            background: var(--bg-primary, #fff);
+            border: 1px solid var(--border-color, #ddd);
+            border-radius: var(--radius, 8px);
+            box-shadow: 0 8px 24px rgba(0,0,0,.15);
+          }
+          .treatment-autocomplete-list .autocomplete-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            cursor: pointer;
+            font-size: var(--text-sm, 0.875rem);
+            border-bottom: 1px solid var(--border-color, #eee);
+            transition: background .15s;
+          }
+          .treatment-autocomplete-list .autocomplete-item:last-child { border-bottom: none; }
+          .treatment-autocomplete-list .autocomplete-item:hover,
+          .treatment-autocomplete-list .autocomplete-item.active {
+            background: var(--primary-50, #eef2ff);
+          }
+          .treatment-autocomplete-list .treatment-name {
+            flex: 1;
+            font-weight: 500;
+            color: var(--text-primary, #333);
+          }
+          .treatment-autocomplete-list .treatment-code {
+            font-size: 0.75rem;
+            color: var(--text-secondary, #888);
+            background: var(--bg-secondary, #f5f5f5);
+            padding: 2px 6px;
+            border-radius: 4px;
+          }
+          .treatment-autocomplete-list .treatment-price {
+            font-weight: 600;
+            color: var(--success-600, #16a34a);
+            white-space: nowrap;
+          }
+          .treatment-autocomplete-list .no-results {
+            padding: 12px 14px;
+            color: var(--text-secondary, #999);
+            font-style: italic;
+            text-align: center;
+          }
+        `;
+        document.head.appendChild(style);
+      }
+
+      // ---- Treatment autocomplete initializer ----
+      const initAutocomplete = (input) => {
+        const wrapper = input.closest('.treatment-autocomplete-wrapper');
+        if (!wrapper || input._acInitialized) return;
+        input._acInitialized = true;
+        const dropdown = wrapper.querySelector('.treatment-autocomplete-list');
+        const row = input.closest('.quote-item-row');
+        let activeIdx = -1;
+
+        const showResults = () => {
+          const term = input.value.toLowerCase().trim();
+          if (!term) { dropdown.style.display = 'none'; return; }
+
+          const matches = treatmentList.filter(t =>
+            t.name.toLowerCase().includes(term) ||
+            (t.code && t.code.toLowerCase().includes(term))
+          ).slice(0, 10);
+
+          if (matches.length === 0) {
+            dropdown.innerHTML = '<li class="no-results">Sin resultados</li>';
+            dropdown.style.display = 'block';
+            activeIdx = -1;
+            return;
+          }
+
+          dropdown.innerHTML = matches.map((t, idx) => `
+            <li class="autocomplete-item" data-idx="${idx}">
+              <span class="treatment-name">${t.name}</span>
+              ${t.code ? `<span class="treatment-code">${t.code}</span>` : ''}
+              <span class="treatment-price">${formatCurrency(t.default_price || 0)}</span>
+            </li>
+          `).join('');
+          dropdown.style.display = 'block';
+          activeIdx = -1;
+
+          dropdown.querySelectorAll('.autocomplete-item').forEach((li, idx) => {
+            li.addEventListener('mousedown', (e) => {
+              e.preventDefault();
+              const selected = matches[idx];
+              input.value = selected.name;
+              const priceInput = row.querySelector('input[name^="item_price_"]');
+              if (priceInput) priceInput.value = parseFloat(selected.default_price || 0).toFixed(2);
+              dropdown.style.display = 'none';
+            });
+          });
+        };
+
+        input.addEventListener('input', showResults);
+        input.addEventListener('focus', () => { if (input.value.trim()) showResults(); });
+        input.addEventListener('blur', () => { setTimeout(() => { dropdown.style.display = 'none'; }, 150); });
+
+        input.addEventListener('keydown', (e) => {
+          const items = dropdown.querySelectorAll('.autocomplete-item');
+          if (!items.length || dropdown.style.display === 'none') return;
+
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            activeIdx = Math.min(activeIdx + 1, items.length - 1);
+            items.forEach((li, i) => li.classList.toggle('active', i === activeIdx));
+            items[activeIdx]?.scrollIntoView({ block: 'nearest' });
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            activeIdx = Math.max(activeIdx - 1, 0);
+            items.forEach((li, i) => li.classList.toggle('active', i === activeIdx));
+            items[activeIdx]?.scrollIntoView({ block: 'nearest' });
+          } else if (e.key === 'Enter' && activeIdx >= 0) {
+            e.preventDefault();
+            items[activeIdx]?.dispatchEvent(new Event('mousedown'));
+          } else if (e.key === 'Escape') {
+            dropdown.style.display = 'none';
+          }
+        });
+      };
+
+      // Init autocomplete on existing item rows
+      document.querySelectorAll('#quote-items-container .quote-item-desc').forEach(initAutocomplete);
+
+      // Add-item button handler
       const addBtn = document.getElementById('add-item-btn');
       if (addBtn) {
         addBtn.addEventListener('click', () => {
@@ -373,12 +558,19 @@ export class Quotations {
           div.className = 'quote-item-row';
           div.style.marginTop = 'var(--space-2)';
           div.innerHTML = `
-            <input type="text" name="item_desc_${idx}" class="form-input quote-item-desc" placeholder="Descripción" required />
+            <div class="treatment-autocomplete-wrapper">
+              <input type="text" name="item_desc_${idx}" class="form-input quote-item-desc" placeholder="Buscar tratamiento..." autocomplete="off" required />
+              <ul class="treatment-autocomplete-list"></ul>
+            </div>
             <input type="number" name="item_qty_${idx}" class="form-input" placeholder="Cant." value="1" min="1" required />
             <input type="number" step="0.01" name="item_price_${idx}" class="form-input" placeholder="Precio $" min="0" required />
             <input type="number" step="0.01" name="item_discount_${idx}" class="form-input" placeholder="Desc. %" value="0" min="0" max="100" />
           `;
           container.appendChild(div);
+          // Init autocomplete on the new input and focus it
+          const newInput = div.querySelector('.quote-item-desc');
+          initAutocomplete(newInput);
+          newInput.focus();
         });
       }
     }, 50);

@@ -4,8 +4,8 @@
 import api from './api.service.js';
 
 class PaymentService {
-  async getAll(params = {}) {
-    return await api.get('/payments', params);
+  async getAll(params = {}, options = {}) {
+    return await api.get('/payments', params, options);
   }
 
   async getByInvoice(invoiceId) {

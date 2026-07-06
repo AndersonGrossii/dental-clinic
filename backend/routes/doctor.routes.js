@@ -23,8 +23,8 @@ router.post('/', managementOnly, validate(createDoctorRules), auditMiddleware('C
 router.put('/:id', managementOnly, validate(updateDoctorRules), auditMiddleware('ACTUALIZAR_DOCTOR', 'doctors'), controller.update);
 router.delete('/:id', managementOnly, auditMiddleware('ELIMINAR_DOCTOR', 'doctors'), controller.remove);
 
-router.put('/:id/schedule', managementOnly, auditMiddleware('ACTUALIZAR_HORARIO_DOCTOR', 'doctor_schedules'), controller.updateSchedule);
-router.post('/:id/unavailability', managementOnly, auditMiddleware('REGISTRAR_NO_DISPONIBILIDAD', 'doctor_unavailability'), controller.addUnavailability);
-router.delete('/:id/unavailability/:unavailId', managementOnly, auditMiddleware('ELIMINAR_NO_DISPONIBILIDAD', 'doctor_unavailability'), controller.removeUnavailability);
+router.put('/:id/schedule', allRoles, auditMiddleware('ACTUALIZAR_HORARIO_DOCTOR', 'doctor_schedules'), controller.updateSchedule);
+router.post('/:id/unavailability', allRoles, auditMiddleware('REGISTRAR_NO_DISPONIBILIDAD', 'doctor_unavailability'), controller.addUnavailability);
+router.delete('/:id/unavailability/:unavailId', allRoles, auditMiddleware('ELIMINAR_NO_DISPONIBILIDAD', 'doctor_unavailability'), controller.removeUnavailability);
 
 export default router;

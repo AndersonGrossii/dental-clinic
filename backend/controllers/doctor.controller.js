@@ -38,6 +38,13 @@ export const getSchedule = async (req, res, next) => {
 export const updateSchedule = async (req, res, next) => {
   try {
     const { id } = req.params;
+
+    if (req.user.roleName === 'doctor') {
+      if (!req.user.doctorId || Number(id) !== Number(req.user.doctorId)) {
+        return ApiResponse.error(res, 'No tiene permisos para modificar la configuración de otro doctor.', 403);
+      }
+    }
+
     const scheduleArray = req.body; // Se espera array de horarios
     const schedule = await doctorService.updateSchedule(id, scheduleArray);
     return ApiResponse.success(res, schedule, 'Horario de doctor actualizado exitosamente');
@@ -63,6 +70,13 @@ export const getUnavailability = async (req, res, next) => {
 export const addUnavailability = async (req, res, next) => {
   try {
     const { id } = req.params;
+
+    if (req.user.roleName === 'doctor') {
+      if (!req.user.doctorId || Number(id) !== Number(req.user.doctorId)) {
+        return ApiResponse.error(res, 'No tiene permisos para modificar la configuración de otro doctor.', 403);
+      }
+    }
+
     const unavailabilityData = req.body;
     const record = await doctorService.addUnavailability(id, unavailabilityData);
     return ApiResponse.created(res, record, 'No disponibilidad registrada exitosamente');
@@ -74,6 +88,13 @@ export const addUnavailability = async (req, res, next) => {
 export const removeUnavailability = async (req, res, next) => {
   try {
     const { id, unavailId } = req.params;
+
+    if (req.user.roleName === 'doctor') {
+      if (!req.user.doctorId || Number(id) !== Number(req.user.doctorId)) {
+        return ApiResponse.error(res, 'No tiene permisos para modificar la configuración de otro doctor.', 403);
+      }
+    }
+
     await doctorService.removeUnavailability(unavailId, id);
     return ApiResponse.success(res, null, 'No disponibilidad eliminada exitosamente');
   } catch (error) {

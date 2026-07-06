@@ -64,11 +64,13 @@ class QuotationRepository extends BaseRepository {
       `SELECT q.*,
               CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
               p.dni AS patient_dni,
-              CONCAT(u.first_name, ' ', u.last_name) AS doctor_name
+              CONCAT(u.first_name, ' ', u.last_name) AS doctor_name,
+              inv.id AS invoice_id
        FROM quotations q
        INNER JOIN patients p ON q.patient_id = p.id
        LEFT JOIN doctors d ON q.doctor_id = d.id
        LEFT JOIN users u ON d.user_id = u.id
+       LEFT JOIN invoices inv ON inv.quotation_id = q.id AND inv.deleted_at IS NULL
        ${whereClause}
        ORDER BY ${safeSortBy} ${safeSortOrder}
        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,

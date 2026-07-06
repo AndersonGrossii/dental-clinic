@@ -11,9 +11,9 @@ class PaymentService {
   /**
    * Obtiene todos los pagos con filtros y paginación.
    */
-  async getAll({ page = 1, limit = 20, invoice_id, date_from, date_to } = {}) {
+  async getAll({ page = 1, limit = 20, invoice_id, date_from, date_to, search, payment_method_id } = {}) {
     const offset = (page - 1) * limit;
-    const filters = { invoice_id, date_from, date_to };
+    const filters = { invoice_id, date_from, date_to, search, payment_method_id };
     const { rows, total } = await paymentRepository.findAllWithDetails({ limit, offset, filters });
     const pagination = buildPaginationMeta(total, page, limit);
     return { payments: rows, pagination };

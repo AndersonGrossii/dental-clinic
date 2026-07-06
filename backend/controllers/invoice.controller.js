@@ -37,7 +37,7 @@ export const getById = async (req, res, next) => {
 export const create = async (req, res, next) => {
   try {
     const data = { ...req.body, created_by: req.user.id };
-    const invoice = await invoiceService.create(data);
+    const invoice = await invoiceService.create(data, req.user.id);
     return ApiResponse.created(res, invoice, 'Factura creada exitosamente');
   } catch (error) {
     next(error);

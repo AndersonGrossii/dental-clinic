@@ -13,11 +13,30 @@ import { AppError } from '../utils/errors.js';
 class InvoiceService {
   /**
    * Obtiene todas las facturas con paginación y filtros.
-   * @param {object} options - { limit, offset, sortBy, sortOrder, filters }
-   * @returns {Promise<{ rows: Array, total: number }>}
+   * @param {object} options - { page, limit, sortBy, sortOrder, filters }
+   * @returns {Promise<{ invoices: Array, pagination: object }>}
    */
-  async getAll(options) {
-    return invoiceRepository.findAllWithDetails(options);
+  async getAll({ page = 1, limit = 20, sortBy = 'i.created_at', sortOrder = 'DESC', filters = {} } = {}) {
+    const offset = (page - 1) * limit;
+    const { rows, total } = await invoiceRepository.findAllWithDetails({
+      limit,
+      offset,
+      sortBy,
+      sortOrder,
+      filters,
+    });
+
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      invoices: rows,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages,
+      },
+    };
   }
 
   /**
@@ -63,18 +82,23 @@ class InvoiceService {
       invoice_number: invoiceNumber,
       patient_id: invoiceFields.patient_id,
       doctor_id: invoiceFields.doctor_id || null,
-      invoice_date: invoiceFields.invoice_date || new Date().toISOString().split('T')[0],
       due_date: invoiceFields.due_date || null,
       subtotal,
       tax_rate: taxRate,
       tax_amount: taxAmount,
-      discount,
+      discount_amount: discount,
+      discount_percentage: data.discount_percentage || 0,
       total,
+      balance: total, // Set initial balance to the total invoice amount
       amount_paid: 0,
       status: 'pendiente',
       notes: invoiceFields.notes || null,
       created_by: userId,
     };
+
+    if (invoiceFields.invoice_date) {
+      invoiceData.created_at = invoiceFields.invoice_date;
+    }
 
     return invoiceRepository.createWithItems(invoiceData, processedItems);
   }
@@ -158,15 +182,16 @@ class InvoiceService {
       quotation_id: quotation.id,
       patient_id: quotation.patient_id,
       doctor_id: quotation.doctor_id,
-      invoice_date: new Date().toISOString().split('T')[0],
       subtotal: quotation.subtotal,
       tax_rate: quotation.tax_rate,
       tax_amount: quotation.tax_amount,
-      discount: quotation.discount,
+      discount_amount: quotation.discount_amount || 0.00,
+      discount_percentage: quotation.discount_percentage || 0.00,
       total: quotation.total,
+      balance: quotation.total,
       amount_paid: 0,
       status: 'pendiente',
-      notes: `Generada desde cotización ${quotation.quotation_number}`,
+      notes: `Generada desde cotización ${quotation.quote_number}`,
       created_by: userId,
     };
 
@@ -176,7 +201,7 @@ class InvoiceService {
       description: item.description,
       quantity: item.quantity,
       unit_price: item.unit_price,
-      subtotal: item.subtotal,
+      subtotal: item.total,
     }));
 
     return invoiceRepository.createWithItems(invoiceData, items);

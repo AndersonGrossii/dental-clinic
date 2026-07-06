@@ -13,6 +13,7 @@ export const toPatientDTO = (row) => {
 
   return {
     id: row.id,
+    customId: row.custom_id,
     firstName: row.first_name,
     lastName: row.last_name,
     fullName: `${row.first_name} ${row.last_name}`,
@@ -54,10 +55,16 @@ export const toPatientDTO = (row) => {
       appointmentCount: row.appointment_count || 0,
       imageCount: row.image_count || 0,
     },
+    financial: {
+      totalDebit: parseFloat(row.total_debit) || 0,
+      totalCredit: parseFloat(row.total_credit) || 0,
+      balance: parseFloat(row.balance) || 0,
+    },
     createdAt: row.created_at,
     updatedAt: row.updated_at,
 
     // flat snake_case aliases for frontend
+    custom_id: row.custom_id,
     first_name: row.first_name,
     last_name: row.last_name,
     full_name: `${row.first_name} ${row.last_name}`,
@@ -75,6 +82,9 @@ export const toPatientDTO = (row) => {
     is_active: row.is_active,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    total_debit: parseFloat(row.total_debit) || 0,
+    total_credit: parseFloat(row.total_credit) || 0,
+    balance: parseFloat(row.balance) || 0,
   };
 };
 
@@ -88,6 +98,7 @@ export const toPatientListDTO = (row) => {
 
   return {
     id: row.id,
+    customId: row.custom_id,
     firstName: row.first_name,
     lastName: row.last_name,
     fullName: `${row.first_name} ${row.last_name}`,
@@ -103,6 +114,7 @@ export const toPatientListDTO = (row) => {
     createdAt: row.created_at,
 
     // flat snake_case aliases for frontend
+    custom_id: row.custom_id,
     first_name: row.first_name,
     last_name: row.last_name,
     full_name: `${row.first_name} ${row.last_name}`,
@@ -111,5 +123,8 @@ export const toPatientListDTO = (row) => {
     photo_url: row.photo_url,
     insurance_provider: row.insurance_provider,
     created_at: row.created_at,
+    total_debit: parseFloat(row.total_debit) || 0,
+    total_credit: parseFloat(row.total_credit) || 0,
+    balance: parseFloat(row.balance) || 0,
   };
 };

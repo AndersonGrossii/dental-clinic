@@ -24,9 +24,9 @@ router.get('/today', allRoles, controller.getTodayAppointments);
 router.get('/stats', staffOnly, controller.getStats);
 router.get('/:id', allRoles, controller.getById);
 
-router.post('/', staffOnly, validate(createAppointmentRules), auditMiddleware('CREAR_CITA', 'appointments'), controller.create);
-router.put('/:id', staffOnly, validate(updateAppointmentRules), auditMiddleware('ACTUALIZAR_CITA', 'appointments'), controller.update);
+router.post('/', allRoles, validate(createAppointmentRules), auditMiddleware('CREAR_CITA', 'appointments'), controller.create);
+router.put('/:id', allRoles, validate(updateAppointmentRules), auditMiddleware('ACTUALIZAR_CITA', 'appointments'), controller.update);
 router.patch('/:id/status', allRoles, validate(updateStatusRules), auditMiddleware('CAMBIAR_ESTADO_CITA', 'appointments'), controller.updateStatus);
-router.delete('/:id', staffOnly, auditMiddleware('CANCELAR_CITA', 'appointments'), controller.remove);
+router.delete('/:id', allRoles, auditMiddleware('CANCELAR_CITA', 'appointments'), controller.remove);
 
 export default router;

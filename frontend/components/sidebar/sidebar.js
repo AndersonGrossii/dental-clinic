@@ -44,7 +44,7 @@ export class Sidebar {
       { path: '#/invoices', label: 'Facturación', icon: icons.invoices, roles: ['propietario', 'direccion', 'recepcionista'] },
       { path: '#/payments', label: 'Pagos', icon: icons.payments, roles: ['propietario', 'direccion', 'recepcionista'] },
       { path: '#/reports', label: 'Reportes', icon: icons.reports, roles: ['propietario', 'direccion'] },
-      { path: '#/settings', label: 'Configuración', icon: icons.settings, roles: ['propietario', 'direccion'] },
+      { path: '#/settings', label: 'Configuración', icon: icons.settings, roles: ['propietario', 'direccion', 'doctor'] },
     ];
 
     const activeHash = window.location.hash || '#/';

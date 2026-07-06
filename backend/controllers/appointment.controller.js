@@ -53,6 +53,13 @@ export const create = async (req, res, next) => {
   try {
     const appointmentData = req.body;
     const userId = req.user.id;
+
+    if (req.user.roleName === 'doctor') {
+      if (Number(appointmentData.doctor_id) !== Number(req.user.doctorId)) {
+        return ApiResponse.error(res, 'No tiene permisos para programar citas para otros doctores.', 403);
+      }
+    }
+
     const appointment = await appointmentService.create(appointmentData, userId);
     return ApiResponse.created(res, appointment, 'Cita programada exitosamente');
   } catch (error) {
@@ -67,6 +74,17 @@ export const update = async (req, res, next) => {
   try {
     const { id } = req.params;
     const appointmentData = req.body;
+
+    if (req.user.roleName === 'doctor') {
+      const existing = await appointmentService.getById(id);
+      if (!existing || Number(existing.doctor_id) !== Number(req.user.doctorId)) {
+        return ApiResponse.error(res, 'No tiene permisos para modificar esta cita.', 403);
+      }
+      if (appointmentData.doctor_id !== undefined && Number(appointmentData.doctor_id) !== Number(req.user.doctorId)) {
+        return ApiResponse.error(res, 'No tiene permisos para asignar esta cita a otro doctor.', 403);
+      }
+    }
+
     const appointment = await appointmentService.update(id, appointmentData);
     return ApiResponse.success(res, appointment, 'Cita actualizada exitosamente');
   } catch (error) {
@@ -94,6 +112,14 @@ export const updateStatus = async (req, res, next) => {
 export const remove = async (req, res, next) => {
   try {
     const { id } = req.params;
+
+    if (req.user.roleName === 'doctor') {
+      const existing = await appointmentService.getById(id);
+      if (!existing || Number(existing.doctor_id) !== Number(req.user.doctorId)) {
+        return ApiResponse.error(res, 'No tiene permisos para cancelar esta cita.', 403);
+      }
+    }
+
     const appointment = await appointmentService.delete(id);
     return ApiResponse.success(res, appointment, 'Cita cancelada exitosamente');
   } catch (error) {

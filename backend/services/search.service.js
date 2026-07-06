@@ -35,7 +35,8 @@ class SearchService {
          CONCAT(first_name, ' ', last_name) AS full_name,
          dni,
          phone,
-         email
+         email,
+         custom_id
        FROM patients
        WHERE deleted_at IS NULL
          AND (
@@ -43,6 +44,7 @@ class SearchService {
            OR dni ILIKE $1
            OR phone ILIKE $1
            OR email ILIKE $1
+           OR custom_id ILIKE $1
          )
        ORDER BY last_name, first_name
        LIMIT 10`,
@@ -52,7 +54,7 @@ class SearchService {
       id: row.id,
       type: 'patient',
       label: row.full_name,
-      subtitle: row.dni ? `DNI: ${row.dni}` : row.phone || row.email || '',
+      subtitle: row.custom_id ? `ID: ${row.custom_id}` : (row.dni ? `DNI: ${row.dni}` : row.phone || row.email || ''),
       url: `/patients/${row.id}`,
     }));
 

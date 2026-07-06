@@ -4,6 +4,7 @@
 import settingsService from '../../services/settings.service.js';
 import userService from '../../services/user.service.js';
 import authService from '../../services/auth.service.js';
+import doctorService from '../../services/doctor.service.js';
 import toast from '../../components/toast/toast.js';
 import state from '../../scripts/state.js';
 import Modal from '../../components/modal/modal.js';
@@ -15,6 +16,7 @@ export class Settings {
     this.clinicInfo = null;
     this.auditLogs = [];
     this.usersList = [];
+    this.doctorSchedule = [];
     this.activeTab = 'clinic';
     this.isManager = false;
   }
@@ -23,20 +25,26 @@ export class Settings {
     const userRole = state.get('user')?.role_name;
     this.isManager = userRole === 'propietario' || userRole === 'direccion';
 
-    if (!this.isManager && this.activeTab !== 'account') {
-      this.activeTab = 'account';
+    if (!this.isManager && this.activeTab !== 'account' && this.activeTab !== 'schedule') {
+      this.activeTab = userRole === 'doctor' ? 'schedule' : 'account';
     }
 
     try {
       this.clinicInfo = await settingsService.getClinicInfo();
-      const logsResponse = await settingsService.getAuditLogs({ limit: 15 });
-      this.auditLogs = logsResponse.logs || [];
       
       if (this.isManager) {
+        const logsResponse = await settingsService.getAuditLogs({ limit: 15 });
+        this.auditLogs = logsResponse.logs || [];
         const usersResponse = await userService.getAll({ limit: 100 });
         this.usersList = usersResponse || [];
       } else {
+        this.auditLogs = [];
         this.usersList = [];
+      }
+
+      if (userRole === 'doctor') {
+        const user = state.get('user');
+        this.doctorSchedule = await doctorService.getSchedule(user.doctor_id) || [];
       }
 
       this.renderView();
@@ -46,6 +54,8 @@ export class Settings {
   }
 
   renderView() {
+    const userRole = state.get('user')?.role_name;
+
     // 1. Render tab headers
     const tabsHtml = `
       <div class="settings-tabs" style="display: flex; gap: var(--space-2); margin-bottom: var(--space-6); border-bottom: 2px solid var(--color-border-light); padding-bottom: 8px; flex-wrap: wrap;">
@@ -53,6 +63,9 @@ export class Settings {
           <button class="btn btn-sm ${this.activeTab === 'clinic' ? 'btn-primary' : 'btn-ghost'} tab-btn" data-tab="clinic">Datos de la Clínica</button>
           <button class="btn btn-sm ${this.activeTab === 'users' ? 'btn-primary' : 'btn-ghost'} tab-btn" data-tab="users">Gestión de Usuarios</button>
           <button class="btn btn-sm ${this.activeTab === 'logs' ? 'btn-primary' : 'btn-ghost'} tab-btn" data-tab="logs">Registro de Auditoría</button>
+        ` : ''}
+        ${userRole === 'doctor' ? `
+          <button class="btn btn-sm ${this.activeTab === 'schedule' ? 'btn-primary' : 'btn-ghost'} tab-btn" data-tab="schedule">Mi Horario y Descansos</button>
         ` : ''}
         <button class="btn btn-sm ${this.activeTab === 'account' ? 'btn-primary' : 'btn-ghost'} tab-btn" data-tab="account">Mi Cuenta y Preferencias</button>
       </div>
@@ -69,6 +82,8 @@ export class Settings {
       contentHtml = this.renderLogsTab();
     } else if (this.activeTab === 'account') {
       contentHtml = this.renderAccountTab();
+    } else if (this.activeTab === 'schedule') {
+      contentHtml = this.renderScheduleTab();
     }
 
     this.container.innerHTML = `
@@ -265,6 +280,75 @@ export class Settings {
     `;
   }
 
+  renderScheduleTab() {
+    const schedule = this.doctorSchedule || [];
+    const days = [
+      { value: 1, label: 'Lunes' },
+      { value: 2, label: 'Martes' },
+      { value: 3, label: 'Miércoles' },
+      { value: 4, label: 'Jueves' },
+      { value: 5, label: 'Viernes' },
+      { value: 6, label: 'Sábado' },
+      { value: 0, label: 'Domingo' },
+    ];
+
+    const getVal = (dow, field) => {
+      const s = schedule.find(s => s.day_of_week === dow);
+      return s ? s[field] : '';
+    };
+    const isActive = (dow) => {
+      const s = schedule.find(s => s.day_of_week === dow);
+      return s ? s.is_active : false;
+    };
+
+    const rows = days.map(d => {
+      const bs = getVal(d.value, 'break_start');
+      const be = getVal(d.value, 'break_end');
+      return `
+        <tr>
+          <td style="padding: var(--space-3) var(--space-4); font-weight: 600; font-size: var(--text-sm); color: var(--color-text);">${d.label}</td>
+          <td style="padding: var(--space-2);"><input type="time" name="start_${d.value}" class="form-input" value="${getVal(d.value, 'start_time')?.substring(0, 5) || ''}" style="width: 120px;" /></td>
+          <td style="padding: var(--space-2);"><input type="time" name="end_${d.value}" class="form-input" value="${getVal(d.value, 'end_time')?.substring(0, 5) || ''}" style="width: 120px;" /></td>
+          <td style="padding: var(--space-2); display: flex; gap: var(--space-2); align-items: center; border-bottom: none;">
+            <input type="time" name="break_start_${d.value}" class="form-input" value="${bs ? bs.substring(0, 5) : ''}" style="width: 120px;" placeholder="Inicio" />
+            <span style="color: var(--text-tertiary); font-size: var(--text-xs);">—</span>
+            <input type="time" name="break_end_${d.value}" class="form-input" value="${be ? be.substring(0, 5) : ''}" style="width: 120px;" placeholder="Fin" />
+          </td>
+          <td style="padding: var(--space-2); text-align: center;">
+            <input type="checkbox" name="active_${d.value}" ${isActive(d.value) ? 'checked' : ''} style="width: 20px; height: 20px; cursor: pointer; accent-color: var(--primary-600);" />
+          </td>
+        </tr>`;
+    }).join('');
+
+    return `
+      <div class="card" style="padding: var(--space-6); max-width: 800px;">
+        <div class="card-header" style="margin-bottom: var(--space-4); border-bottom: 2px solid var(--gray-100); padding-bottom: 8px;">
+          <h3>Mi Horario y Descansos</h3>
+          <p style="color: var(--text-secondary); font-size: var(--text-sm); margin-top: 2px;">Gestione su horario laboral semanal y horas de almuerzo/descanso.</p>
+        </div>
+        <form id="doctor-schedule-form">
+          <div class="table-container" style="overflow-x: auto; margin-bottom: var(--space-4);">
+            <table style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr style="background: var(--color-bg-secondary);">
+                  <th style="padding: var(--space-3) var(--space-4); text-align: left; font-size: var(--text-xs); color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Día</th>
+                  <th style="padding: var(--space-3) var(--space-2); text-align: left; font-size: var(--text-xs); color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Entrada</th>
+                  <th style="padding: var(--space-3) var(--space-2); text-align: left; font-size: var(--text-xs); color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Salida</th>
+                  <th style="padding: var(--space-3) var(--space-2); text-align: left; font-size: var(--text-xs); color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Descanso</th>
+                  <th style="padding: var(--space-3) var(--space-2); text-align: center; font-size: var(--text-xs); color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Activo</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows}
+              </tbody>
+            </table>
+          </div>
+          <button type="submit" class="btn btn-primary" style="width: 100%;">Guardar Mi Horario</button>
+        </form>
+      </div>
+    `;
+  }
+
   renderUsersTab() {
     const userRole = state.get('user')?.role_name;
 
@@ -357,6 +441,55 @@ export class Settings {
           await this.render();
         } catch (err) {
           toast.error(err.message || 'Error al actualizar información');
+        }
+      });
+    }
+
+    // Doctor Schedule Form submit handler
+    const scheduleForm = this.container.querySelector('#doctor-schedule-form');
+    if (scheduleForm) {
+      scheduleForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const user = state.get('user');
+        const doctorId = user.doctor_id;
+        
+        const days = [1, 2, 3, 4, 5, 6, 0];
+        const scheduleArray = [];
+        
+        for (const val of days) {
+          const start = scheduleForm.querySelector(`[name="start_${val}"]`)?.value;
+          const end = scheduleForm.querySelector(`[name="end_${val}"]`)?.value;
+          const active = scheduleForm.querySelector(`[name="active_${val}"]`)?.checked;
+          const breakStart = scheduleForm.querySelector(`[name="break_start_${val}"]`)?.value || null;
+          const breakEnd = scheduleForm.querySelector(`[name="break_end_${val}"]`)?.value || null;
+          
+          if (active && start && end) {
+            scheduleArray.push({
+              day_of_week: val,
+              start_time: start,
+              end_time: end,
+              break_start: breakStart,
+              break_end: breakEnd,
+              is_active: true,
+            });
+          } else {
+            scheduleArray.push({
+              day_of_week: val,
+              start_time: start || '00:00',
+              end_time: end || '00:00',
+              break_start: null,
+              break_end: null,
+              is_active: false,
+            });
+          }
+        }
+        
+        try {
+          await doctorService.updateSchedule(doctorId, scheduleArray);
+          toast.success('Su horario ha sido guardado exitosamente');
+          await this.render();
+        } catch (err) {
+          toast.error(err.message || 'Error al guardar horario');
         }
       });
     }

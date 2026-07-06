@@ -4,7 +4,8 @@
 import patientService from '../../services/patient.service.js';
 import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
-import { formatDate } from '../../utils/helpers.js';
+import state from '../../scripts/state.js';
+import { formatDate, formatCurrency } from '../../utils/helpers.js';
 
 export class Patients {
   constructor(container) {
@@ -16,6 +17,7 @@ export class Patients {
     this.searchQuery = '';
     this.statusFilter = 'all';
     this.searchTimeout = null;
+    this.isDoctor = state.get('user')?.role_name === 'doctor';
   }
 
   async render() {
@@ -31,7 +33,7 @@ export class Patients {
         limit: this.limit,
       };
 
-      if (this.searchQuery) {
+      if (this.searchQuery && this.searchQuery.trim().length >= 2) {
         result = await patientService.search(this.searchQuery, params, { returnFullResponse: true });
       } else {
         if (this.statusFilter === 'active') params.isActive = 'true';
@@ -81,18 +83,19 @@ export class Patients {
           <table>
             <thead>
               <tr>
+                <th>ID</th>
                 <th>Nombre Completo</th>
                 <th>DNI / Pasaporte</th>
                 <th>Teléfono</th>
                 <th>Correo Electrónico</th>
-                <th>Fecha Nacimiento</th>
+                ${this.isDoctor ? '' : '<th>Saldo</th>'}
                 <th>Estado</th>
                 <th>Acciones</th>
               </tr>
             </thead>
             <tbody id="patients-table-body">
               <tr>
-                <td colspan="7" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
+                <td colspan="${this.isDoctor ? 8 : 9}" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
                   Cargando pacientes...
                 </td>
               </tr>
@@ -121,25 +124,31 @@ export class Patients {
 
     if (!tbody) return;
 
-    let rows = this.patientsList.map(pat => `
+    let rows = this.patientsList.map(pat => {
+      const balance = parseFloat(pat.balance || 0);
+      const balanceColor = balance > 0 ? 'var(--danger-600)' : 'var(--success-600)';
+      const balanceLabel = balance > 0 ? formatCurrency(balance) : 'Al corriente';
+      return `
       <tr>
+        <td><code class="text-primary" style="font-weight: 600;">${pat.custom_id || 'N/A'}</code></td>
         <td><strong>${pat.first_name} ${pat.last_name}</strong></td>
         <td>${pat.dni || pat.passport || 'No registrado'}</td>
         <td>${pat.phone || pat.mobile || 'No registrado'}</td>
         <td>${pat.email || 'No registrado'}</td>
-        <td>${pat.birth_date ? formatDate(pat.birth_date) : 'N/A'}</td>
+        ${this.isDoctor ? '' : `<td><span style="color: ${balanceColor}; font-weight: 600;">${balanceLabel}</span></td>`}
         <td><span class="badge ${pat.is_active ? 'badge-success' : 'badge-danger'}">${pat.is_active ? 'Activo' : 'Inactivo'}</span></td>
         <td>
           <a href="#/patients/${pat.id}" class="btn btn-sm btn-outline">Perfil</a>
           <button class="btn btn-sm btn-secondary edit-patient-btn" data-id="${pat.id}">Editar</button>
         </td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
 
     if (this.patientsList.length === 0) {
       rows = `
         <tr>
-          <td colspan="7" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
+          <td colspan="${this.isDoctor ? 8 : 9}" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
             No se encontraron pacientes registrados.
           </td>
         </tr>

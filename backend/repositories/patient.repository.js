@@ -14,6 +14,67 @@ class PatientRepository extends BaseRepository {
   }
 
   /**
+   * Sobrescribe findAll para incluir datos financieros agregados de facturas.
+   * @param {object} options - { limit, offset, sortBy, sortOrder, filters }
+   * @returns {Promise<{ rows: Array, total: number }>}
+   */
+  async findAll({ limit = 20, offset = 0, sortBy = 'created_at', sortOrder = 'DESC', filters = {} } = {}) {
+    // Construir condiciones WHERE dinámicas con prefijo de alias
+    const conditions = ['p.deleted_at IS NULL'];
+    const params = [];
+    let paramIndex = 1;
+
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== null && value !== '') {
+        if (typeof value === 'string' && value.includes('%')) {
+          conditions.push(`p.${key} ILIKE $${paramIndex}`);
+        } else {
+          conditions.push(`p.${key} = $${paramIndex}`);
+        }
+        params.push(value);
+        paramIndex++;
+      }
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // Validar sortBy contra inyección SQL (solo letras, guiones bajos, puntos)
+    const safeSortBy = /^[a-zA-Z_.]+$/.test(sortBy) ? sortBy : 'created_at';
+    const safeSortOrder = sortOrder === 'ASC' ? 'ASC' : 'DESC';
+
+    // Query para total
+    const countResult = await query(
+      `SELECT COUNT(*) AS total FROM patients p ${whereClause}`,
+      params
+    );
+    const total = parseInt(countResult.rows[0].total, 10);
+
+    // Query para datos con agregación de facturas
+    const dataResult = await query(
+      `SELECT p.*,
+              COALESCE(inv.total_debit, 0) AS total_debit,
+              COALESCE(inv.total_credit, 0) AS total_credit,
+              COALESCE(inv.balance, 0) AS balance
+       FROM patients p
+       LEFT JOIN (
+         SELECT patient_id,
+                COALESCE(SUM(total), 0) AS total_debit,
+                COALESCE(SUM(amount_paid), 0) AS total_credit,
+                COALESCE(SUM(total), 0) - COALESCE(SUM(amount_paid), 0) AS balance
+         FROM invoices
+         WHERE status != 'cancelada' AND deleted_at IS NULL
+         GROUP BY patient_id
+       ) inv ON inv.patient_id = p.id
+       ${whereClause}
+       ORDER BY ${safeSortBy} ${safeSortOrder}
+       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+      [...params, limit, offset]
+    );
+
+    return { rows: dataResult.rows, total };
+  }
+
+  /**
    * Busca pacientes por término de búsqueda (nombre, DNI, teléfono, email).
    * @param {string} term - Término de búsqueda
    * @param {object} options - { limit, offset }
@@ -33,26 +94,40 @@ class PatientRepository extends BaseRepository {
            OR phone ILIKE $1
            OR mobile ILIKE $1
            OR email ILIKE $1
+           OR custom_id ILIKE $1
          )`,
       [searchPattern]
     );
     const total = parseInt(countResult.rows[0].total, 10);
 
     const dataResult = await query(
-      `SELECT id, first_name, last_name, dni, phone, mobile, email,
-              birth_date, gender, is_active, photo_url, created_at
-       FROM patients
-       WHERE deleted_at IS NULL
+      `SELECT p.id, p.first_name, p.last_name, p.dni, p.phone, p.mobile, p.email,
+              p.birth_date, p.gender, p.is_active, p.photo_url, p.created_at, p.custom_id,
+              COALESCE(inv.total_debit, 0) AS total_debit,
+              COALESCE(inv.total_credit, 0) AS total_credit,
+              COALESCE(inv.balance, 0) AS balance
+       FROM patients p
+       LEFT JOIN (
+         SELECT patient_id,
+                COALESCE(SUM(total), 0) AS total_debit,
+                COALESCE(SUM(amount_paid), 0) AS total_credit,
+                COALESCE(SUM(total), 0) - COALESCE(SUM(amount_paid), 0) AS balance
+         FROM invoices
+         WHERE status != 'cancelada' AND deleted_at IS NULL
+         GROUP BY patient_id
+       ) inv ON inv.patient_id = p.id
+       WHERE p.deleted_at IS NULL
          AND (
-           first_name ILIKE $1
-           OR last_name ILIKE $1
-           OR CONCAT(first_name, ' ', last_name) ILIKE $1
-           OR dni ILIKE $1
-           OR phone ILIKE $1
-           OR mobile ILIKE $1
-           OR email ILIKE $1
+           p.first_name ILIKE $1
+           OR p.last_name ILIKE $1
+           OR CONCAT(p.first_name, ' ', p.last_name) ILIKE $1
+           OR p.dni ILIKE $1
+           OR p.phone ILIKE $1
+           OR p.mobile ILIKE $1
+           OR p.email ILIKE $1
+           OR p.custom_id ILIKE $1
          )
-       ORDER BY last_name ASC, first_name ASC
+       ORDER BY p.last_name ASC, p.first_name ASC
        LIMIT $2 OFFSET $3`,
       [searchPattern, limit, offset]
     );
@@ -72,6 +147,9 @@ class PatientRepository extends BaseRepository {
               COALESCE(dh.dental_count, 0)::integer AS dental_history_count,
               COALESCE(ap.appointment_count, 0)::integer AS appointment_count,
               COALESCE(pi.image_count, 0)::integer AS image_count,
+              COALESCE(inv.total_debit, 0) AS total_debit,
+              COALESCE(inv.total_credit, 0) AS total_credit,
+              COALESCE(inv.balance, 0) AS balance,
               u.first_name AS created_by_name, u.last_name AS created_by_lastname
        FROM patients p
        LEFT JOIN (
@@ -98,6 +176,15 @@ class PatientRepository extends BaseRepository {
          WHERE deleted_at IS NULL
          GROUP BY patient_id
        ) pi ON pi.patient_id = p.id
+       LEFT JOIN (
+         SELECT patient_id,
+                COALESCE(SUM(total), 0) AS total_debit,
+                COALESCE(SUM(amount_paid), 0) AS total_credit,
+                COALESCE(SUM(total), 0) - COALESCE(SUM(amount_paid), 0) AS balance
+         FROM invoices
+         WHERE status != 'cancelada' AND deleted_at IS NULL
+         GROUP BY patient_id
+       ) inv ON inv.patient_id = p.id
        LEFT JOIN users u ON u.id = p.created_by
        WHERE p.id = $1 AND p.deleted_at IS NULL`,
       [id]

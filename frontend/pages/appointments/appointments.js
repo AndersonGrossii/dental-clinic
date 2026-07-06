@@ -98,7 +98,7 @@ export class Appointments {
       if (this.isDoctor) this.filters.doctor_id = user.doctor_id;
 
       const range = this.getVisibleRange();
-      const params = { date_from: range.start, date_to: range.end };
+      const params = { date_from: range.start, date_to: range.end, limit: 1000 };
       if (this.filters.doctor_id) params.doctor_id = this.filters.doctor_id;
       if (this.filters.search) params.search = this.filters.search;
 
@@ -114,13 +114,11 @@ export class Appointments {
       this.allDoctorUnavail = {};
       this.allDoctorSchedules = {};
 
-      if (!this.isDoctor) {
-        const docsResponse = await doctorService.getAll();
-        this.doctorsList = docsResponse || [];
-        this.doctorColors = Object.fromEntries(
-          this.doctorsList.map(d => [d.id, d.color || '#0891b2'])
-        );
-      }
+      const docsResponse = await doctorService.getAll();
+      this.doctorsList = docsResponse || [];
+      this.doctorColors = Object.fromEntries(
+        this.doctorsList.map(d => [d.id, d.color || '#0891b2'])
+      );
 
       // Fetch unavailability for the visible doctor(s)
       if (this.filters.doctor_id) {
@@ -573,6 +571,7 @@ export class Appointments {
     const monthName = monthNames[this.currentDate.getMonth()];
     const dayNum = this.currentDate.getDate();
     const isWeekendDay = this.currentDate.getDay() === 0 || this.currentDate.getDay() === 6;
+    const dow = this.currentDate.getDay();
 
     const slotDuration = 30;
     const slots = [];
@@ -835,9 +834,9 @@ export class Appointments {
       return;
     }
 
-    const docOptions = this.doctorsList.map(d => `
+    const docOptions = !this.isDoctor ? (this.doctorsList || []).map(d => `
       <option value="${d.id}" ${doctorId == d.id ? 'selected' : ''}>Dr/a. ${d.first_name} ${d.last_name} (${d.specialty})</option>
-    `).join('');
+    `).join('') : '';
 
     const defaultEnd = endTime || (startTime ? this._addMinutes(startTime, 30) : '');
 
@@ -881,13 +880,17 @@ export class Appointments {
             <button type="button" id="create-patient-for-appointment-btn" class="btn btn-secondary" style="margin-top: var(--space-3);">Crear y Seleccionar Paciente</button>
           </div>
         </div>
-        <div class="form-group" style="margin-top: var(--space-3);">
-          <label class="form-label">Doctor</label>
-          <select name="doctor_id" class="form-select" required>
-            <option value="">Seleccione doctor</option>
-            ${docOptions}
-          </select>
-        </div>
+        ${this.isDoctor ? `
+          <input type="hidden" name="doctor_id" value="${state.get('user')?.doctor_id}" />
+        ` : `
+          <div class="form-group" style="margin-top: var(--space-3);">
+            <label class="form-label">Doctor</label>
+            <select name="doctor_id" class="form-select" required>
+              <option value="">Seleccione doctor</option>
+              ${docOptions}
+            </select>
+          </div>
+        `}
         <div class="form-group" style="margin-top: var(--space-3);">
           <label class="form-label">Fecha de la Cita</label>
           <input type="date" name="appointment_date" class="form-input" value="${targetDate}" required />
@@ -948,7 +951,8 @@ export class Appointments {
       const pSelLabel = overlay.querySelector('#appointment-selected-patient');
       if (pIdInput && pSelLabel) {
         pIdInput.value = options.patientId;
-        pSelLabel.innerHTML = `<strong>Paciente seleccionado:</strong> ${options.patientName}`;
+        const customIdText = options.patientCustomId ? `[${options.patientCustomId}] ` : '';
+        pSelLabel.innerHTML = `<strong>Paciente seleccionado:</strong> ${customIdText}${options.patientName}`;
       }
     }
     if (options.reason) {
@@ -969,7 +973,7 @@ export class Appointments {
 
     const selectPatient = (patient) => {
       patientIdInput.value = patient.id;
-      selectedPatient.innerHTML = `<strong>Paciente seleccionado:</strong> ${patient.first_name} ${patient.last_name}`;
+      selectedPatient.innerHTML = `<strong>Paciente seleccionado:</strong> [${patient.custom_id || 'N/A'}] ${patient.first_name} ${patient.last_name}`;
       resultsContainer.innerHTML = '';
     };
 
@@ -980,7 +984,7 @@ export class Appointments {
       }
       resultsContainer.innerHTML = patients.map(p => `
         <button type="button" class="btn btn-outline appointment-patient-result" data-id="${p.id}" style="display: block; width: 100%; text-align: left; margin-bottom: var(--space-2);">
-          ${p.first_name} ${p.last_name}${p.phone ? ` - ${p.phone}` : ''}${p.email ? ` - ${p.email}` : ''}
+          [${p.custom_id || 'N/A'}] ${p.first_name} ${p.last_name}${p.phone ? ` - ${p.phone}` : ''}${p.email ? ` - ${p.email}` : ''}
         </button>
       `).join('');
       resultsContainer.querySelectorAll('.appointment-patient-result').forEach(button => {
@@ -1126,9 +1130,9 @@ export class Appointments {
       </label>
     `).join('');
 
-    const docOptions = this.doctorsList.map(d => `
+    const docOptions = !this.isDoctor ? (this.doctorsList || []).map(d => `
       <option value="${d.id}" ${appt.doctor_id == d.id ? 'selected' : ''}>Dr/a. ${d.first_name} ${d.last_name} (${d.specialty})</option>
-    `).join('');
+    `).join('') : '';
 
     const content = `
       <style>
@@ -1159,12 +1163,16 @@ export class Appointments {
           <div style="border-right: 1px solid var(--color-border-light); padding-right: var(--space-4);">
             <div class="manage-section-title">Reprogramar / Editar Cita</div>
             
-            <div class="form-group">
-              <label class="form-label" style="font-size: var(--text-xs);">Doctor</label>
-              <select name="doctor_id" class="form-select" required>
-                ${docOptions}
-              </select>
-            </div>
+            ${this.isDoctor ? `
+              <input type="hidden" name="doctor_id" value="${state.get('user')?.doctor_id}" />
+            ` : `
+              <div class="form-group">
+                <label class="form-label" style="font-size: var(--text-xs);">Doctor</label>
+                <select name="doctor_id" class="form-select" required>
+                  ${docOptions}
+                </select>
+              </div>
+            `}
             
             <div class="form-group" style="margin-top: var(--space-3);">
               <label class="form-label" style="font-size: var(--text-xs);">Fecha de la Cita</label>

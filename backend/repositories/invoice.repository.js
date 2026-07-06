@@ -37,13 +37,13 @@ class InvoiceRepository extends BaseRepository {
     }
 
     if (filters.start_date) {
-      conditions.push(`i.invoice_date >= $${paramIndex}`);
+      conditions.push(`i.created_at >= $${paramIndex}`);
       params.push(filters.start_date);
       paramIndex++;
     }
 
     if (filters.end_date) {
-      conditions.push(`i.invoice_date <= $${paramIndex}`);
+      conditions.push(`i.created_at <= $${paramIndex}`);
       params.push(filters.end_date);
       paramIndex++;
     }
@@ -71,9 +71,11 @@ class InvoiceRepository extends BaseRepository {
 
     const dataResult = await query(
       `SELECT i.*,
+              CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
               p.first_name AS patient_first_name,
               p.last_name AS patient_last_name,
               p.dni AS patient_dni,
+              CONCAT(u.first_name, ' ', u.last_name) AS doctor_name,
               u.first_name AS doctor_first_name,
               u.last_name AS doctor_last_name
        FROM invoices i
@@ -96,11 +98,13 @@ class InvoiceRepository extends BaseRepository {
   async findByIdWithItems(id) {
     const invoiceResult = await query(
       `SELECT i.*,
+              CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
               p.first_name AS patient_first_name,
               p.last_name AS patient_last_name,
               p.dni AS patient_dni,
               p.email AS patient_email,
               p.phone AS patient_phone,
+              CONCAT(u.first_name, ' ', u.last_name) AS doctor_name,
               u.first_name AS doctor_first_name,
               u.last_name AS doctor_last_name
        FROM invoices i
@@ -174,8 +178,8 @@ class InvoiceRepository extends BaseRepository {
 
       for (const item of items) {
         const itemResult = await client.query(
-          `INSERT INTO invoice_items (invoice_id, treatment_id, description, quantity, unit_price, subtotal)
-           VALUES ($1, $2, $3, $4, $5, $6)
+          `INSERT INTO invoice_items (invoice_id, treatment_id, description, quantity, unit_price, total, tooth_number)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
            RETURNING *`,
           [
             invoice.id,
@@ -184,6 +188,7 @@ class InvoiceRepository extends BaseRepository {
             item.quantity,
             item.unit_price,
             item.subtotal,
+            item.tooth_number || null,
           ]
         );
         insertedItems.push(itemResult.rows[0]);

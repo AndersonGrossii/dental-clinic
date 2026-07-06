@@ -58,6 +58,34 @@ class PatientService {
   }
 
   /**
+   * Genera el siguiente ID personalizado de paciente ("año-número").
+   * @returns {Promise<string>}
+   */
+  async generateNextCustomId() {
+    const currentYear = new Date().getFullYear();
+    const prefix = `${currentYear}-`;
+
+    const result = await patientRepository.rawQuery(
+      `SELECT custom_id FROM patients 
+       WHERE custom_id LIKE $1 AND deleted_at IS NULL
+       ORDER BY custom_id DESC LIMIT 1`,
+      [`${prefix}%`]
+    );
+
+    if (result.rows.length === 0) {
+      return `${currentYear}-0001`;
+    }
+
+    const lastCustomId = result.rows[0].custom_id;
+    const parts = lastCustomId.split('-');
+    const lastNum = parseInt(parts[1], 10);
+    const nextNum = lastNum + 1;
+    const paddedNum = String(nextNum).padStart(4, '0');
+
+    return `${currentYear}-${paddedNum}`;
+  }
+
+  /**
    * Crea un nuevo paciente.
    * @param {object} data - Datos del paciente
    * @param {number} createdBy - ID del usuario que crea el registro
@@ -80,7 +108,10 @@ class PatientService {
       }
     }
 
+    const nextCustomId = await this.generateNextCustomId();
+
     const patientData = {
+      custom_id: nextCustomId,
       first_name: data.first_name,
       last_name: data.last_name,
       dni: data.dni || null,
