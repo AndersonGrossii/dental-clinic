@@ -274,11 +274,13 @@ export class Dashboard {
         const dateStr = this.toDateStr(date);
         const isWeekend = i >= 5;
 
+        const sm = parseInt(slot.split(':')[0]) * 60 + parseInt(slot.split(':')[1]) + 30;
+        const ns = `${String(Math.floor(sm / 60)).padStart(2, '0')}:${String(sm % 60).padStart(2, '0')}`;
         const matches = this.appointmentsList.filter(a => {
           if (String(a.appointment_date).substring(0, 10) !== dateStr) return false;
           const s = a.start_time ? a.start_time.substring(0, 5) : '';
           const e = a.end_time ? a.end_time.substring(0, 5) : '';
-          return s <= slot && e > slot;
+          return s < ns && e > slot;
         });
 
         if (matches.length === 0) {
