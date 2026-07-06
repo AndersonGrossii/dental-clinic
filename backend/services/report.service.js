@@ -132,11 +132,18 @@ class ReportService {
    */
   async getTreatmentReport(startDate, endDate) {
     const popularResult = await query(
-      `SELECT t.name AS treatment, COUNT(pt.id) AS count, COALESCE(SUM(pt.price), 0) AS total
-       FROM patient_treatments pt
-       INNER JOIN treatments t ON pt.treatment_id = t.id
-       WHERE pt.created_at >= $1 AND pt.created_at <= $2 AND pt.deleted_at IS NULL AND pt.status = 'completado'
-       GROUP BY t.name
+      `SELECT COALESCE(t.name, ii.description) AS treatment, COUNT(ii.id) AS count, COALESCE(SUM(ii.total), 0) AS total
+       FROM invoice_items ii
+       INNER JOIN invoices i ON ii.invoice_id = i.id AND i.deleted_at IS NULL AND i.status IN ('pagada', 'parcial')
+       LEFT JOIN treatments t ON ii.treatment_id = t.id
+       WHERE EXISTS (
+           SELECT 1 FROM payments p
+           WHERE p.invoice_id = i.id
+             AND p.payment_date >= $1
+             AND p.payment_date <= $2
+             AND p.deleted_at IS NULL
+       )
+       GROUP BY COALESCE(t.name, ii.description)
        ORDER BY count DESC, total DESC
        LIMIT 10`,
       [startDate, endDate]
@@ -180,8 +187,8 @@ class ReportService {
     todayApptsQuery += ` ORDER BY a.start_time ASC`;
     const todayApptsResult = await query(todayApptsQuery, todayApptsParams);
 
-    // 1. Estadísticas para Propietario (Ingresos, Facturas, Pacientes, Citas)
-    if (role === 'propietario') {
+    // 1. Estadísticas para Propietario / Dirección (Ingresos, Facturas, Pacientes, Citas)
+    if (role === 'propietario' || role === 'direccion') {
       const revenue = await query(
         `SELECT COALESCE(SUM(amount), 0) AS total FROM payments
          WHERE DATE(payment_date) = $1 AND deleted_at IS NULL`,

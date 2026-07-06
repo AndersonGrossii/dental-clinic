@@ -112,14 +112,14 @@ export class Reports {
         const data = await reportService.getRevenue(from, to);
         this.reportData = data;
         
-        let methodRows = data.byMethod.map(m => `
+        let methodRows = (data.byMethod || []).map(m => `
           <tr>
             <td><strong>${m.method}</strong></td>
             <td><strong>${formatCurrency(m.total)}</strong></td>
           </tr>
         `).join('');
 
-        let docRows = data.byDoctor.map(d => `
+        let docRows = (data.byDoctor || []).map(d => `
           <tr>
             <td><strong>${d.doctor}</strong></td>
             <td><strong>${formatCurrency(d.total)}</strong></td>
@@ -161,20 +161,20 @@ export class Reports {
           </div>
         `;
 
-        this.initRevenueCharts(data);
+        try { this.initRevenueCharts(data); } catch (e) { console.warn('Error en revenue charts:', e); }
 
       } else if (type === 'citas') {
         const data = await reportService.getAppointments(from, to);
         this.reportData = data;
 
-        let statusRows = data.byStatus.map(s => `
+        let statusRows = (data.byStatus || []).map(s => `
           <tr>
             <td><strong><span style="color: ${s.color};">●</span> ${s.status}</strong></td>
             <td><strong>${s.count} citas</strong></td>
           </tr>
         `).join('');
 
-        let docRows = data.byDoctor.map(d => `
+        let docRows = (data.byDoctor || []).map(d => `
           <tr>
             <td><strong>${d.doctor}</strong></td>
             <td><strong>${d.count} citas</strong></td>
@@ -216,13 +216,14 @@ export class Reports {
           </div>
         `;
 
-        this.initAppointmentCharts(data);
+        try { this.initAppointmentCharts(data); } catch (e) { console.warn('Error en appointment charts:', e); }
 
       } else if (type === 'tratamientos') {
         const data = await reportService.getTreatments(from, to);
         this.reportData = data;
 
-        let rows = data.popular.map((t, idx) => `
+        let popular = data.popular || [];
+        let rows = popular.map((t, idx) => `
           <tr>
             <td><strong># ${idx + 1}</strong></td>
             <td><strong>${t.treatment}</strong></td>
@@ -231,12 +232,12 @@ export class Reports {
           </tr>
         `).join('');
 
-        if (data.popular.length === 0) {
+        if (popular.length === 0) {
           rows = `<tr><td colspan="4" style="text-align: center; color: var(--text-secondary);">No hay tratamientos registrados en el rango.</td></tr>`;
         }
 
         resultsContainer.innerHTML = `
-          <div style="display: grid; grid-template-columns: 1fr; gap: var(--space-6);">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-6);">
             <div class="card" style="grid-column: span 2;">
               <div class="card-header"><h3>Popularidad de Tratamientos</h3></div>
               <div style="padding: var(--space-4); border-bottom: 1px solid var(--color-border);">
@@ -265,7 +266,7 @@ export class Reports {
           </div>
         `;
 
-        this.initTreatmentCharts(data);
+        try { this.initTreatmentCharts(data); } catch (e) { console.warn('Error en treatment charts:', e); }
       }
 
       // Mostrar botón de exportar
