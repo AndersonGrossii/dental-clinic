@@ -128,10 +128,6 @@ export class Dashboard {
           <div class="card stat-card">
             <div class="stat-card-title">Mis Citas Hoy</div>
             <div class="stat-card-value">${stats.todayAppointmentsCount}</div>
-          </div>
-          <div class="card stat-card">
-            <div class="stat-card-title">Mis Pacientes Registrados</div>
-            <div class="stat-card-value">${stats.myPatientsCount}</div>
           </div>`;
       }
 
