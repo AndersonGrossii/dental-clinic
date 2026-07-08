@@ -558,29 +558,53 @@ export class PatientProfile {
       .map(t => `<option value="${t.id}" data-price="${t.default_price}">${t.name} (${t.code}) - ${formatCurrency(t.default_price)}</option>`)
       .join('');
 
-    const content = `
+    const calcTotal = (price, taxRate) => {
+      const p = parseFloat(price) || 0;
+      const tr = parseFloat(taxRate) || 0;
+      const tax = parseFloat((p * tr / 100).toFixed(2));
+      return { subtotal: p, tax, total: parseFloat((p + tax).toFixed(2)) };
+    };
+
+    let content = buildContent('');
+    let totals = calcTotal(0, 16);
+
+    function buildContent(selectHtml) {
+      return `
       <form id="add-treatment-history-form">
         <div class="form-group">
           <label class="form-label">Tratamiento</label>
           <select name="treatment_id" id="treatment-select" class="form-select" required>
             <option value="">Seleccione un tratamiento...</option>
-            ${options}
+            ${selectHtml || options}
           </select>
         </div>
         <div class="form-group" style="margin-top: var(--space-3);">
           <label class="form-label">Diente / Pieza (Opcional)</label>
           <input type="number" name="tooth_number" class="form-input" placeholder="Ej: 18" />
         </div>
-        <div class="form-group" style="margin-top: var(--space-3);">
-          <label class="form-label">Precio Cobrado</label>
-          <input type="number" name="price" id="treatment-price" class="form-input" placeholder="Ej: 1200" required />
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); margin-top: var(--space-3);">
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label">Precio ($)</label>
+            <input type="number" name="price" id="treatment-price" class="form-input" placeholder="Ej: 1200" required />
+          </div>
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label">IVA (%)</label>
+            <input type="number" name="tax_rate" id="treatment-tax" class="form-input" value="16" step="0.01" min="0" max="100" required />
+          </div>
+        </div>
+        <div id="treatment-total-display" style="margin-top: var(--space-2); padding: var(--space-2); background: var(--color-bg-secondary); border-radius: var(--radius-md); font-size: var(--text-sm);">
+          <div style="display: flex; justify-content: space-between;"><span>Subtotal:</span><span id="t-subtotal">$0.00</span></div>
+          <div style="display: flex; justify-content: space-between;"><span>IVA:</span><span id="t-tax">$0.00</span></div>
+          <div style="display: flex; justify-content: space-between; font-weight: 700; border-top: 1px solid var(--color-border-light); padding-top: var(--space-1); margin-top: var(--space-1);"><span>Total a facturar:</span><span id="t-total">$0.00</span></div>
         </div>
         <div class="form-group" style="margin-top: var(--space-3);">
           <label class="form-label">Notas Clínicas</label>
           <textarea name="notes" class="form-textarea" rows="3"></textarea>
         </div>
-      </form>
-    `;
+      </form>`;
+    }
+
+    content = buildContent(options);
 
     Modal.show({
       title: 'Registrar Tratamiento Clínico',
@@ -590,10 +614,11 @@ export class PatientProfile {
         const form = modalBody.querySelector('#add-treatment-history-form');
         const formData = new FormData(form);
         const data = Object.fromEntries(formData.entries());
-        data.patient_id = this.patientId;
-        data.status = 'completado'; // completado por defecto al registrar manualmente
+        data.patient_id = Number(this.patientId);
+        data.status = 'completado';
         data.treatment_id = Number(data.treatment_id);
         data.price = Number(data.price);
+        data.tax_rate = Number(data.tax_rate) || 0;
         if (data.tooth_number) data.tooth_number = Number(data.tooth_number);
 
         try {
@@ -609,16 +634,36 @@ export class PatientProfile {
       }
     });
 
-    // Auto-fill price when treatment select changes
-    const select = document.getElementById('treatment-select');
-    const priceInput = document.getElementById('treatment-price');
-    if (select && priceInput) {
-      select.addEventListener('change', () => {
-        const selectedOption = select.options[select.selectedIndex];
-        const price = selectedOption.dataset.price || '';
-        priceInput.value = price;
-      });
-    }
+    const updateTotals = () => {
+      const price = document.getElementById('treatment-price')?.value || 0;
+      const taxRate = document.getElementById('treatment-tax')?.value || 0;
+      totals = calcTotal(price, taxRate);
+      const fmt = (n) => '$' + n.toFixed(2);
+      const subEl = document.getElementById('t-subtotal');
+      const taxEl = document.getElementById('t-tax');
+      const totEl = document.getElementById('t-total');
+      if (subEl) subEl.textContent = fmt(totals.subtotal);
+      if (taxEl) taxEl.textContent = fmt(totals.tax);
+      if (totEl) totEl.textContent = fmt(totals.total);
+    };
+
+    setTimeout(() => {
+      const select = document.getElementById('treatment-select');
+      const priceInput = document.getElementById('treatment-price');
+      const taxInput = document.getElementById('treatment-tax');
+
+      if (select) {
+        select.addEventListener('change', () => {
+          const opt = select.options[select.selectedIndex];
+          const price = opt.dataset.price || '';
+          if (priceInput) priceInput.value = price;
+          updateTotals();
+        });
+      }
+      if (priceInput) priceInput.addEventListener('input', updateTotals);
+      if (taxInput) taxInput.addEventListener('input', updateTotals);
+      updateTotals();
+    }, 100);
   }
 
   async showAddNoteModal() {

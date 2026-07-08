@@ -307,7 +307,7 @@ export class Quotations {
         <div class="form-row-3col" style="margin-top: var(--space-3);">
           <div class="form-group">
             <label class="form-label">Impuesto (%)</label>
-            <input type="number" name="tax_rate" class="form-input" value="${q.tax_rate || 16}" min="0" max="100" />
+            <input type="number" name="tax_rate" class="form-input" value="${q.tax_rate || 21}" min="0" max="100" />
           </div>
           <div class="form-group">
             <label class="form-label">Descuento global (%)</label>

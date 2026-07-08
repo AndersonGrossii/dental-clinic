@@ -6,7 +6,8 @@ import auth from '../../services/auth.service.js';
 
 // SVG icons (Lucide-style) for a crisp, professional look
 const icons = {
-  dashboard: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>`,
+  dashboard: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16" /></svg>`,
+  cabinets: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>`,
   patients: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
   appointments: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/></svg>`,
   doctors: `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20a6 6 0 0 0-12 0"/><circle cx="12" cy="10" r="4"/><circle cx="12" cy="12" r="10"/></svg>`,
@@ -38,7 +39,7 @@ export class Sidebar {
       { path: '#/', label: 'Dashboard', icon: icons.dashboard, roles: ['propietario', 'direccion', 'recepcionista', 'doctor', 'higienista'] },
       { path: '#/patients', label: 'Pacientes', icon: icons.patients, roles: ['propietario', 'direccion', 'recepcionista', 'doctor', 'higienista'] },
       { path: '#/appointments', label: 'Citas', icon: icons.appointments, roles: ['propietario', 'direccion', 'recepcionista', 'doctor', 'higienista'] },
-      { path: '#/cabinets', label: 'Gabinetes', icon: icons.appointments, roles: ['propietario', 'direccion', 'recepcionista', 'doctor', 'higienista'] },
+      { path: '#/cabinets', label: 'Gabinetes', icon: icons.cabinets, roles: ['propietario', 'direccion', 'recepcionista', 'doctor', 'higienista'] },
       { path: '#/doctors', label: 'Doctores', icon: icons.doctors, roles: ['propietario', 'direccion', 'recepcionista'] },
       { path: '#/treatments', label: 'Tratamientos', icon: icons.treatments, roles: ['propietario', 'direccion', 'recepcionista', 'doctor'] },
       { path: '#/quotations', label: 'Presupuestos', icon: icons.quotations, roles: ['propietario', 'direccion', 'recepcionista'] },

@@ -274,6 +274,14 @@ export const createPatientTreatmentRules = [
     pattern: /^\d{4}-\d{2}-\d{2}$/,
     patternMsg: 'La fecha debe tener formato YYYY-MM-DD.',
   },
+  {
+    field: 'tax_rate',
+    label: 'Tasa de impuesto (%)',
+    required: false,
+    type: 'number',
+    min: 0,
+    max: 100,
+  },
 ];
 
 /**
