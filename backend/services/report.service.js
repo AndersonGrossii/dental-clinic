@@ -175,7 +175,7 @@ class ReportService {
       INNER JOIN doctors d ON a.doctor_id = d.id
       INNER JOIN users u ON d.user_id = u.id
       INNER JOIN appointment_status s ON a.status_id = s.id
-      WHERE a.appointment_date = $1 AND a.deleted_at IS NULL`;
+      WHERE a.appointment_date = $1 AND a.deleted_at IS NULL AND u.is_active = TRUE`;
     
     const todayApptsParams = [today];
 
@@ -219,8 +219,8 @@ class ReportService {
       };
     }
 
-    // 2. Estadísticas para Recepcionista
-    if (role === 'recepcionista') {
+    // 2. Estadísticas para Recepcionista o Higienista
+    if (role === 'recepcionista' || role === 'higienista') {
       const activePatients = await query(
         `SELECT COUNT(*) AS count FROM patients WHERE is_active = TRUE AND deleted_at IS NULL`
       );

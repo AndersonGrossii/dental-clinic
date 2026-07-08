@@ -117,7 +117,7 @@ export class Settings {
             <input type="text" name="legal_name" class="form-input" value="${info.legal_name || ''}" />
           </div>
           <div class="form-group" style="margin-top: var(--space-3);">
-            <label class="form-label">RFC / Tax ID</label>
+            <label class="form-label">NIF</label>
             <input type="text" name="tax_id" class="form-input" value="${info.tax_id || ''}" />
           </div>
 
@@ -603,9 +603,10 @@ export class Settings {
             <select name="role_id" class="form-select" required ${isEdit && userObj.role_name === 'propietario' ? 'disabled' : ''}>
               <option value="">Seleccione Rol</option>
               <option value="1" ${userObj.role_id == 1 ? 'selected' : ''}>Propietario</option>
-              <option value="2" ${userObj.role_id == 2 ? 'selected' : ''}>Dirección</option>
-              <option value="3" ${userObj.role_id == 3 ? 'selected' : ''}>Recepcionista</option>
-              <option value="4" ${userObj.role_id == 4 ? 'selected' : ''}>Doctor</option>
+              <option value="4" ${userObj.role_id == 4 ? 'selected' : ''}>Dirección</option>
+              <option value="2" ${userObj.role_id == 2 ? 'selected' : ''}>Recepcionista</option>
+              <option value="3" ${userObj.role_id == 3 ? 'selected' : ''}>Doctor</option>
+              <option value="5" ${userObj.role_id == 5 ? 'selected' : ''}>Higienista</option>
             </select>
           </div>
         </div>
@@ -620,15 +621,27 @@ export class Settings {
         const form = modalBody.querySelector('#settings-user-form');
         const formData = new FormData(form);
         const data = Object.fromEntries(formData.entries());
-        if (data.role_id) data.role_id = Number(data.role_id);
+        
+        const apiData = {
+          firstName: data.first_name,
+          lastName: data.last_name,
+          email: data.email,
+          phone: data.phone || null,
+        };
+        if (data.password) {
+          apiData.password = data.password;
+        }
+        if (data.role_id) {
+          apiData.roleId = Number(data.role_id);
+        }
 
         try {
           if (isEdit) {
-            if (userObj.role_name === 'propietario') delete data.role_id;
-            await userService.update(userId, data);
+            if (userObj.role_name === 'propietario') delete apiData.roleId;
+            await userService.update(userId, apiData);
             toast.success('Usuario actualizado con éxito');
           } else {
-            await userService.create(data);
+            await userService.create(apiData);
             toast.success('Usuario creado con éxito');
           }
           await this.render();

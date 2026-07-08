@@ -29,7 +29,14 @@ export function formatCurrency(amount) {
  */
 export function formatDate(dateString) {
   if (!dateString) return '';
-  const [year, month, day] = dateString.split('T')[0].split('-');
+  let str = dateString;
+  if (dateString instanceof Date) {
+    const year = dateString.getFullYear();
+    const month = String(dateString.getMonth() + 1).padStart(2, '0');
+    const day = String(dateString.getDate()).padStart(2, '0');
+    str = `${year}-${month}-${day}`;
+  }
+  const [year, month, day] = str.split('T')[0].split('-');
   return `${day}/${month}/${year}`;
 }
 

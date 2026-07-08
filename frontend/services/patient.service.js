@@ -31,6 +31,14 @@ class PatientService {
   async getHistory(id) {
     return await api.get(`/patients/${id}/history`);
   }
+
+  async getNotes(id) {
+    return await api.get(`/patients/${id}/notes`);
+  }
+
+  async createNote(id, data) {
+    return await api.post(`/patients/${id}/notes`, data);
+  }
 }
 
 const patientService = new PatientService();

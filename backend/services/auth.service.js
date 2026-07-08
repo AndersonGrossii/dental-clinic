@@ -51,7 +51,9 @@ class AuthService {
       throw new AppError('Credenciales inválidas. Verifique su correo y contraseña.', 401);
     }
 
-    // Generar tokens
+    // Generar tokens y sesión
+    const sessionId = crypto.randomUUID();
+
     const tokenPayload = {
       id: user.id,
       email: user.email,
@@ -60,6 +62,7 @@ class AuthService {
       doctorId: user.doctor_id || null,
       firstName: user.first_name,
       lastName: user.last_name,
+      sessionId,
     };
 
     const accessToken = jwt.sign(tokenPayload, config.jwt.secret, {
@@ -72,10 +75,10 @@ class AuthService {
       { expiresIn: config.jwt.refreshExpiration }
     );
 
-    // Actualizar último acceso
+    // Actualizar último acceso y session ID
     await query(
-      `UPDATE users SET last_login = NOW(), updated_at = NOW() WHERE id = $1`,
-      [user.id]
+      `UPDATE users SET last_login = NOW(), current_session_id = $1, updated_at = NOW() WHERE id = $2`,
+      [sessionId, user.id]
     );
 
     logger.info(`Inicio de sesión exitoso para: ${email}`);
@@ -117,7 +120,7 @@ class AuthService {
     // Obtener datos actualizados del usuario
     const result = await query(
       `SELECT u.id, u.email, u.role_id, r.name AS role_name,
-              d.id AS doctor_id
+              u.current_session_id, d.id AS doctor_id
        FROM users u
        INNER JOIN roles r ON u.role_id = r.id
        LEFT JOIN doctors d ON d.user_id = u.id AND d.deleted_at IS NULL
@@ -138,6 +141,7 @@ class AuthService {
         roleId: user.role_id,
         roleName: user.role_name,
         doctorId: user.doctor_id || null,
+        sessionId: user.current_session_id,
       },
       config.jwt.secret,
       { expiresIn: config.jwt.expiration }

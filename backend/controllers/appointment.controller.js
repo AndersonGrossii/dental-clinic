@@ -85,7 +85,7 @@ export const update = async (req, res, next) => {
       }
     }
 
-    const appointment = await appointmentService.update(id, appointmentData);
+    const appointment = await appointmentService.update(id, appointmentData, req.user.id);
     return ApiResponse.success(res, appointment, 'Cita actualizada exitosamente');
   } catch (error) {
     next(error);
@@ -98,8 +98,8 @@ export const update = async (req, res, next) => {
 export const updateStatus = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { status_name, cancellation_reason } = req.body;
-    const appointment = await appointmentService.updateStatus(id, status_name, cancellation_reason);
+    const { status_name, cancellation_reason, notes } = req.body;
+    const appointment = await appointmentService.updateStatus(id, status_name, cancellation_reason, notes, req.user.id);
     return ApiResponse.success(res, appointment, `Estado de la cita cambiado a ${status_name}`);
   } catch (error) {
     next(error);

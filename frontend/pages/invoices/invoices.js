@@ -74,8 +74,8 @@ export class Invoices {
               <tr>
                 <th>No. Factura</th>
                 <th>Paciente</th>
-                <th>Monto Total</th>
-                <th>Monto Pagado</th>
+                <th>Montante Total</th>
+                <th>Montante Pagado</th>
                 <th>Saldo Restante</th>
                 <th>Estado</th>
                 <th>Fecha Emisión</th>
@@ -625,7 +625,7 @@ export class Invoices {
           <p style="margin: 2px 0;"><strong>Saldo Pendiente:</strong> ${formatCurrency(invoice.balance)}</p>
         </div>
         <div class="form-group">
-          <label class="form-label">Monto del Pago ($)</label>
+          <label class="form-label">Montante del Pago ($)</label>
           <input type="number" name="amount" class="form-input" max="${invoice.balance}" min="1" value="${invoice.balance}" required />
         </div>
         <div class="form-group" style="margin-top: var(--space-3);">
@@ -697,7 +697,7 @@ export class Invoices {
             <div>
               <h2>${clinic.name || 'Clinica Vides Dental'}</h2>
               <p>${clinic.address || 'Av. Reforma 1234, Centro'}</p>
-              <p>${clinic.tax_id ? 'RFC: ' + clinic.tax_id : 'RFC: CDS850101ABC'}</p>
+              <p>${clinic.tax_id ? 'NIF: ' + clinic.tax_id : 'NIF: 0000000000'}</p>
             </div>
             <div>
               <h1>FACTURA</h1>
@@ -710,7 +710,7 @@ export class Invoices {
             <div>
               <h3>Receptor:</h3>
               <p><strong>Nombre:</strong> ${invoice.patient_name || 'N/A'}</p>
-              <p><strong>RFC / ID:</strong> ${invoice.patient_dni || 'N/A'}</p>
+              <p><strong>NIF:</strong> ${invoice.patient_dni || 'N/A'}</p>
             </div>
             <div>
               <h3>Especialista:</h3>
@@ -743,7 +743,7 @@ export class Invoices {
             <p>Subtotal: ${formatCurrency(invoice.subtotal)}</p>
             <p>IVA (${invoice.tax_rate}%): ${formatCurrency(invoice.tax_amount)}</p>
             <p>Descuento: -${formatCurrency(invoice.discount_amount)}</p>
-            <p>Monto Pagado: ${formatCurrency(invoice.amount_paid)}</p>
+            <p>Montante Pagado: ${formatCurrency(invoice.amount_paid)}</p>
             <hr/>
             <h2>Saldo Restante: ${formatCurrency(invoice.balance)}</h2>
             <h2>TOTAL FACTURA: ${formatCurrency(invoice.total)}</h2>

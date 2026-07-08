@@ -110,7 +110,7 @@ export class Payments {
                 <th>ID</th>
                 <th>No. Factura</th>
                 <th>Paciente</th>
-                <th>Monto Recibido</th>
+                <th>Montante Recibido</th>
                 <th>Método de Pago</th>
                 <th>Referencia</th>
                 <th>Fecha y Hora</th>
@@ -354,7 +354,7 @@ export class Payments {
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
           <div class="form-group">
-            <label class="form-label">Monto a Pagar <span style="color: var(--danger-500);">*</span></label>
+            <label class="form-label">Montante a Pagar <span style="color: var(--danger-500);">*</span></label>
             <input type="number" name="amount" id="payment-amount-input" class="form-input" step="0.01" min="0.01" placeholder="0.00" required />
           </div>
           <div class="form-group">
@@ -399,7 +399,7 @@ export class Payments {
         }
         const amount = parseFloat(data.amount);
         if (!amount || amount <= 0) {
-          toast.error('Ingrese un monto válido mayor a 0');
+          toast.error('Ingrese un montante válido mayor a 0');
           return false;
         }
 

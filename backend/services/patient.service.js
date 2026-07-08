@@ -354,6 +354,43 @@ class PatientService {
   async getStats() {
     return patientRepository.getStats();
   }
+
+  /**
+   * Obtiene las notas de evolución clínica de un paciente.
+   * @param {number} patientId
+   * @returns {Promise<Array>}
+   */
+  async getNotes(patientId) {
+    const patient = await patientRepository.findById(patientId);
+    if (!patient) {
+      throw new AppError('Paciente no encontrado.', 404);
+    }
+    return patientRepository.getNotes(patientId);
+  }
+
+  /**
+   * Crea una nueva nota de evolución clínica para un paciente.
+   * @param {number} patientId
+   * @param {number} userId
+   * @param {object} data
+   * @returns {Promise<object>}
+   */
+  async createNote(patientId, userId, data) {
+    const patient = await patientRepository.findById(patientId);
+    if (!patient) {
+      throw new AppError('Paciente no encontrado.', 404);
+    }
+    if (!data.content || data.content.trim() === '') {
+      throw new AppError('El contenido de la nota es obligatorio.', 400);
+    }
+    return patientRepository.createNote(
+      patientId,
+      userId,
+      data.title || 'Nota Clínica',
+      data.content,
+      data.type || 'clinica'
+    );
+  }
 }
 
 export default new PatientService();

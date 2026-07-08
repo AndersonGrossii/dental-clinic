@@ -46,4 +46,4 @@ export const staffOnly = roleMiddleware('propietario', 'direccion', 'recepcionis
 /**
  * Todos los roles autenticados.
  */
-export const allRoles = roleMiddleware('propietario', 'direccion', 'recepcionista', 'doctor');
+export const allRoles = roleMiddleware('propietario', 'direccion', 'recepcionista', 'doctor', 'higienista');

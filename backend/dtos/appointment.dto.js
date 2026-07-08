@@ -23,6 +23,7 @@ export const toAppointmentDTO = (row) => {
     notes: row.notes,
     cancellationReason: row.cancellation_reason,
     isFirstVisit: row.is_first_visit,
+    gabinete: row.gabinete,
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -66,6 +67,7 @@ export const toAppointmentDTO = (row) => {
     appointment_date: row.appointment_date,
     start_time: row.start_time,
     end_time: row.end_time,
+    gabinete: row.gabinete,
     patient_name: row.patient_name,
     doctor_name: row.doctor_name,
     treatment_name: row.treatment_name,
@@ -105,6 +107,7 @@ export const toCalendarEventDTO = (row) => {
     statusColor: row.status_color,
     treatmentName: row.treatment_name || null,
     isFirstVisit: row.is_first_visit,
+    gabinete: row.gabinete,
     backgroundColor: row.doctor_color || '#0891b2',
     borderColor: row.status_color || '#6b7280',
   };

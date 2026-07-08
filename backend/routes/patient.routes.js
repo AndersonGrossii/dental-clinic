@@ -3,7 +3,7 @@
 // ============================================
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/auth.middleware.js';
-import { staffOnly, allRoles } from '../middlewares/role.middleware.js';
+import { staffOnly, allRoles, roleMiddleware } from '../middlewares/role.middleware.js';
 import { validate } from '../middlewares/validation.middleware.js';
 import { createPatientRules, updatePatientRules } from '../validators/patient.validator.js';
 import { auditMiddleware } from '../middlewares/audit.middleware.js';
@@ -97,5 +97,19 @@ router.get('/:id/invoices', allRoles, patientController.getInvoices);
  * @access  Todos los roles
  */
 router.get('/:id/images', allRoles, patientController.getImages);
+
+/**
+ * @route   GET /api/v1/patients/:id/notes
+ * @desc    Obtener notas de evolución clínica del paciente
+ * @access  Todos los roles
+ */
+router.get('/:id/notes', allRoles, patientController.getNotes);
+
+/**
+ * @route   POST /api/v1/patients/:id/notes
+ * @desc    Crear una nota de evolución clínica para el paciente
+ * @access  Propietario, Dirección, Doctor
+ */
+router.post('/:id/notes', roleMiddleware('propietario', 'direccion', 'doctor'), patientController.createNote);
 
 export default router;

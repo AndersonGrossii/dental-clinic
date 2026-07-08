@@ -366,6 +366,45 @@ class PatientRepository extends BaseRepository {
 
     return { rows: dataResult.rows, total };
   }
+
+  /**
+   * Obtiene las notas de evolución clínica de un paciente.
+   * @param {number} patientId
+   * @returns {Promise<Array>}
+   */
+  async getNotes(patientId) {
+    const result = await query(
+      `SELECT n.*,
+              u.first_name AS author_name, u.last_name AS author_lastname,
+              r.name AS author_role
+       FROM patient_notes n
+       INNER JOIN users u ON u.id = n.user_id
+       INNER JOIN roles r ON u.role_id = r.id
+       WHERE n.patient_id = $1 AND n.deleted_at IS NULL
+       ORDER BY n.created_at DESC`,
+      [patientId]
+    );
+    return result.rows;
+  }
+
+  /**
+   * Crea una nueva nota de evolución clínica para un paciente.
+   * @param {number} patientId
+   * @param {number} userId
+   * @param {string} title
+   * @param {string} content
+   * @param {string} type
+   * @returns {Promise<object>}
+   */
+  async createNote(patientId, userId, title, content, type = 'clinica') {
+    const result = await query(
+      `INSERT INTO patient_notes (patient_id, user_id, title, content, type)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [patientId, userId, title, content, type]
+    );
+    return result.rows[0];
+  }
 }
 
 export default new PatientRepository();

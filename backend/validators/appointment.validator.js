@@ -69,6 +69,13 @@ export const createAppointmentRules = [
     type: 'string',
     maxLength: 1000,
   },
+  {
+    field: 'gabinete',
+    label: 'Gabinete',
+    required: false,
+    type: 'string',
+    enum: ['Gabinete 1', 'Gabinete 2'],
+  },
 ];
 
 /**
@@ -132,6 +139,13 @@ export const updateAppointmentRules = [
     required: false,
     type: 'string',
     maxLength: 1000,
+  },
+  {
+    field: 'gabinete',
+    label: 'Gabinete',
+    required: false,
+    type: 'string',
+    enum: ['Gabinete 1', 'Gabinete 2'],
   },
 ];
 

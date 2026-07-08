@@ -385,50 +385,160 @@ export class Doctors {
     }
   }
 
-  showUnavailabilityModal(doctorId) {
-    const content = `
-      <form id="unavail-form">
-        <div class="form-group">
-          <label class="form-label">Fecha Inicio</label>
-          <input type="date" name="start_date" class="form-input" required />
+  async showUnavailabilityModal(doctorId) {
+    const now = new Date();
+    const rangeStart = `${now.getFullYear() - 1}-01-01`;
+    const rangeEnd = `${now.getFullYear() + 1}-12-31`;
+
+    let records = [];
+    try {
+      records = await doctorService.getUnavailability(doctorId, rangeStart, rangeEnd);
+    } catch (_) { records = []; }
+
+    const renderList = () => {
+      if (records.length === 0) {
+        return `<p style="color: var(--text-secondary); font-size: var(--text-sm); text-align: center; padding: var(--space-4);">No hay periodos registrados.</p>`;
+      }
+      const typeLabels = { vacaciones: 'Vacaciones', personal: 'Asunto Personal', enfermedad: 'Enfermedad / Licencia Médica', conferencia: 'Conferencia / Congreso', otro: 'Otro' };
+      return records.map(r => {
+        const start = (r.start_date || '').slice(0, 10);
+        const end = (r.end_date || '').slice(0, 10);
+        const label = typeLabels[r.type] || r.type || '—';
+        const reason = r.reason || '';
+        return `<div style="display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border-light); border-radius: var(--radius-md); margin-bottom: var(--space-2); background: var(--color-surface);">
+          <div style="flex: 1; font-size: var(--text-sm);">
+            <span style="font-weight: 600;">${start}</span> → <span style="font-weight: 600;">${end}</span>
+            <span style="display: inline-block; margin-left: var(--space-2); padding: 1px 6px; border-radius: 4px; background: var(--color-bg-secondary); font-size: 10px;">${label}</span>
+            ${reason ? `<br><span style="color: var(--text-secondary); font-size: 10px;">${reason}</span>` : ''}
+          </div>
+          <div style="display: flex; gap: var(--space-1); flex-shrink: 0;">
+            <button class="btn btn-sm btn-outline edit-unavail" data-id="${r.id}" style="font-size: 11px; padding: 2px 8px;">Editar</button>
+            <button class="btn btn-sm btn-danger delete-unavail" data-id="${r.id}" style="font-size: 11px; padding: 2px 8px;">Eliminar</button>
+          </div>
+        </div>`;
+      }).join('');
+    };
+
+    const renderForm = (editRecord = null) => {
+      const startVal = editRecord ? (editRecord.start_date || '').slice(0, 10) : '';
+      const endVal = editRecord ? (editRecord.end_date || '').slice(0, 10) : '';
+      const typeVal = editRecord ? (editRecord.type || 'vacaciones') : 'vacaciones';
+      const reasonVal = editRecord ? (editRecord.reason || '') : '';
+      return `
+        <div style="margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--color-border-light);">
+          <h4 style="margin: 0 0 var(--space-2) 0; font-size: var(--text-sm);">${editRecord ? 'Editar Periodo' : 'Nuevo Periodo'}</h4>
+          <form id="unavail-form">
+            <input type="hidden" name="edit_id" value="${editRecord ? editRecord.id : ''}" />
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2);">
+              <div class="form-group">
+                <label class="form-label" style="font-size: var(--text-xs);">Fecha Inicio</label>
+                <input type="date" name="start_date" class="form-input" value="${startVal}" required />
+              </div>
+              <div class="form-group">
+                <label class="form-label" style="font-size: var(--text-xs);">Fecha Fin</label>
+                <input type="date" name="end_date" class="form-input" value="${endVal}" required />
+              </div>
+            </div>
+            <div class="form-group" style="margin-top: var(--space-2);">
+              <label class="form-label" style="font-size: var(--text-xs);">Motivo</label>
+              <select name="type" class="form-select">
+                <option value="vacaciones" ${typeVal === 'vacaciones' ? 'selected' : ''}>Vacaciones</option>
+                <option value="personal" ${typeVal === 'personal' ? 'selected' : ''}>Asunto Personal</option>
+                <option value="enfermedad" ${typeVal === 'enfermedad' ? 'selected' : ''}>Enfermedad / Licencia Médica</option>
+                <option value="conferencia" ${typeVal === 'conferencia' ? 'selected' : ''}>Conferencia / Congreso</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-top: var(--space-2);">
+              <label class="form-label" style="font-size: var(--text-xs);">Detalles / Observaciones</label>
+              <input type="text" name="reason" class="form-input" value="${reasonVal}" placeholder="Ej: Viaje familiar" />
+            </div>
+            <div style="margin-top: var(--space-2); display: flex; gap: var(--space-2);">
+              <button type="submit" class="btn btn-primary" style="flex: 1;">${editRecord ? 'Actualizar' : 'Registrar'}</button>
+              ${editRecord ? `<button type="button" class="btn btn-outline cancel-edit-unavail" style="flex: 1;">Cancelar</button>` : ''}
+            </div>
+          </form>
+        </div>`;
+    };
+
+    const modalContainer = document.createElement('div');
+
+    const attachFormHandler = () => {
+      const form = modalContainer.querySelector('#unavail-form');
+      if (form && !form._unavailHandler) {
+        form._unavailHandler = true;
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          const formData = new FormData(form);
+          const data = Object.fromEntries(formData.entries());
+          const editId = data.edit_id;
+
+          (async () => {
+            try {
+              if (editId) {
+                await doctorService.removeUnavailability(doctorId, editId);
+                records = records.filter(r => String(r.id) !== String(editId));
+              }
+              await doctorService.addUnavailability(doctorId, data);
+              const newRecords = await doctorService.getUnavailability(doctorId, rangeStart, rangeEnd);
+              records = newRecords || [];
+              refreshUI();
+              toast.success(editId ? 'Periodo actualizado' : 'Periodo registrado');
+            } catch (err) {
+              toast.error(err.message || 'Error al guardar');
+            }
+          })();
+        });
+      }
+    };
+
+    const refreshUI = (editingRecord = null) => {
+      modalContainer.innerHTML = `
+        <div id="unavail-list-section">
+          <h4 style="margin: 0 0 var(--space-2) 0; font-size: var(--text-sm);">Periodos Registrados</h4>
+          <div id="unavail-list">${renderList()}</div>
         </div>
-        <div class="form-group" style="margin-top: var(--space-3);">
-          <label class="form-label">Fecha Fin</label>
-          <input type="date" name="end_date" class="form-input" required />
-        </div>
-        <div class="form-group" style="margin-top: var(--space-3);">
-          <label class="form-label">Motivo</label>
-          <select name="type" class="form-select">
-            <option value="vacaciones">Vacaciones</option>
-            <option value="personal">Asunto Personal</option>
-            <option value="enfermedad">Enfermedad / Licencia Médica</option>
-            <option value="conferencia">Conferencia / Congreso</option>
-          </select>
-        </div>
-        <div class="form-group" style="margin-top: var(--space-3);">
-          <label class="form-label">Detalles / Observaciones</label>
-          <input type="text" name="reason" class="form-input" placeholder="Ej: Viaje familiar" />
-        </div>
-      </form>
-    `;
+        <div id="unavail-form-section">${renderForm(editingRecord)}</div>
+      `;
+      attachFormHandler();
+    };
+
+    refreshUI();
 
     Modal.show({
-      title: 'Registrar Inasistencia o Vacaciones',
-      content: content,
-      confirmText: 'Registrar Fechas',
-      onConfirm: async (modalBody) => {
-        const form = modalBody.querySelector('#unavail-form');
-        const formData = new FormData(form);
-        const data = Object.fromEntries(formData.entries());
+      title: 'Gestionar Inasistencias y Vacaciones',
+      content: modalContainer,
+      size: 'md',
+      confirmText: null,
+      onConfirm: null,
+    });
 
+    modalContainer.addEventListener('click', async (e) => {
+      const deleteBtn = e.target.closest('.delete-unavail');
+      if (deleteBtn) {
+        const id = deleteBtn.getAttribute('data-id');
+        if (!confirm('¿Eliminar este periodo de no disponibilidad?')) return;
         try {
-          await doctorService.addUnavailability(doctorId, data);
-          toast.success('Periodo de no disponibilidad guardado con éxito');
-          return true;
+          await doctorService.removeUnavailability(doctorId, id);
+          records = records.filter(r => String(r.id) !== String(id));
+          refreshUI();
+          toast.success('Periodo eliminado');
         } catch (err) {
-          toast.error(err.message || 'Error al guardar inasistencia');
-          return false;
+          toast.error(err.message || 'Error al eliminar');
         }
+        return;
+      }
+
+      const editBtn = e.target.closest('.edit-unavail');
+      if (editBtn) {
+        const id = editBtn.getAttribute('data-id');
+        const rec = records.find(r => String(r.id) === String(id));
+        if (rec) refreshUI(rec);
+        return;
+      }
+
+      if (e.target.closest('.cancel-edit-unavail')) {
+        refreshUI();
+        return;
       }
     });
   }

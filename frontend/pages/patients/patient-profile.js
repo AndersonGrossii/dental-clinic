@@ -18,6 +18,7 @@ export class PatientProfile {
     this.clinicalTreatments = [];
     this.appointments = [];
     this.quotations = [];
+    this.clinicalNotes = [];
     this.activeTab = 'info';
   }
 
@@ -28,6 +29,7 @@ export class PatientProfile {
       this.appointments = await appointmentService.getAll({ patient_id: this.patientId, limit: 999 });
       const quotesRes = await quotationService.getAll({ patient_id: this.patientId, limit: 999 });
       this.quotations = Array.isArray(quotesRes) ? quotesRes : (quotesRes.rows || []);
+      this.clinicalNotes = await patientService.getNotes(this.patientId) || [];
       
       this.renderProfile();
     } catch (err) {
@@ -254,6 +256,40 @@ export class PatientProfile {
           </table>
         </div>
       `;
+    } else if (this.activeTab === 'notes') {
+      const userRole = state.get('user')?.role_name;
+      const canWriteNotes = ['propietario', 'direccion', 'doctor'].includes(userRole);
+
+      let noteRows = (this.clinicalNotes || []).map(n => `
+        <div style="border-bottom: 1px solid var(--border-color); padding: var(--space-4) 0; margin-bottom: var(--space-2);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-1); gap: var(--space-2);">
+            <strong style="font-size: var(--text-sm); color: var(--primary-700);">${n.title || 'Nota Clínica'}</strong>
+            <span style="font-size: var(--text-xs); color: var(--text-tertiary); white-space: nowrap;">${formatDate(n.created_at)}</span>
+          </div>
+          <div style="font-size: var(--text-xs); color: var(--text-secondary); margin-bottom: var(--space-2);">
+            Escrito por: <strong>${n.author_name} ${n.author_lastname}</strong> (${n.author_role.charAt(0).toUpperCase() + n.author_role.slice(1)})
+          </div>
+          <p style="font-size: var(--text-sm); margin: 0; color: var(--color-text); white-space: pre-wrap;">${n.content}</p>
+        </div>
+      `).join('');
+
+      if (!this.clinicalNotes || this.clinicalNotes.length === 0) {
+        noteRows = `
+          <div style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
+            No hay notas de evolución clínica registradas para este paciente.
+          </div>
+        `;
+      }
+
+      tabContent = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
+          <h3>Notas de Evolución Clínica</h3>
+          ${canWriteNotes ? `<button id="profile-add-note-btn" class="btn btn-sm btn-primary">+ Nueva Nota</button>` : ''}
+        </div>
+        <div style="max-height: 500px; overflow-y: auto; padding-right: 8px;">
+          ${noteRows}
+        </div>
+      `;
     }
 
     this.container.innerHTML = `
@@ -287,6 +323,7 @@ export class PatientProfile {
         ${tabLink('treatments', 'Historial Odontológico')}
         ${tabLink('appointments', 'Historial de Citas')}
         ${tabLink('quotations', 'Presupuestos')}
+        ${tabLink('notes', 'Notas de Evolución')}
       </div>
 
       <div class="card" style="padding: var(--space-6);">
@@ -310,6 +347,12 @@ export class PatientProfile {
     const addHistoryBtn = this.container.querySelector('#add-treatment-history-btn');
     if (addHistoryBtn) {
       addHistoryBtn.addEventListener('click', () => this.showAddTreatmentModal());
+    }
+
+    // Agregar nota clínica
+    const addNoteBtn = this.container.querySelector('#profile-add-note-btn');
+    if (addNoteBtn) {
+      addNoteBtn.addEventListener('click', () => this.showAddNoteModal());
     }
 
     // Editar datos del paciente
@@ -576,5 +619,56 @@ export class PatientProfile {
         priceInput.value = price;
       });
     }
+  }
+
+  async showAddNoteModal() {
+    const content = `
+      <form id="add-note-form">
+        <div class="form-group">
+          <label class="form-label">Título de la Nota</label>
+          <input type="text" name="title" class="form-input" placeholder="Ej: Revisión general, Evolución Ortodoncia..." required />
+        </div>
+        <div class="form-group" style="margin-top: var(--space-3);">
+          <label class="form-label">Contenido Clínico</label>
+          <textarea name="content" class="form-textarea" rows="5" placeholder="Escriba los detalles de la consulta..." required></textarea>
+        </div>
+        <div class="form-group" style="margin-top: var(--space-3);">
+          <label class="form-label">Tipo de Nota</label>
+          <select name="type" class="form-select">
+            <option value="clinica">Clínica</option>
+            <option value="seguimiento">Seguimiento</option>
+            <option value="observacion">Observación</option>
+            <option value="general">General</option>
+          </select>
+        </div>
+      </form>
+    `;
+
+    Modal.show({
+      title: 'Registrar Nota de Evolución Clínica',
+      content: content,
+      confirmText: 'Registrar',
+      onConfirm: async (modalBody) => {
+        const form = modalBody.querySelector('#add-note-form');
+        const formData = new FormData(form);
+        const data = Object.fromEntries(formData.entries());
+
+        if (!data.content || data.content.trim() === '') {
+          toast.error('El contenido de la nota es requerido.');
+          return false;
+        }
+
+        try {
+          await patientService.createNote(this.patientId, data);
+          toast.success('Nota clínica registrada con éxito');
+          await this.render();
+          this.mount();
+          return true;
+        } catch (err) {
+          toast.error(err.message || 'Error al guardar nota clínica');
+          return false;
+        }
+      }
+    });
   }
 }

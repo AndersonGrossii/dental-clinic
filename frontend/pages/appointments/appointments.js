@@ -47,7 +47,13 @@ export class Appointments {
       }
       const eventEl = e.target.closest('.calendar-event, .cal-week-event, .cal-day-event, .db-wg-event, .cal-dg-event');
       if (eventEl?.dataset.id) {
-        this.showChangeStatusModal(eventEl.dataset.id);
+        const patientId = eventEl.dataset.patientId;
+        const userRole = state.get('user')?.role_name;
+        if ((userRole === 'doctor' || userRole === 'higienista') && patientId) {
+          window.location.hash = `#/patients/${patientId}`;
+        } else {
+          this.showChangeStatusModal(eventEl.dataset.id);
+        }
         return;
       }
 
@@ -115,7 +121,7 @@ export class Appointments {
       this.allDoctorSchedules = {};
 
       const docsResponse = await doctorService.getAll();
-      this.doctorsList = docsResponse || [];
+      this.doctorsList = (docsResponse || []).filter(d => d.is_active);
       this.doctorColors = Object.fromEntries(
         this.doctorsList.map(d => [d.id, d.color || '#0891b2'])
       );
@@ -128,8 +134,8 @@ export class Appointments {
           doctorService.getSchedule(id),
         ]);
         (unavail || []).forEach(rec => {
-          const d = new Date(rec.start_date + 'T12:00:00');
-          const end = new Date(rec.end_date + 'T12:00:00');
+          const d = new Date(rec.start_date.slice(0, 10) + 'T12:00:00');
+          const end = new Date(rec.end_date.slice(0, 10) + 'T12:00:00');
           while (d <= end) {
             const ds = this.toDateStr(d);
             if (!this.doctorUnavail[ds]) this.doctorUnavail[ds] = [];
@@ -151,8 +157,8 @@ export class Appointments {
         this.doctorsList.forEach((d, i) => {
           const unavail = {};
           (unavailResults[i] || []).forEach(rec => {
-            const cur = new Date(rec.start_date + 'T12:00:00');
-            const end = new Date(rec.end_date + 'T12:00:00');
+            const cur = new Date(rec.start_date.slice(0, 10) + 'T12:00:00');
+            const end = new Date(rec.end_date.slice(0, 10) + 'T12:00:00');
             while (cur <= end) {
               const ds = this.toDateStr(cur);
               if (!unavail[ds]) unavail[ds] = [];
@@ -261,7 +267,7 @@ export class Appointments {
           <tr>
             <td><strong>${formatDate(app.appointment_date)}</strong></td>
             <td>${formatTime(app.start_time)} - ${formatTime(app.end_time)}</td>
-            <td>${app.patient_name}</td>
+            <td><a href="#/patients/${app.patient_id}" style="color: var(--primary-600); font-weight: 600; text-decoration: underline;">${app.patient_name}</a></td>
             <td>${app.doctor_name}</td>
             <td>${app.treatment_name || 'Consulta general'}</td>
             <td><span class="badge" style="background-color: ${app.status_color}; color: white;">${app.status_label}</span></td>
@@ -419,7 +425,7 @@ export class Appointments {
         html += `<div class="weekend-badge" style="font-size: 9px; color: var(--color-danger, #e53e3e); text-align: center; padding: 4px 0;">Cerrado</div>`;
       }
       events.slice(0, maxVisible).forEach(ev => {
-        html += `<div class="calendar-event ${ev.status_name || ''}" title="${ev.patient_name} — ${formatTime(ev.start_time)}" data-id="${ev.id}" style="background-color: ${ev.status_color}; color: #fff; border-radius: 4px; padding: 1px 6px; margin: 1px 0; font-size: 11px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+        html += `<div class="calendar-event ${ev.status_name || ''}" title="${ev.patient_name} — ${formatTime(ev.start_time)}" data-id="${ev.id}" data-patient-id="${ev.patient_id}" style="background-color: ${ev.status_color}; color: #fff; border-radius: 4px; padding: 1px 6px; margin: 1px 0; font-size: 11px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
           ${formatTime(ev.start_time)} ${ev.patient_name}
         </div>`;
       });
@@ -537,7 +543,7 @@ export class Appointments {
           if (appt) {
             const patientName = appt.patient_name || '—';
             subSlotsHtml += `
-              <div class="db-wg-event sub-slot-event" data-id="${appt.id}" style="background-color: color-mix(in srgb, ${docColor} 15%, var(--color-surface)) !important; border: 1px solid color-mix(in srgb, ${docColor} 30%, var(--color-border-light)) !important; padding: 4px; display: flex; flex-direction: column; justify-content: space-between; min-height: 36px;" title="Cita: ${patientName} con Dr/a. ${d.first_name} ${d.last_name} (${appt.status_label || appt.status_name})">
+              <div class="db-wg-event sub-slot-event" data-id="${appt.id}" data-patient-id="${appt.patient_id}" style="background-color: color-mix(in srgb, ${docColor} 15%, var(--color-surface)) !important; border: 1px solid color-mix(in srgb, ${docColor} 30%, var(--color-border-light)) !important; padding: 4px; display: flex; flex-direction: column; justify-content: space-between; min-height: 36px;" title="Cita: ${patientName} con Dr/a. ${d.first_name} ${d.last_name} (${appt.status_label || appt.status_name})">
                 <div class="db-wg-event-patient" style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 2px;">
                   <span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 10px); font-size: 9px; color: var(--color-text);">${patientName}</span>
                   <span style="width: 7px; height: 7px; border-radius: 50%; background: ${appt.status_color || '#0891b2'}; border: 1.5px solid #fff; display: inline-block; flex-shrink: 0;" title="${appt.status_label || appt.status_name}"></span>
@@ -667,7 +673,7 @@ export class Appointments {
         if (appt) {
           const patientName = appt.patient_name || '—';
           subSlotsHtml += `
-            <div class="cal-dg-event sub-slot-event" data-id="${appt.id}" style="background-color: color-mix(in srgb, ${docColor} 15%, var(--color-surface)) !important; border: 1px solid color-mix(in srgb, ${docColor} 30%, var(--color-border-light)) !important; padding: 6px 8px; display: flex; flex-direction: column; justify-content: space-between; min-height: 48px;" title="Cita: ${patientName} con Dr/a. ${d.first_name} ${d.last_name}">
+            <div class="cal-dg-event sub-slot-event" data-id="${appt.id}" data-patient-id="${appt.patient_id}" style="background-color: color-mix(in srgb, ${docColor} 15%, var(--color-surface)) !important; border: 1px solid color-mix(in srgb, ${docColor} 30%, var(--color-border-light)) !important; padding: 6px 8px; display: flex; flex-direction: column; justify-content: space-between; min-height: 48px;" title="Cita: ${patientName} con Dr/a. ${d.first_name} ${d.last_name}">
               <div class="cal-dg-event-patient" style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 6px;">
                 <span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 14px); color: var(--color-text);">${formatTime(appt.start_time)} ${patientName}</span>
                 <span style="width: 8px; height: 8px; border-radius: 50%; background: ${appt.status_color || '#0891b2'}; border: 1.5px solid #fff; display: inline-block; flex-shrink: 0;" title="${appt.status_label || appt.status_name}"></span>

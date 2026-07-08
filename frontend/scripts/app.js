@@ -19,6 +19,7 @@ import { Invoices } from '../pages/invoices/invoices.js';
 import { Payments } from '../pages/payments/payments.js';
 import { Reports } from '../pages/reports/reports.js';
 import { Settings } from '../pages/settings/settings.js';
+import { Cabinets } from '../pages/cabinets/cabinets.js';
 import settingsService from '../services/settings.service.js';
 
 // Configurar Rutas
@@ -27,6 +28,7 @@ router.addRoute('#/', Dashboard);
 router.addRoute('#/patients', Patients);
 router.addRoute('#/patients/:id', PatientProfile);
 router.addRoute('#/appointments', Appointments);
+router.addRoute('#/cabinets', Cabinets);
 router.addRoute('#/doctors', Doctors);
 router.addRoute('#/treatments', Treatments);
 router.addRoute('#/quotations', Quotations);

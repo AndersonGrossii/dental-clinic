@@ -290,7 +290,7 @@ export class Dashboard {
           matches.forEach(m => {
             const patientName = m.patient_name || '—';
             const doctorName = getDocName(m);
-            inner += `<div class="db-wg-event" style="background-color: ${m.status_color || '#0891b2'};">
+            inner += `<div class="db-wg-event" data-id="${m.id}" data-patient-id="${m.patient_id}" style="background-color: ${m.status_color || '#0891b2'}; cursor: pointer;">
               <div class="db-wg-event-patient">${patientName}</div>
               ${doctorName ? `<div class="db-wg-event-doctor">${doctorName}</div>` : ''}
             </div>`;
@@ -345,8 +345,15 @@ export class Dashboard {
     const layoutContainer = this.container.querySelector('#db-cal-layout-container');
     if (layoutContainer) {
       layoutContainer.addEventListener('click', (e) => {
-        if (e.target.closest('.db-wg-event')) {
-          window.location.hash = '#/appointments';
+        const eventEl = e.target.closest('.db-wg-event');
+        if (eventEl) {
+          const patientId = eventEl.dataset.patientId;
+          const userRole = state.get('user')?.role_name;
+          if ((userRole === 'doctor' || userRole === 'higienista') && patientId) {
+            window.location.hash = `#/patients/${patientId}`;
+          } else {
+            window.location.hash = '#/appointments';
+          }
         }
       });
     }

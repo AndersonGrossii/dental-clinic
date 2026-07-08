@@ -236,3 +236,31 @@ export const getStats = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * Obtiene las notas de evolución clínica de un paciente.
+ */
+export const getNotes = async (req, res, next) => {
+  try {
+    const notes = await patientService.getNotes(parseInt(req.params.id, 10));
+    return ApiResponse.success(res, notes, 'Notas del paciente obtenidas con éxito.');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Crea una nueva nota de evolución clínica para un paciente.
+ */
+export const createNote = async (req, res, next) => {
+  try {
+    const note = await patientService.createNote(
+      parseInt(req.params.id, 10),
+      req.user.id,
+      req.body
+    );
+    return ApiResponse.created(res, note, 'Nota creada con éxito.');
+  } catch (error) {
+    next(error);
+  }
+};

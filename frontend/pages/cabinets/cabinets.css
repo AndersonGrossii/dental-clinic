@@ -1,0 +1,6 @@
+/* ── Estilos Específicos de la Vista de Gabinetes ── */
+.cab-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}

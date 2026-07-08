@@ -19,7 +19,17 @@ class AppointmentRepository extends BaseRepository {
    * @returns {Promise<{ rows: Array, total: number }>}
    */
   async findAllWithDetails({ limit = 20, offset = 0, sortBy = 'a.appointment_date', sortOrder = 'DESC', filters = {} } = {}) {
-    const conditions = ['a.deleted_at IS NULL'];
+    const conditions = [
+      'a.deleted_at IS NULL',
+      'u.is_active = TRUE',
+      `NOT EXISTS (
+        SELECT 1 
+        FROM doctor_unavailability du 
+        WHERE du.doctor_id = a.doctor_id 
+          AND a.appointment_date >= du.start_date 
+          AND a.appointment_date <= du.end_date
+      )`
+    ];
     const params = [];
     let paramIndex = 1;
 
@@ -78,6 +88,8 @@ class AppointmentRepository extends BaseRepository {
       `SELECT COUNT(*) AS total
        FROM appointments a
        INNER JOIN patients p ON a.patient_id = p.id
+       INNER JOIN doctors d ON a.doctor_id = d.id
+       INNER JOIN users u ON d.user_id = u.id
        ${whereClause}`,
       params
     );
@@ -96,6 +108,7 @@ class AppointmentRepository extends BaseRepository {
          a.end_time,
          a.reason,
          a.notes,
+         a.gabinete,
          a.cancellation_reason,
          a.is_first_visit,
          a.created_at,
@@ -146,6 +159,7 @@ class AppointmentRepository extends BaseRepository {
          a.end_time,
          a.reason,
          a.notes,
+         a.gabinete,
          a.cancellation_reason,
          a.is_first_visit,
          a.created_by,
@@ -195,6 +209,7 @@ class AppointmentRepository extends BaseRepository {
          a.end_time,
          a.reason,
          a.notes,
+         a.gabinete,
          a.status_id,
          a.treatment_id,
          CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
@@ -227,8 +242,16 @@ class AppointmentRepository extends BaseRepository {
   async findByDateRange(startDate, endDate, doctorId = null) {
     const conditions = [
       'a.deleted_at IS NULL',
+      'u.is_active = TRUE',
       'a.appointment_date >= $1',
       'a.appointment_date <= $2',
+      `NOT EXISTS (
+        SELECT 1 
+        FROM doctor_unavailability du 
+        WHERE du.doctor_id = a.doctor_id 
+          AND a.appointment_date >= du.start_date 
+          AND a.appointment_date <= du.end_date
+      )`
     ];
     const params = [startDate, endDate];
 
@@ -248,6 +271,7 @@ class AppointmentRepository extends BaseRepository {
          a.start_time,
          a.end_time,
          a.reason,
+         a.gabinete,
          a.is_first_visit,
          CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
          CONCAT(u.first_name, ' ', u.last_name) AS doctor_name,
@@ -328,6 +352,42 @@ class AppointmentRepository extends BaseRepository {
       '(a.start_time < $4 AND a.end_time > $3)',
     ];
     const params = [doctorId, date, startTime, endTime];
+
+    if (excludeId) {
+      conditions.push(`a.id != $5`);
+      params.push(excludeId);
+    }
+
+    const result = await query(
+      `SELECT a.id, a.start_time, a.end_time,
+              CONCAT(p.first_name, ' ', p.last_name) AS patient_name
+       FROM appointments a
+       INNER JOIN patients p ON a.patient_id = p.id
+       WHERE ${conditions.join(' AND ')}
+       LIMIT 1`,
+      params
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Verifica si existe un conflicto de horario para un gabinete.
+   * @param {string} gabinete - Nombre del gabinete
+   * @param {string} date - Fecha YYYY-MM-DD
+   * @param {string} startTime - Hora inicio HH:mm
+   * @param {string} endTime - Hora fin HH:mm
+   * @param {number|null} excludeId - ID de cita a excluir (para actualizaciones)
+   * @returns {Promise<object|null>} Cita conflictiva o null
+   */
+  async checkCabinetConflict(gabinete, date, startTime, endTime, excludeId = null) {
+    const conditions = [
+      'a.gabinete = $1',
+      'a.appointment_date = $2',
+      'a.deleted_at IS NULL',
+      `a.status_id NOT IN (SELECT id FROM appointment_status WHERE name IN ('cancelada', 'no_asistio'))`,
+      '(a.start_time < $4 AND a.end_time > $3)',
+    ];
+    const params = [gabinete, date, startTime, endTime];
 
     if (excludeId) {
       conditions.push(`a.id != $5`);

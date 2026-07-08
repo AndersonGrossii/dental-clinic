@@ -80,6 +80,20 @@ class AppointmentService {
       );
     }
 
+    // Verificar conflicto de gabinete
+    const cabinetConflict = await appointmentRepository.checkCabinetConflict(
+      data.gabinete || 'Gabinete 1',
+      data.appointment_date,
+      data.start_time,
+      data.end_time
+    );
+    if (cabinetConflict) {
+      throw new AppError(
+        `Conflicto de gabinete: ya hay una cita programada en el ${data.gabinete || 'Gabinete 1'} con ${cabinetConflict.patient_name} de ${cabinetConflict.start_time} a ${cabinetConflict.end_time}.`,
+        409
+      );
+    }
+
     // Obtener el estado "programada" por defecto
     const statusResult = await query(
       "SELECT id FROM appointment_status WHERE name = 'programada'",
@@ -102,6 +116,7 @@ class AppointmentService {
       appointment_date: data.appointment_date,
       start_time: data.start_time,
       end_time: data.end_time,
+      gabinete: data.gabinete || 'Gabinete 1',
       reason: data.reason || null,
       notes: data.notes || null,
       is_first_visit: isFirstVisit,
@@ -109,6 +124,11 @@ class AppointmentService {
     };
 
     const created = await appointmentRepository.create(appointmentData);
+
+    // Sincronizar notas si se proporcionaron
+    if (data.notes && data.notes.trim() !== '') {
+      await this.syncNotes(created.id, data.notes, data.patient_id, userId);
+    }
 
     // Crear notificación para el doctor
     const doctor = doctorResult.rows[0];
@@ -137,7 +157,7 @@ class AppointmentService {
    * @returns {Promise<object>}
    * @throws {AppError} Si la cita no existe o hay conflicto
    */
-  async update(id, data) {
+  async update(id, data, userId = null) {
     const existing = await appointmentRepository.findById(id);
     if (!existing) {
       throw new AppError('Cita no encontrada.', 404);
@@ -148,6 +168,7 @@ class AppointmentService {
     const appointmentDate = data.appointment_date || formatDateSQL(existing.appointment_date);
     const startTime = data.start_time || existing.start_time;
     const endTime = data.end_time || existing.end_time;
+    const gabinete = data.gabinete || existing.gabinete;
 
     const timeChanged =
       data.doctor_id || data.appointment_date || data.start_time || data.end_time;
@@ -168,11 +189,28 @@ class AppointmentService {
       }
     }
 
+    const cabinetChanged = timeChanged || data.gabinete;
+    if (cabinetChanged) {
+      const cabinetConflict = await appointmentRepository.checkCabinetConflict(
+        gabinete,
+        appointmentDate,
+        startTime,
+        endTime,
+        id
+      );
+      if (cabinetConflict) {
+        throw new AppError(
+          `Conflicto de gabinete: ya hay una cita programada en el ${gabinete} con ${cabinetConflict.patient_name} de ${cabinetConflict.start_time} a ${cabinetConflict.end_time}.`,
+          409
+        );
+      }
+    }
+
     // Construir datos de actualización (solo campos proporcionados)
     const updateData = {};
     const allowedFields = [
       'patient_id', 'doctor_id', 'appointment_date', 'start_time',
-      'end_time', 'treatment_id', 'reason', 'notes',
+      'end_time', 'treatment_id', 'reason', 'notes', 'gabinete',
     ];
     for (const field of allowedFields) {
       if (data[field] !== undefined) {
@@ -185,6 +223,12 @@ class AppointmentService {
     }
 
     await appointmentRepository.update(id, updateData);
+
+    // Sincronizar notas si se actualizaron
+    if (data.notes && data.notes.trim() !== '') {
+      await this.syncNotes(id, data.notes, existing.patient_id, userId);
+    }
+
     return this.getById(id);
   }
 
@@ -198,7 +242,7 @@ class AppointmentService {
    * @returns {Promise<object>}
    * @throws {AppError} Si la transición no es válida
    */
-  async updateStatus(id, statusName, reason = null) {
+  async updateStatus(id, statusName, reason = null, notes = null, userId = null) {
     const existing = await appointmentRepository.findByIdWithDetails(id);
     if (!existing) {
       throw new AppError('Cita no encontrada.', 404);
@@ -241,7 +285,16 @@ class AppointmentService {
       updateData.cancellation_reason = null;
     }
 
+    if (notes !== null) {
+      updateData.notes = notes;
+    }
+
     await appointmentRepository.update(id, updateData);
+
+    // Sincronizar notas si se proporcionaron
+    if (notes && notes.trim() !== '') {
+      await this.syncNotes(id, notes, existing.patient_id, userId);
+    }
 
     // Notificar cancelación
     if (statusName === 'cancelada') {
@@ -263,6 +316,57 @@ class AppointmentService {
     }
 
     return this.getById(id);
+  }
+
+  /**
+   * Sincroniza las notas de la cita con el historial clínico (tabla patient_notes).
+   */
+  async syncNotes(appointmentId, notes, patientId, userId = null) {
+    if (!notes || notes.trim() === '') return;
+
+    // Resolver userId si no se proporciona
+    let resolvedUserId = userId;
+    if (!resolvedUserId) {
+      const userRes = await query(
+        'SELECT d.user_id FROM appointments a JOIN doctors d ON a.doctor_id = d.id WHERE a.id = $1',
+        [appointmentId]
+      );
+      resolvedUserId = userRes.rows[0]?.user_id || 1; // Fallback al propietario
+    }
+
+    const existingNoteResult = await query(
+      'SELECT id FROM patient_notes WHERE appointment_id = $1 AND deleted_at IS NULL',
+      [appointmentId]
+    );
+
+    if (existingNoteResult.rows.length > 0) {
+      await query(
+        'UPDATE patient_notes SET content = $1, updated_at = NOW() WHERE id = $2',
+        [notes, existingNoteResult.rows[0].id]
+      );
+    } else {
+      const apptResult = await query('SELECT appointment_date FROM appointments WHERE id = $1', [appointmentId]);
+      const apptDate = apptResult.rows[0]?.appointment_date;
+
+      let formattedDate = new Date().toISOString().split('T')[0];
+      if (apptDate) {
+        const d = new Date(apptDate);
+        formattedDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      }
+
+      await query(
+        `INSERT INTO patient_notes (patient_id, user_id, title, content, type, appointment_id)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          patientId,
+          resolvedUserId,
+          `Nota de Cita - ${formattedDate}`,
+          notes,
+          'clinica',
+          appointmentId
+        ]
+      );
+    }
   }
 
   /**
