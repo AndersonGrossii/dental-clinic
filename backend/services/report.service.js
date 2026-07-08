@@ -132,18 +132,13 @@ class ReportService {
    */
   async getTreatmentReport(startDate, endDate) {
     const popularResult = await query(
-      `SELECT COALESCE(t.name, ii.description) AS treatment, COUNT(ii.id) AS count, COALESCE(SUM(ii.total), 0) AS total
-       FROM invoice_items ii
-       INNER JOIN invoices i ON ii.invoice_id = i.id AND i.deleted_at IS NULL AND i.status IN ('pagada', 'parcial')
-       LEFT JOIN treatments t ON ii.treatment_id = t.id
-       WHERE EXISTS (
-           SELECT 1 FROM payments p
-           WHERE p.invoice_id = i.id
-             AND p.payment_date >= $1
-             AND p.payment_date <= $2
-             AND p.deleted_at IS NULL
-       )
-       GROUP BY COALESCE(t.name, ii.description)
+      `SELECT t.name AS treatment, COUNT(pt.id) AS count, COALESCE(SUM(pt.price), 0) AS total
+       FROM patient_treatments pt
+       INNER JOIN treatments t ON pt.treatment_id = t.id
+       WHERE pt.deleted_at IS NULL
+         AND pt.created_at::date >= $1
+         AND pt.created_at::date <= $2
+       GROUP BY t.name
        ORDER BY count DESC, total DESC
        LIMIT 10`,
       [startDate, endDate]

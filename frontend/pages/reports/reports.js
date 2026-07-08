@@ -71,6 +71,7 @@ export class Reports {
           </div>
           <button id="generate-report-btn" class="btn btn-primary">Generar Reporte</button>
           <button id="export-csv-btn" class="btn btn-outline" style="display: none;">Exportar CSV</button>
+          <button id="print-report-btn" class="btn btn-outline" style="display: none;">Imprimir</button>
         </div>
       </div>
 
@@ -94,6 +95,11 @@ export class Reports {
 
     if (exportBtn) {
       exportBtn.addEventListener('click', () => this.exportCsv());
+    }
+
+    const printBtn = this.container.querySelector('#print-report-btn');
+    if (printBtn) {
+      printBtn.addEventListener('click', () => this.printReport());
     }
   }
 
@@ -222,18 +228,16 @@ export class Reports {
         const data = await reportService.getTreatments(from, to);
         this.reportData = data;
 
-        let popular = data.popular || [];
-        let rows = popular.map((t, idx) => `
+        let rows = data.popular.map((t, idx) => `
           <tr>
             <td><strong># ${idx + 1}</strong></td>
             <td><strong>${t.treatment}</strong></td>
             <td>${t.count} veces</td>
-            <td style="color: var(--success-600); font-weight: 600;">${formatCurrency(t.total)}</td>
           </tr>
         `).join('');
 
-        if (popular.length === 0) {
-          rows = `<tr><td colspan="4" style="text-align: center; color: var(--text-secondary);">No hay tratamientos registrados en el rango.</td></tr>`;
+        if (!data.popular || data.popular.length === 0) {
+          rows = `<tr><td colspan="3" style="text-align: center; color: var(--text-secondary);">No hay tratamientos registrados en el rango.</td></tr>`;
         }
 
         resultsContainer.innerHTML = `
@@ -254,7 +258,6 @@ export class Reports {
                       <th>Ranking</th>
                       <th>Servicio / Tratamiento</th>
                       <th>Frecuencia</th>
-                      <th>Ingresos Producidos</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -269,8 +272,8 @@ export class Reports {
         try { this.initTreatmentCharts(data); } catch (e) { console.warn('Error en treatment charts:', e); }
       }
 
-      // Mostrar botón de exportar
       this.container.querySelector('#export-csv-btn').style.display = 'inline-block';
+      this.container.querySelector('#print-report-btn').style.display = 'inline-block';
     } catch (err) {
       toast.error('Error al generar el reporte.');
       resultsContainer.innerHTML = `<p style="color: var(--danger-600);">Error: ${err.message}</p>`;
@@ -398,6 +401,41 @@ export class Reports {
         }
       });
     }
+  }
+
+  printReport() {
+    const typeLabels = { ingresos: 'Reporte Financiero (Ingresos)', citas: 'Reporte Operativo (Citas)', tratamientos: 'Reporte Clínico (Tratamientos)' };
+    const from = this.container.querySelector('#report-date-from').value;
+    const to = this.container.querySelector('#report-date-to').value;
+    const typeLabel = typeLabels[this.activeReport] || 'Reporte';
+    const title = `${typeLabel} — ${from} al ${to}`;
+
+    const contentEl = this.container.querySelector('#report-results-container');
+    const printContent = contentEl.innerHTML.replace(/<canvas[^>]*>.*?<\/canvas>/g, '');
+
+    const w = window.open('', '_blank');
+    w.document.write(`
+      <html><head><title>${title}</title>
+      <style>
+        body { font-family: sans-serif; padding: 40px; color: #333; }
+        h1 { font-size: 22px; margin-bottom: 4px; }
+        .subtitle { color: #666; margin-bottom: 24px; }
+        .card { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+        th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
+        th { background: #f5f5f5; }
+        .card-header h3 { margin: 0 0 8px 0; }
+        .empty-state { text-align: center; padding: 40px; color: #999; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+      </style></head><body>
+        <h1>Clinica Vides Dental</h1>
+        <div class="subtitle">${title}</div>
+        ${printContent}
+        <p style="text-align:center;color:#999;margin-top:40px;font-size:12px;">Generado el ${new Date().toLocaleString()}</p>
+      </body></html>
+    `);
+    w.document.close();
+    w.print();
   }
 
   exportCsv() {

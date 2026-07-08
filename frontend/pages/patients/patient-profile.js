@@ -111,7 +111,6 @@ export class PatientProfile {
           <td>${t.created_at ? formatDate(t.created_at) : 'N/A'}</td>
           <td>${t.treatment_name}</td>
           <td>${t.tooth_number ? `Pieza ${t.tooth_number}` : 'General'}</td>
-          <td><strong>${formatCurrency(t.price)}</strong></td>
           <td><span class="badge ${t.status === 'completado' ? 'badge-success' : 'badge-warning'}">${t.status.toUpperCase()}</span></td>
           <td>${t.notes || ''}</td>
         </tr>
@@ -120,7 +119,7 @@ export class PatientProfile {
       if (this.clinicalTreatments.length === 0) {
         treatmentRows = `
           <tr>
-            <td colspan="6" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
+            <td colspan="5" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
               No se han registrado tratamientos en el expediente de este paciente.
             </td>
           </tr>
@@ -139,7 +138,6 @@ export class PatientProfile {
                 <th>Fecha</th>
                 <th>Tratamiento</th>
                 <th>Pieza</th>
-                <th>Costo</th>
                 <th>Estado</th>
                 <th>Notas</th>
               </tr>
@@ -555,56 +553,27 @@ export class PatientProfile {
 
     const options = treatments
       .filter(t => t.is_active)
-      .map(t => `<option value="${t.id}" data-price="${t.default_price}">${t.name} (${t.code}) - ${formatCurrency(t.default_price)}</option>`)
+      .map(t => `<option value="${t.id}">${t.name} (${t.code})</option>`)
       .join('');
 
-    const calcTotal = (price, taxRate) => {
-      const p = parseFloat(price) || 0;
-      const tr = parseFloat(taxRate) || 0;
-      const tax = parseFloat((p * tr / 100).toFixed(2));
-      return { subtotal: p, tax, total: parseFloat((p + tax).toFixed(2)) };
-    };
-
-    let content = buildContent('');
-    let totals = calcTotal(0, 16);
-
-    function buildContent(selectHtml) {
-      return `
+    const content = `
       <form id="add-treatment-history-form">
         <div class="form-group">
           <label class="form-label">Tratamiento</label>
           <select name="treatment_id" id="treatment-select" class="form-select" required>
             <option value="">Seleccione un tratamiento...</option>
-            ${selectHtml || options}
+            ${options}
           </select>
         </div>
         <div class="form-group" style="margin-top: var(--space-3);">
           <label class="form-label">Diente / Pieza (Opcional)</label>
           <input type="number" name="tooth_number" class="form-input" placeholder="Ej: 18" />
         </div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); margin-top: var(--space-3);">
-          <div class="form-group" style="margin: 0;">
-            <label class="form-label">Precio ($)</label>
-            <input type="number" name="price" id="treatment-price" class="form-input" placeholder="Ej: 1200" required />
-          </div>
-          <div class="form-group" style="margin: 0;">
-            <label class="form-label">IVA (%)</label>
-            <input type="number" name="tax_rate" id="treatment-tax" class="form-input" value="16" step="0.01" min="0" max="100" required />
-          </div>
-        </div>
-        <div id="treatment-total-display" style="margin-top: var(--space-2); padding: var(--space-2); background: var(--color-bg-secondary); border-radius: var(--radius-md); font-size: var(--text-sm);">
-          <div style="display: flex; justify-content: space-between;"><span>Subtotal:</span><span id="t-subtotal">$0.00</span></div>
-          <div style="display: flex; justify-content: space-between;"><span>IVA:</span><span id="t-tax">$0.00</span></div>
-          <div style="display: flex; justify-content: space-between; font-weight: 700; border-top: 1px solid var(--color-border-light); padding-top: var(--space-1); margin-top: var(--space-1);"><span>Total a facturar:</span><span id="t-total">$0.00</span></div>
-        </div>
         <div class="form-group" style="margin-top: var(--space-3);">
           <label class="form-label">Notas Clínicas</label>
           <textarea name="notes" class="form-textarea" rows="3"></textarea>
         </div>
       </form>`;
-    }
-
-    content = buildContent(options);
 
     Modal.show({
       title: 'Registrar Tratamiento Clínico',
@@ -617,8 +586,6 @@ export class PatientProfile {
         data.patient_id = Number(this.patientId);
         data.status = 'completado';
         data.treatment_id = Number(data.treatment_id);
-        data.price = Number(data.price);
-        data.tax_rate = Number(data.tax_rate) || 0;
         if (data.tooth_number) data.tooth_number = Number(data.tooth_number);
 
         try {
@@ -633,37 +600,6 @@ export class PatientProfile {
         }
       }
     });
-
-    const updateTotals = () => {
-      const price = document.getElementById('treatment-price')?.value || 0;
-      const taxRate = document.getElementById('treatment-tax')?.value || 0;
-      totals = calcTotal(price, taxRate);
-      const fmt = (n) => '$' + n.toFixed(2);
-      const subEl = document.getElementById('t-subtotal');
-      const taxEl = document.getElementById('t-tax');
-      const totEl = document.getElementById('t-total');
-      if (subEl) subEl.textContent = fmt(totals.subtotal);
-      if (taxEl) taxEl.textContent = fmt(totals.tax);
-      if (totEl) totEl.textContent = fmt(totals.total);
-    };
-
-    setTimeout(() => {
-      const select = document.getElementById('treatment-select');
-      const priceInput = document.getElementById('treatment-price');
-      const taxInput = document.getElementById('treatment-tax');
-
-      if (select) {
-        select.addEventListener('change', () => {
-          const opt = select.options[select.selectedIndex];
-          const price = opt.dataset.price || '';
-          if (priceInput) priceInput.value = price;
-          updateTotals();
-        });
-      }
-      if (priceInput) priceInput.addEventListener('input', updateTotals);
-      if (taxInput) taxInput.addEventListener('input', updateTotals);
-      updateTotals();
-    }, 100);
   }
 
   async showAddNoteModal() {

@@ -240,7 +240,7 @@ export const createPatientTreatmentRules = [
   {
     field: 'price',
     label: 'Precio',
-    required: true,
+    required: false,
     type: 'number',
     min: 0,
   },

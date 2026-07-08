@@ -2,7 +2,6 @@
 // Servicio de Tratamientos — Lógica de negocio
 // ============================================
 import treatmentRepository from '../repositories/treatment.repository.js';
-import invoiceRepository from '../repositories/invoice.repository.js';
 import { AppError } from '../utils/errors.js';
 
 /**
@@ -197,7 +196,7 @@ class TreatmentService {
       doctor_id: data.doctor_id || null,
       appointment_id: data.appointment_id || null,
       tooth_number: data.tooth_number || null,
-      price: data.price,
+      price: data.price || 0,
       status: data.status || 'pendiente',
       notes: data.notes || null,
       start_date: data.start_date || null,
@@ -205,43 +204,7 @@ class TreatmentService {
       created_by: data.created_by || null,
     };
 
-    const ptRecord = await treatmentRepository.createPatientTreatment(ptData);
-
-    const taxRate = data.tax_rate !== undefined ? Number(data.tax_rate) : 16;
-    const subtotal = Number(data.price) || 0;
-    const taxAmount = parseFloat((subtotal * taxRate / 100).toFixed(2));
-    const total = parseFloat((subtotal + taxAmount).toFixed(2));
-    const invoiceNumber = await invoiceRepository.generateNumber();
-
-    const invoiceData = {
-      invoice_number: invoiceNumber,
-      patient_id: data.patient_id,
-      doctor_id: data.doctor_id || null,
-      subtotal,
-      tax_rate: taxRate,
-      tax_amount: taxAmount,
-      discount_amount: 0,
-      discount_percentage: 0,
-      total,
-      balance: total,
-      amount_paid: 0,
-      status: 'pendiente',
-      notes: `Auto-generado — ${treatment.name}`,
-      created_by: data.created_by || null,
-    };
-
-    const items = [{
-      treatment_id: data.treatment_id,
-      description: treatment.name,
-      quantity: 1,
-      unit_price: subtotal,
-      subtotal,
-      tooth_number: data.tooth_number || null,
-    }];
-
-    await invoiceRepository.createWithItems(invoiceData, items);
-
-    return ptRecord;
+    return treatmentRepository.createPatientTreatment(ptData);
   }
 
   /**

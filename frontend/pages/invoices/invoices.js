@@ -45,6 +45,7 @@ export class Invoices {
             <div style="display: flex; gap: var(--space-1);">
               <button class="btn btn-sm btn-outline print-invoice-btn" data-id="${inv.id}">Imprimir</button>
               ${parseFloat(inv.balance || 0) > 0 ? `<button class="btn btn-sm btn-primary pay-invoice-btn" data-id="${inv.id}">Pagar</button>` : ''}
+              ${inv.status === 'pendiente' && parseFloat(inv.balance || 0) === parseFloat(inv.total || 0) ? `<button class="btn btn-sm btn-danger delete-invoice-btn" data-id="${inv.id}">Eliminar</button>` : ''}
             </div>
           </td>
         </tr>
@@ -113,6 +114,10 @@ export class Invoices {
       if (e.target.classList.contains('pay-invoice-btn')) {
         const id = e.target.getAttribute('data-id');
         this.showRegisterPaymentModal(id);
+      }
+      if (e.target.classList.contains('delete-invoice-btn')) {
+        const id = e.target.getAttribute('data-id');
+        this.confirmDeleteInvoice(id);
       }
     });
   }
@@ -666,6 +671,33 @@ export class Invoices {
           return true;
         } catch (err) {
           toast.error(err.message || 'Error al guardar el pago');
+          return false;
+        }
+      }
+    });
+  }
+
+  async confirmDeleteInvoice(id) {
+    Modal.show({
+      title: 'Eliminar Factura',
+      content: `
+        <div style="text-align: center; padding: var(--space-2);">
+          <div style="font-size: 48px; margin-bottom: var(--space-2); color: var(--danger-500);">&#9888;</div>
+          <h3>Eliminar Factura</h3>
+          <p style="color: var(--text-secondary);">Esta acci&oacute;n eliminar&aacute; la factura permanentemente. ¿Est&aacute; seguro?</p>
+        </div>
+      `,
+      confirmText: 'Eliminar',
+      confirmClass: 'btn-danger',
+      onConfirm: async () => {
+        try {
+          await invoiceService.remove(id);
+          toast.success('Factura eliminada exitosamente');
+          await this.render();
+          this.mount();
+          return true;
+        } catch (err) {
+          toast.error(err.message || 'Error al eliminar la factura');
           return false;
         }
       }
