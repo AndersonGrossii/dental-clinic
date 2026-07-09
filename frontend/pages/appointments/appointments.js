@@ -776,6 +776,15 @@ export class Appointments {
     const menu = this.container.querySelector('#print-dropdown-menu');
     if (menu) menu.style.display = 'none';
 
+    // Open print window synchronously to bypass popup blocker
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast.error('El bloqueador de ventanas emergentes impidió abrir la agenda. Por favor, permita las ventanas emergentes.');
+      return;
+    }
+    printWindow.document.write('<html><head><title>Cargando Agenda...</title></head><body style="font-family:Arial,sans-serif;text-align:center;padding-top:100px;color:#555;"><h2>Cargando Agenda del Día, por favor espere...</h2></body></html>');
+    printWindow.document.close();
+
     try {
       const [appointments, allDoctors] = await Promise.all([
         appointmentService.getAll({
@@ -916,7 +925,7 @@ export class Appointments {
       }).join('');
 
       // Print
-      const printWindow = window.open('', '_blank');
+      printWindow.document.open();
       printWindow.document.write(`<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Agenda del Día — ${dateLabel}</title>
 <style>
@@ -933,7 +942,9 @@ export class Appointments {
       printWindow.document.close();
       printWindow.print();
     } catch (err) {
-      toast.error('Error al cargar la agenda del día');
+      console.error(err);
+      if (printWindow) printWindow.close();
+      toast.error('Error al cargar la agenda del día: ' + err.message);
     }
   }
 
@@ -948,6 +959,15 @@ export class Appointments {
     // Close dropdown
     const menu = this.container.querySelector('#print-dropdown-menu');
     if (menu) menu.style.display = 'none';
+
+    // Open print window synchronously to bypass popup blocker
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast.error('El bloqueador de ventanas emergentes impidió abrir la agenda. Por favor, permita las ventanas emergentes.');
+      return;
+    }
+    printWindow.document.write('<html><head><title>Cargando Agenda...</title></head><body style="font-family:Arial,sans-serif;text-align:center;padding-top:100px;color:#555;"><h2>Cargando Agenda Semanal, por favor espere...</h2></body></html>');
+    printWindow.document.close();
 
     try {
       const [appointments, allDoctors] = await Promise.all([
@@ -1126,7 +1146,7 @@ export class Appointments {
       }).join('');
 
       // Print
-      const printWindow = window.open('', '_blank');
+      printWindow.document.open();
       printWindow.document.write(`<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Agenda Semanal — ${weekLabel}</title>
 <style>
@@ -1143,7 +1163,9 @@ export class Appointments {
       printWindow.document.close();
       printWindow.print();
     } catch (err) {
-      toast.error('Error al cargar la agenda semanal');
+      console.error(err);
+      if (printWindow) printWindow.close();
+      toast.error('Error al cargar la agenda semanal: ' + err.message);
     }
   }
 
