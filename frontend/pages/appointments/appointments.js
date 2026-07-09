@@ -797,6 +797,16 @@ export class Appointments {
       const list = Array.isArray(appointments) ? appointments : [];
       const activeDoctors = (allDoctors || []).filter(d => d.is_active);
 
+      // Fetch schedules and unavailability for all active doctors for printDate
+      const [unavailResults, scheduleResults] = await Promise.all([
+        Promise.all(activeDoctors.map(d =>
+          doctorService.getUnavailability(d.id, printDate, printDate).catch(() => [])
+        )),
+        Promise.all(activeDoctors.map(d =>
+          doctorService.getSchedule(d.id).catch(() => [])
+        ))
+      ]);
+
       const getDocId = (a) => a.doctor_id || a.doctor?.id || null;
       const getDocName = (a) => a.doctor_name || a.doctor?.fullName || a.doctorName || 'Sin doctor';
       const getDocSpec = (a) => a.doctor_specialty || a.doctor?.specialty || '';
@@ -815,14 +825,33 @@ export class Appointments {
         groupsByDocId[key].appointments.push(a);
       });
 
-      // Build a list of doctors to print: all active doctors (even those with partial day or 0 appointments)
-      const doctorsToShow = activeDoctors.map(d => ({
-        id: d.id,
-        name: d.fullName || `${d.first_name || ''} ${d.last_name || ''}`.trim() || 'Doctor',
-        specialty: d.specialty || '',
-        appointments: (groupsByDocId[d.id]?.appointments || [])
-          .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''))
-      }));
+      // Build a list of doctors to print: only those who work on this day or have appointments
+      const dow = new Date(printDate + 'T12:00:00').getDay();
+      const doctorsToShow = [];
+      activeDoctors.forEach((d, idx) => {
+        const unavail = unavailResults[idx] || [];
+        const schedules = scheduleResults[idx] || [];
+        
+        const isUnavailable = unavail.some(rec => {
+          const start = rec.start_date.slice(0, 10);
+          const end = rec.end_date.slice(0, 10);
+          return printDate >= start && printDate <= end;
+        });
+        
+        const daySchedule = schedules.find(s => s.day_of_week === dow && s.is_active);
+        const worksOnThisDay = !isUnavailable && !!daySchedule;
+        const hasAppointments = (groupsByDocId[d.id]?.appointments || []).length > 0;
+        
+        if (worksOnThisDay || hasAppointments) {
+          doctorsToShow.push({
+            id: d.id,
+            name: d.fullName || `${d.first_name || ''} ${d.last_name || ''}`.trim() || 'Doctor',
+            specialty: d.specialty || '',
+            appointments: (groupsByDocId[d.id]?.appointments || [])
+              .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''))
+          });
+        }
+      });
 
       // Also include any leftover groups that didn't match an active doctor
       const matchedIds = new Set(activeDoctors.map(d => d.id));
@@ -973,6 +1002,16 @@ export class Appointments {
       const list = Array.isArray(appointments) ? appointments : [];
       const activeDoctors = (allDoctors || []).filter(d => d.is_active);
 
+      // Fetch schedules and unavailability for all active doctors for the weekly range
+      const [unavailResults, scheduleResults] = await Promise.all([
+        Promise.all(activeDoctors.map(d =>
+          doctorService.getUnavailability(d.id, startDate, endDate).catch(() => [])
+        )),
+        Promise.all(activeDoctors.map(d =>
+          doctorService.getSchedule(d.id).catch(() => [])
+        ))
+      ]);
+
       const getDocId = (a) => a.doctor_id || a.doctor?.id || null;
       const getDocName = (a) => a.doctor_name || a.doctor?.fullName || a.doctorName || 'Sin doctor';
       const getDocSpec = (a) => a.doctor_specialty || a.doctor?.specialty || '';
@@ -991,19 +1030,51 @@ export class Appointments {
         groupsByDocId[key].appointments.push(a);
       });
 
-      // Build doctors to print (all active, including partial-day doctors)
-      const doctorsToShow = activeDoctors.map(d => ({
-        id: d.id,
-        name: d.fullName || `${d.first_name || ''} ${d.last_name || ''}`.trim() || 'Doctor',
-        specialty: d.specialty || '',
-        appointments: (groupsByDocId[d.id]?.appointments || [])
-          .sort((a, b) => {
-            const dateA = a.appointment_date ? String(a.appointment_date).substring(0, 10) : '';
-            const dateB = b.appointment_date ? String(b.appointment_date).substring(0, 10) : '';
-            if (dateA !== dateB) return dateA.localeCompare(dateB);
-            return (a.start_time || '').localeCompare(b.start_time || '');
-          })
-      }));
+      // Build doctors to print: only those who work at least one day of this week or have appointments
+      const doctorsToShow = [];
+      activeDoctors.forEach((d, idx) => {
+        const unavailList = unavailResults[idx] || [];
+        const schedules = scheduleResults[idx] || [];
+        
+        let worksAtLeastOneDay = false;
+        // Check Mon-Sat (6 days)
+        for (let i = 0; i < 6; i++) {
+          const date = new Date(monday);
+          date.setDate(monday.getDate() + i);
+          const dateStr = this.toDateStr(date);
+          const currentDow = date.getDay();
+          
+          const isUnavailable = unavailList.some(rec => {
+            const start = rec.start_date.slice(0, 10);
+            const end = rec.end_date.slice(0, 10);
+            return dateStr >= start && dateStr <= end;
+          });
+          
+          const daySchedule = schedules.find(s => s.day_of_week === currentDow && s.is_active);
+          
+          if (!isUnavailable && !!daySchedule) {
+            worksAtLeastOneDay = true;
+            break;
+          }
+        }
+        
+        const hasAppointments = (groupsByDocId[d.id]?.appointments || []).length > 0;
+        
+        if (worksAtLeastOneDay || hasAppointments) {
+          doctorsToShow.push({
+            id: d.id,
+            name: d.fullName || `${d.first_name || ''} ${d.last_name || ''}`.trim() || 'Doctor',
+            specialty: d.specialty || '',
+            appointments: (groupsByDocId[d.id]?.appointments || [])
+              .sort((a, b) => {
+                const dateA = a.appointment_date ? String(a.appointment_date).substring(0, 10) : '';
+                const dateB = b.appointment_date ? String(b.appointment_date).substring(0, 10) : '';
+                if (dateA !== dateB) return dateA.localeCompare(dateB);
+                return (a.start_time || '').localeCompare(b.start_time || '');
+              })
+          });
+        }
+      });
 
       // Also include leftover groups
       const matchedIds = new Set(activeDoctors.map(d => d.id));
