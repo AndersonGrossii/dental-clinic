@@ -742,88 +742,162 @@ export class Appointments {
     const today = this.toDateStr(new Date());
 
     try {
-      const appointments = await appointmentService.getAll({
-        date_from: today, date_to: today,
-        limit: 9999,
-        sortBy: 'a.start_time', sortOrder: 'ASC'
-      });
+      // Fetch all appointments for today and all active doctors
+      const [appointments, allDoctors] = await Promise.all([
+        appointmentService.getAll({
+          date_from: today, date_to: today,
+          limit: 9999,
+          sortBy: 'a.start_time', sortOrder: 'ASC'
+        }),
+        doctorService.getAll()
+      ]);
       const list = Array.isArray(appointments) ? appointments : [];
+      const activeDoctors = (allDoctors || []).filter(d => d.is_active);
 
+      const getDocId = (a) => a.doctor_id || a.doctor?.id || null;
       const getDocName = (a) => a.doctor_name || a.doctor?.fullName || a.doctorName || 'Sin doctor';
       const getDocSpec = (a) => a.doctor_specialty || a.doctor?.specialty || '';
+      const getPatient = (a) => a.patient_name || a.patient?.fullName || 'Sin paciente';
+      const getTreatment = (a) => a.treatment || a.treatment_name || a.reason || '';
+      const getStatus = (a) => {
+        const s = (a.status || '').toLowerCase();
+        const labels = {
+          scheduled: 'Programada', confirmed: 'Confirmada', completed: 'Completada',
+          cancelled: 'Cancelada', no_show: 'No asistió', in_progress: 'En curso'
+        };
+        return labels[s] || a.status || '';
+      };
 
-      const groups = {};
+      // Group appointments by doctor id
+      const groupsByDocId = {};
       list.forEach(a => {
-        const name = getDocName(a);
-        if (!groups[name]) groups[name] = { doctor_name: name, doctor_specialty: getDocSpec(a), appointments: [] };
-        groups[name].appointments.push(a);
+        const docId = getDocId(a);
+        const key = docId || getDocName(a);
+        if (!groupsByDocId[key]) {
+          groupsByDocId[key] = { doctor_id: docId, doctor_name: getDocName(a), doctor_specialty: getDocSpec(a), appointments: [] };
+        }
+        groupsByDocId[key].appointments.push(a);
       });
 
-      const allIds = new Set(list.map(a => a.id));
-      const totalAppts = allIds.size;
+      // Build a list of doctors to print: all active doctors (even those with 0 appointments)
+      const doctorsToShow = activeDoctors.map(d => ({
+        id: d.id,
+        name: d.fullName || `${d.first_name || ''} ${d.last_name || ''}`.trim() || 'Doctor',
+        specialty: d.specialty || '',
+        appointments: (groupsByDocId[d.id]?.appointments || [])
+          .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''))
+      }));
 
+      // Also include any leftover groups that didn't match an active doctor
+      const matchedIds = new Set(activeDoctors.map(d => d.id));
+      Object.values(groupsByDocId).forEach(g => {
+        if (!matchedIds.has(g.doctor_id)) {
+          doctorsToShow.push({
+            id: g.doctor_id,
+            name: g.doctor_name,
+            specialty: g.doctor_specialty,
+            appointments: g.appointments.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''))
+          });
+        }
+      });
+
+      // Time slots
       const slots = [];
       for (let m = 540; m < 1200; m += slotDuration) {
         slots.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
       }
 
+      // Date label
       const clinic = state.get('clinicInfo') || {};
       const dateParts = new Date();
       const dayNames = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
       const monthNames = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
       const dateLabel = `${dayNames[dateParts.getDay()]}, ${dateParts.getDate()} de ${monthNames[dateParts.getMonth()]} de ${dateParts.getFullYear()}`;
 
+      const allIds = new Set(list.map(a => a.id));
+      const totalAppts = allIds.size;
+
+      // Styles
       const cellStyle = 'border: 1px solid #ddd; padding: 6px 10px; font-size: 12px;';
       const thStyle = `${cellStyle} background: #f0f0f0; font-weight: 600; text-align: left;`;
+      const statusColors = {
+        scheduled: '#2563eb', confirmed: '#059669', completed: '#6b7280',
+        cancelled: '#dc2626', no_show: '#d97706', in_progress: '#7c3aed'
+      };
 
-      const groupsArr = Object.values(groups).map(g => ({
-        name: g.doctor_name,
-        specialty: g.doctor_specialty,
-        sorted: [...g.appointments].sort((a, b) =>
-          (a.start_time || '').localeCompare(b.start_time || '')
-        )
-      }));
+      // Build one page section per doctor
+      const doctorPages = doctorsToShow.map((doc, idx) => {
+        const docApptCount = doc.appointments.length;
 
-      let headerCells = `<th style="${thStyle}width: 60px;">Hora</th>`;
-      groupsArr.forEach(g => {
-        headerCells += `<th style="${thStyle}">${g.name}${g.specialty ? '<br><span style="font-weight:400;font-size:10px;color:#666;">' + g.specialty + '</span>' : ''}</th>`;
-      });
-
-      let rows = '';
-      slots.forEach(slot => {
-        rows += `<tr>`;
-        rows += `<td style="${cellStyle}font-weight:600;color:#555;">${slot}</td>`;
-        groupsArr.forEach(g => {
-          const match = g.sorted.find(a => {
+        // Build table rows: one row per time slot
+        let rows = '';
+        slots.forEach(slot => {
+          const match = doc.appointments.find(a => {
             const s = a.start_time ? a.start_time.substring(0, 5) : '';
             const e = a.end_time ? a.end_time.substring(0, 5) : '';
             return s <= slot && e > slot;
           });
-          rows += `<td style="${cellStyle}${match ? '' : ' color:#ddd;'}">${match ? match.patient_name : '—'}</td>`;
+          const statusKey = match ? (match.status || '').toLowerCase() : '';
+          const statusColor = statusColors[statusKey] || '#333';
+          rows += `<tr>
+            <td style="${cellStyle}font-weight:600;color:#555;width:60px;">${slot}</td>
+            <td style="${cellStyle}${match ? '' : 'color:#ccc;'}">${match ? getPatient(match) : '—'}</td>
+            <td style="${cellStyle}${match ? '' : 'color:#ccc;'}">${match ? getTreatment(match) : ''}</td>
+            <td style="${cellStyle}"><span style="color:${statusColor};font-weight:500;">${match ? getStatus(match) : ''}</span></td>
+          </tr>`;
         });
-        rows += `</tr>`;
-      });
 
-      const bodyHtml = `
-        <table style="width: 100%; border-collapse: collapse;">
-          <thead><tr>${headerCells}</tr></thead>
-          <tbody>${rows}</tbody>
-        </table>`;
+        return `
+          <div style="page-break-after: ${idx < doctorsToShow.length - 1 ? 'always' : 'auto'}; padding: 30px 40px;">
+            <!-- Clinic header -->
+            <div style="text-align: center; margin-bottom: 20px; padding-bottom: 14px; border-bottom: 3px double #ccc;">
+              <h1 style="margin: 0; font-size: 22px; color: #111;">${clinic.name || 'Clinica Vides Dental'}</h1>
+              <p style="margin: 4px 0 0; font-size: 13px; color: #555;">${clinic.address || ''}${clinic.phone ? ' — Tel: ' + clinic.phone : ''}</p>
+            </div>
+            <!-- Doctor header -->
+            <div style="margin-bottom: 18px; display: flex; justify-content: space-between; align-items: baseline;">
+              <div>
+                <h2 style="margin: 0; font-size: 18px; color: #222;">Dr. ${doc.name}</h2>
+                ${doc.specialty ? `<p style="margin: 2px 0 0; font-size: 13px; color: #666;">${doc.specialty}</p>` : ''}
+              </div>
+              <div style="text-align: right;">
+                <p style="margin: 0; font-size: 14px; font-weight: 600; color: #333;">Agenda del Día</p>
+                <p style="margin: 2px 0 0; font-size: 13px; color: #666;">${dateLabel}</p>
+              </div>
+            </div>
+            <!-- Appointments table -->
+            <table style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr>
+                  <th style="${thStyle}width:60px;">Hora</th>
+                  <th style="${thStyle}">Paciente</th>
+                  <th style="${thStyle}">Tratamiento</th>
+                  <th style="${thStyle}width:110px;">Estado</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+            <!-- Footer -->
+            <div style="margin-top: 16px; padding-top: 10px; border-top: 1px solid #ddd; font-size: 13px; color: #555; display: flex; justify-content: space-between;">
+              <span>Citas: <strong>${docApptCount}</strong></span>
+              <span>Intervalo: ${slotDuration} min</span>
+            </div>
+          </div>`;
+      }).join('');
 
+      // Print
       const printWindow = window.open('', '_blank');
       printWindow.document.write(`<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Agenda del Día</title></head>
-<body style="font-family: Arial, sans-serif; padding: 30px 40px; color: #333; margin: 0;">
-  <div style="text-align: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 3px double #ccc;">
-    <h1 style="margin: 0; font-size: 22px; color: #111;">${clinic.name || 'Clinica Vides Dental'}</h1>
-    <p style="margin: 4px 0 0; font-size: 13px; color: #555;">${clinic.address || ''}${clinic.phone ? ' — Tel: ' + clinic.phone : ''}</p>
-    <h2 style="margin: 12px 0 0; font-size: 17px; color: #333;">Agenda del Día</h2>
-    <p style="margin: 2px 0 0; font-size: 13px; color: #666;">${dateLabel}</p>
-  </div>
-  ${bodyHtml}
-  <div style="margin-top: 20px; padding-top: 12px; border-top: 1px solid #ddd; font-size: 13px; color: #555;">
-    Total: <strong>${totalAppts}</strong> cita${totalAppts !== 1 ? 's' : ''} programada${totalAppts !== 1 ? 's' : ''}
-    &nbsp;|&nbsp; Intervalo: ${slotDuration} min
+<html><head><meta charset="utf-8"><title>Agenda del Día — Todos los Doctores</title>
+<style>
+  @media print { body { margin: 0; } }
+  @page { margin: 20mm 15mm; }
+</style>
+</head>
+<body style="font-family: Arial, sans-serif; color: #333; margin: 0;">
+  ${doctorPages}
+  <div style="padding: 0 40px 20px; font-size: 12px; color: #888; text-align: center; border-top: 1px solid #eee; padding-top: 10px;">
+    Resumen general: <strong>${totalAppts}</strong> cita${totalAppts !== 1 ? 's' : ''} programada${totalAppts !== 1 ? 's' : ''} — ${doctorsToShow.length} doctor${doctorsToShow.length !== 1 ? 'es' : ''}
   </div>
 </body></html>`);
       printWindow.document.close();
