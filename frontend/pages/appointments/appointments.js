@@ -341,6 +341,24 @@ export class Appointments {
     `;
 
     this.container.innerHTML = `
+      <style>
+        .print-dropdown-btn-item {
+          display: block;
+          width: 100%;
+          text-align: left;
+          border: none !important;
+          border-radius: 0 !important;
+          padding: 10px 16px;
+          font-size: var(--text-sm);
+          color: var(--color-text);
+          background: transparent;
+          cursor: pointer;
+          transition: background 0.15s ease;
+        }
+        .print-dropdown-btn-item:hover {
+          background: var(--color-bg-secondary, #f5f5f5) !important;
+        }
+      </style>
       <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4); flex-wrap: wrap; gap: var(--space-3);">
         <div>
           <h1 class="page-title">Agenda y Citas</h1>
@@ -355,9 +373,9 @@ export class Appointments {
           <div style="position: relative; display: inline-block;">
             <button id="print-toggle-btn" class="btn btn-outline">🖨️ Imprimir ▾</button>
             <div id="print-dropdown-menu" style="display: none; position: absolute; right: 0; top: 100%; margin-top: 4px; background: var(--color-surface, #fff); border: 1px solid var(--color-border, #ddd); border-radius: var(--radius-md, 8px); box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 100; min-width: 220px; overflow: hidden;">
-              <button id="print-daily-btn" class="btn" style="display: block; width: 100%; text-align: left; border: none; border-radius: 0; padding: 10px 16px; font-size: var(--text-sm); color: var(--color-text); background: transparent; cursor: pointer;" onmouseover="this.style.background='var(--color-bg-secondary, #f5f5f5)'" onmouseout="this.style.background='transparent'">📅 Imprimir Agenda del Día</button>
+              <button id="print-daily-btn" class="btn print-dropdown-btn-item">📅 Imprimir Agenda del Día</button>
               <div style="height: 1px; background: var(--color-border, #eee); margin: 0 12px;"></div>
-              <button id="print-weekly-btn" class="btn" style="display: block; width: 100%; text-align: left; border: none; border-radius: 0; padding: 10px 16px; font-size: var(--text-sm); color: var(--color-text); background: transparent; cursor: pointer;" onmouseover="this.style.background='var(--color-bg-secondary, #f5f5f5)'" onmouseout="this.style.background='transparent'">📋 Imprimir Agenda Semanal</button>
+              <button id="print-weekly-btn" class="btn print-dropdown-btn-item">📋 Imprimir Agenda Semanal</button>
             </div>
           </div>
           <button id="add-appointment-btn" class="btn btn-primary">+ Nueva Cita</button>
