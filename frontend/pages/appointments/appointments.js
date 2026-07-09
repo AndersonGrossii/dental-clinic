@@ -802,14 +802,7 @@ export class Appointments {
       const getDocSpec = (a) => a.doctor_specialty || a.doctor?.specialty || '';
       const getPatient = (a) => a.patient_name || a.patient?.fullName || 'Sin paciente';
       const getTreatment = (a) => a.treatment || a.treatment_name || a.reason || '';
-      const getStatus = (a) => {
-        const s = (a.status || '').toLowerCase();
-        const labels = {
-          scheduled: 'Programada', confirmed: 'Confirmada', completed: 'Completada',
-          cancelled: 'Cancelada', no_show: 'No asistió', in_progress: 'En curso'
-        };
-        return labels[s] || a.status || '';
-      };
+      const getStatus = (a) => a.status_label || a.status_name || '';
 
       // Group appointments by doctor id
       const groupsByDocId = {};
@@ -880,8 +873,7 @@ export class Appointments {
             const e = a.end_time ? a.end_time.substring(0, 5) : '';
             return s <= slot && e > slot;
           });
-          const statusKey = match ? (match.status || '').toLowerCase() : '';
-          const statusColor = statusColors[statusKey] || '#333';
+          const statusColor = match ? match.status_color || '#333' : '#333';
           rows += `<tr>
             <td style="${cellStyle}font-weight:600;color:#555;width:60px;">${slot}</td>
             <td style="${cellStyle}${match ? '' : 'color:#ccc;'}">${match ? getPatient(match) : '—'}</td>
@@ -986,14 +978,7 @@ export class Appointments {
       const getDocSpec = (a) => a.doctor_specialty || a.doctor?.specialty || '';
       const getPatient = (a) => a.patient_name || a.patient?.fullName || 'Sin paciente';
       const getTreatment = (a) => a.treatment || a.treatment_name || a.reason || '';
-      const getStatus = (a) => {
-        const s = (a.status || '').toLowerCase();
-        const labels = {
-          scheduled: 'Programada', confirmed: 'Confirmada', completed: 'Completada',
-          cancelled: 'Cancelada', no_show: 'No asistió', in_progress: 'En curso'
-        };
-        return labels[s] || a.status || '';
-      };
+      const getStatus = (a) => a.status_label || a.status_name || '';
 
       // Group appointments by doctor id then by date
       const groupsByDocId = {};
@@ -1104,8 +1089,7 @@ export class Appointments {
               return s <= slot && e > slot;
             });
             if (match) {
-              const statusKey = (match.status || '').toLowerCase();
-              const statusColor = statusColors[statusKey] || '#333';
+              const statusColor = match.status_color || '#333';
               rows += `<td style="${cellStyle}">
                 <div style="font-weight:600;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">${getPatient(match)}</div>
                 <div style="font-size:9px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">${getTreatment(match)}</div>
