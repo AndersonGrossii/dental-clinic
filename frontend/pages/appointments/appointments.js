@@ -73,6 +73,12 @@ export class Appointments {
         this.showChangeStatusModal(e.target.dataset.id);
       }
       if (e.target.id === 'print-daily-btn') this.printDailyAgenda();
+      if (e.target.id === 'print-weekly-btn') this.printWeeklyAgenda();
+      if (e.target.id === 'print-toggle-btn') {
+        const menu = this.container.querySelector('#print-dropdown-menu');
+        if (menu) menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+        return;
+      }
       if (e.target.id === 'add-appointment-btn') this.showAddAppointmentModal();
       if (e.target.id === 'apply-filters-btn') this.applyFilters();
       if (e.target.id === 'clear-filters-btn') this.clearFilters();
@@ -346,7 +352,14 @@ export class Appointments {
             <option value="30" selected>30 min</option>
             <option value="60">60 min</option>
           </select>
-          <button id="print-daily-btn" class="btn btn-outline">Imprimir Agenda</button>
+          <div style="position: relative; display: inline-block;">
+            <button id="print-toggle-btn" class="btn btn-outline">🖨️ Imprimir ▾</button>
+            <div id="print-dropdown-menu" style="display: none; position: absolute; right: 0; top: 100%; margin-top: 4px; background: var(--color-surface, #fff); border: 1px solid var(--color-border, #ddd); border-radius: var(--radius-md, 8px); box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 100; min-width: 220px; overflow: hidden;">
+              <button id="print-daily-btn" class="btn" style="display: block; width: 100%; text-align: left; border: none; border-radius: 0; padding: 10px 16px; font-size: var(--text-sm); color: var(--color-text); background: transparent; cursor: pointer;" onmouseover="this.style.background='var(--color-bg-secondary, #f5f5f5)'" onmouseout="this.style.background='transparent'">📅 Imprimir Agenda del Día</button>
+              <div style="height: 1px; background: var(--color-border, #eee); margin: 0 12px;"></div>
+              <button id="print-weekly-btn" class="btn" style="display: block; width: 100%; text-align: left; border: none; border-radius: 0; padding: 10px 16px; font-size: var(--text-sm); color: var(--color-text); background: transparent; cursor: pointer;" onmouseover="this.style.background='var(--color-bg-secondary, #f5f5f5)'" onmouseout="this.style.background='transparent'">📋 Imprimir Agenda Semanal</button>
+            </div>
+          </div>
           <button id="add-appointment-btn" class="btn btn-primary">+ Nueva Cita</button>
         </div>
       </div>
@@ -739,13 +752,16 @@ export class Appointments {
 
   async printDailyAgenda() {
     const slotDuration = parseInt(this.container.querySelector('#slot-duration')?.value || '30', 10);
-    const today = this.toDateStr(new Date());
+    const printDate = this.toDateStr(this.currentDate);
+
+    // Close dropdown
+    const menu = this.container.querySelector('#print-dropdown-menu');
+    if (menu) menu.style.display = 'none';
 
     try {
-      // Fetch all appointments for today and all active doctors
       const [appointments, allDoctors] = await Promise.all([
         appointmentService.getAll({
-          date_from: today, date_to: today,
+          date_from: printDate, date_to: printDate,
           limit: 9999,
           sortBy: 'a.start_time', sortOrder: 'ASC'
         }),
@@ -779,7 +795,7 @@ export class Appointments {
         groupsByDocId[key].appointments.push(a);
       });
 
-      // Build a list of doctors to print: all active doctors (even those with 0 appointments)
+      // Build a list of doctors to print: all active doctors (even those with partial day or 0 appointments)
       const doctorsToShow = activeDoctors.map(d => ({
         id: d.id,
         name: d.fullName || `${d.first_name || ''} ${d.last_name || ''}`.trim() || 'Doctor',
@@ -807,9 +823,9 @@ export class Appointments {
         slots.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
       }
 
-      // Date label
+      // Date label using the selected date
       const clinic = state.get('clinicInfo') || {};
-      const dateParts = new Date();
+      const dateParts = new Date(printDate + 'T12:00:00');
       const dayNames = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
       const monthNames = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
       const dateLabel = `${dayNames[dateParts.getDay()]}, ${dateParts.getDate()} de ${monthNames[dateParts.getMonth()]} de ${dateParts.getFullYear()}`;
@@ -849,12 +865,10 @@ export class Appointments {
 
         return `
           <div style="page-break-after: ${idx < doctorsToShow.length - 1 ? 'always' : 'auto'}; padding: 30px 40px;">
-            <!-- Clinic header -->
             <div style="text-align: center; margin-bottom: 20px; padding-bottom: 14px; border-bottom: 3px double #ccc;">
               <h1 style="margin: 0; font-size: 22px; color: #111;">${clinic.name || 'Clinica Vides Dental'}</h1>
               <p style="margin: 4px 0 0; font-size: 13px; color: #555;">${clinic.address || ''}${clinic.phone ? ' — Tel: ' + clinic.phone : ''}</p>
             </div>
-            <!-- Doctor header -->
             <div style="margin-bottom: 18px; display: flex; justify-content: space-between; align-items: baseline;">
               <div>
                 <h2 style="margin: 0; font-size: 18px; color: #222;">Dr. ${doc.name}</h2>
@@ -865,7 +879,6 @@ export class Appointments {
                 <p style="margin: 2px 0 0; font-size: 13px; color: #666;">${dateLabel}</p>
               </div>
             </div>
-            <!-- Appointments table -->
             <table style="width: 100%; border-collapse: collapse;">
               <thead>
                 <tr>
@@ -877,7 +890,6 @@ export class Appointments {
               </thead>
               <tbody>${rows}</tbody>
             </table>
-            <!-- Footer -->
             <div style="margin-top: 16px; padding-top: 10px; border-top: 1px solid #ddd; font-size: 13px; color: #555; display: flex; justify-content: space-between;">
               <span>Citas: <strong>${docApptCount}</strong></span>
               <span>Intervalo: ${slotDuration} min</span>
@@ -888,7 +900,7 @@ export class Appointments {
       // Print
       const printWindow = window.open('', '_blank');
       printWindow.document.write(`<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Agenda del Día — Todos los Doctores</title>
+<html><head><meta charset="utf-8"><title>Agenda del Día — ${dateLabel}</title>
 <style>
   @media print { body { margin: 0; } }
   @page { margin: 20mm 15mm; }
@@ -904,6 +916,216 @@ export class Appointments {
       printWindow.print();
     } catch (err) {
       toast.error('Error al cargar la agenda del día');
+    }
+  }
+
+  async printWeeklyAgenda() {
+    const slotDuration = parseInt(this.container.querySelector('#slot-duration')?.value || '30', 10);
+    const monday = this.getMonday(this.currentDate);
+    const saturday = new Date(monday);
+    saturday.setDate(monday.getDate() + 5);
+    const startDate = this.toDateStr(monday);
+    const endDate = this.toDateStr(saturday);
+
+    // Close dropdown
+    const menu = this.container.querySelector('#print-dropdown-menu');
+    if (menu) menu.style.display = 'none';
+
+    try {
+      const [appointments, allDoctors] = await Promise.all([
+        appointmentService.getAll({
+          date_from: startDate, date_to: endDate,
+          limit: 9999,
+          sortBy: 'a.start_time', sortOrder: 'ASC'
+        }),
+        doctorService.getAll()
+      ]);
+      const list = Array.isArray(appointments) ? appointments : [];
+      const activeDoctors = (allDoctors || []).filter(d => d.is_active);
+
+      const getDocId = (a) => a.doctor_id || a.doctor?.id || null;
+      const getDocName = (a) => a.doctor_name || a.doctor?.fullName || a.doctorName || 'Sin doctor';
+      const getDocSpec = (a) => a.doctor_specialty || a.doctor?.specialty || '';
+      const getPatient = (a) => a.patient_name || a.patient?.fullName || 'Sin paciente';
+      const getTreatment = (a) => a.treatment || a.treatment_name || a.reason || '';
+      const getStatus = (a) => {
+        const s = (a.status || '').toLowerCase();
+        const labels = {
+          scheduled: 'Programada', confirmed: 'Confirmada', completed: 'Completada',
+          cancelled: 'Cancelada', no_show: 'No asistió', in_progress: 'En curso'
+        };
+        return labels[s] || a.status || '';
+      };
+
+      // Group appointments by doctor id then by date
+      const groupsByDocId = {};
+      list.forEach(a => {
+        const docId = getDocId(a);
+        const key = docId || getDocName(a);
+        if (!groupsByDocId[key]) {
+          groupsByDocId[key] = { doctor_id: docId, doctor_name: getDocName(a), doctor_specialty: getDocSpec(a), appointments: [] };
+        }
+        groupsByDocId[key].appointments.push(a);
+      });
+
+      // Build doctors to print (all active, including partial-day doctors)
+      const doctorsToShow = activeDoctors.map(d => ({
+        id: d.id,
+        name: d.fullName || `${d.first_name || ''} ${d.last_name || ''}`.trim() || 'Doctor',
+        specialty: d.specialty || '',
+        appointments: (groupsByDocId[d.id]?.appointments || [])
+          .sort((a, b) => {
+            const dateA = a.appointment_date ? String(a.appointment_date).substring(0, 10) : '';
+            const dateB = b.appointment_date ? String(b.appointment_date).substring(0, 10) : '';
+            if (dateA !== dateB) return dateA.localeCompare(dateB);
+            return (a.start_time || '').localeCompare(b.start_time || '');
+          })
+      }));
+
+      // Also include leftover groups
+      const matchedIds = new Set(activeDoctors.map(d => d.id));
+      Object.values(groupsByDocId).forEach(g => {
+        if (!matchedIds.has(g.doctor_id)) {
+          doctorsToShow.push({
+            id: g.doctor_id,
+            name: g.doctor_name,
+            specialty: g.doctor_specialty,
+            appointments: g.appointments.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''))
+          });
+        }
+      });
+
+      // Build day columns (Mon-Sat)
+      const weekDays = [];
+      const dayNamesShort = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+      const dayNamesFull = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+      const monthNames = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+      for (let i = 0; i < 6; i++) {
+        const d = new Date(monday);
+        d.setDate(monday.getDate() + i);
+        weekDays.push({
+          dateStr: this.toDateStr(d),
+          label: `${dayNamesShort[i]} ${d.getDate()}`,
+          fullLabel: `${dayNamesFull[d.getDay()]} ${d.getDate()}`
+        });
+      }
+
+      // Week label
+      const monDate = new Date(monday);
+      const satDate = new Date(saturday);
+      const weekLabel = monDate.getMonth() === satDate.getMonth()
+        ? `${monDate.getDate()} - ${satDate.getDate()} de ${monthNames[monDate.getMonth()]} de ${monDate.getFullYear()}`
+        : `${monDate.getDate()} ${monthNames[monDate.getMonth()]} - ${satDate.getDate()} ${monthNames[satDate.getMonth()]} ${satDate.getFullYear()}`;
+
+      // Time slots
+      const slots = [];
+      for (let m = 540; m < 1200; m += slotDuration) {
+        slots.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
+      }
+
+      const clinic = state.get('clinicInfo') || {};
+      const allIds = new Set(list.map(a => a.id));
+      const totalAppts = allIds.size;
+
+      // Styles
+      const cellStyle = 'border: 1px solid #ddd; padding: 4px 6px; font-size: 10px; vertical-align: top;';
+      const thStyle = `${cellStyle} background: #f0f0f0; font-weight: 600; text-align: center; font-size: 11px;`;
+      const statusColors = {
+        scheduled: '#2563eb', confirmed: '#059669', completed: '#6b7280',
+        cancelled: '#dc2626', no_show: '#d97706', in_progress: '#7c3aed'
+      };
+
+      // Build one page per doctor
+      const doctorPages = doctorsToShow.map((doc, idx) => {
+        const docApptCount = doc.appointments.length;
+
+        // Get appointments indexed by date
+        const apptsByDate = {};
+        doc.appointments.forEach(a => {
+          const aptDate = a.appointment_date ? String(a.appointment_date).substring(0, 10) : '';
+          if (!apptsByDate[aptDate]) apptsByDate[aptDate] = [];
+          apptsByDate[aptDate].push(a);
+        });
+
+        // Header columns
+        let headerCells = `<th style="${thStyle}width:55px;">Hora</th>`;
+        weekDays.forEach(wd => {
+          headerCells += `<th style="${thStyle}min-width:100px;">${wd.label}</th>`;
+        });
+
+        // Build rows
+        let rows = '';
+        slots.forEach(slot => {
+          rows += '<tr>';
+          rows += `<td style="${cellStyle}font-weight:600;color:#555;text-align:center;width:55px;">${slot}</td>`;
+          weekDays.forEach(wd => {
+            const dayAppts = apptsByDate[wd.dateStr] || [];
+            const match = dayAppts.find(a => {
+              const s = a.start_time ? a.start_time.substring(0, 5) : '';
+              const e = a.end_time ? a.end_time.substring(0, 5) : '';
+              return s <= slot && e > slot;
+            });
+            if (match) {
+              const statusKey = (match.status || '').toLowerCase();
+              const statusColor = statusColors[statusKey] || '#333';
+              rows += `<td style="${cellStyle}">
+                <div style="font-weight:600;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">${getPatient(match)}</div>
+                <div style="font-size:9px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">${getTreatment(match)}</div>
+                <div style="font-size:9px;color:${statusColor};font-weight:500;">${getStatus(match)}</div>
+              </td>`;
+            } else {
+              rows += `<td style="${cellStyle}color:#ddd;text-align:center;">—</td>`;
+            }
+          });
+          rows += '</tr>';
+        });
+
+        return `
+          <div style="page-break-after: ${idx < doctorsToShow.length - 1 ? 'always' : 'auto'}; padding: 20px 25px;">
+            <div style="text-align: center; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 3px double #ccc;">
+              <h1 style="margin: 0; font-size: 20px; color: #111;">${clinic.name || 'Clinica Vides Dental'}</h1>
+              <p style="margin: 4px 0 0; font-size: 12px; color: #555;">${clinic.address || ''}${clinic.phone ? ' — Tel: ' + clinic.phone : ''}</p>
+            </div>
+            <div style="margin-bottom: 14px; display: flex; justify-content: space-between; align-items: baseline;">
+              <div>
+                <h2 style="margin: 0; font-size: 16px; color: #222;">Dr. ${doc.name}</h2>
+                ${doc.specialty ? `<p style="margin: 2px 0 0; font-size: 12px; color: #666;">${doc.specialty}</p>` : ''}
+              </div>
+              <div style="text-align: right;">
+                <p style="margin: 0; font-size: 13px; font-weight: 600; color: #333;">Agenda Semanal</p>
+                <p style="margin: 2px 0 0; font-size: 12px; color: #666;">${weekLabel}</p>
+              </div>
+            </div>
+            <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+              <thead><tr>${headerCells}</tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+            <div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid #ddd; font-size: 12px; color: #555; display: flex; justify-content: space-between;">
+              <span>Citas de la semana: <strong>${docApptCount}</strong></span>
+              <span>Intervalo: ${slotDuration} min</span>
+            </div>
+          </div>`;
+      }).join('');
+
+      // Print
+      const printWindow = window.open('', '_blank');
+      printWindow.document.write(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Agenda Semanal — ${weekLabel}</title>
+<style>
+  @media print { body { margin: 0; } }
+  @page { size: landscape; margin: 12mm 10mm; }
+</style>
+</head>
+<body style="font-family: Arial, sans-serif; color: #333; margin: 0;">
+  ${doctorPages}
+  <div style="padding: 0 25px 16px; font-size: 11px; color: #888; text-align: center; border-top: 1px solid #eee; padding-top: 8px;">
+    Resumen semanal: <strong>${totalAppts}</strong> cita${totalAppts !== 1 ? 's' : ''} programada${totalAppts !== 1 ? 's' : ''} — ${doctorsToShow.length} doctor${doctorsToShow.length !== 1 ? 'es' : ''}
+  </div>
+</body></html>`);
+      printWindow.document.close();
+      printWindow.print();
+    } catch (err) {
+      toast.error('Error al cargar la agenda semanal');
     }
   }
 
