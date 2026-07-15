@@ -669,7 +669,7 @@ export class Quotations {
           </style>
         </head>
         <body>
-          <button class="print-btn" onclick='${window.print()}'>🖨️ Imprimir / Guardar PDF</button>
+          <button class="print-btn" onclick='${printWindow.print()}'>🖨️ Imprimir / Guardar PDF</button>
 
           <div class="header">
             <img src="${logoUrl}" alt="Logo" style="height: 60px; width: auto; object-fit: contain;" onerror="this.style.display='none'" />
