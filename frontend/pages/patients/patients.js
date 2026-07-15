@@ -44,7 +44,7 @@ export class Patients {
       if (result && result.data) {
         this.patientsList = result.data || [];
         this.totalPages = result.pagination?.totalPages || 1;
-        this.currentPage = result.pagination?.page || 1;
+        this.currentPage = result.pagination?.currentPage || 1;
       } else {
         this.patientsList = result || [];
         this.totalPages = 1;

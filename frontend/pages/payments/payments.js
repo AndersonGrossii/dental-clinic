@@ -51,7 +51,7 @@ export class Payments {
       const response = await paymentService.getAll(params, { returnFullResponse: true });
       this.paymentsList = response.data || [];
       this.totalPages = response.pagination?.totalPages || 1;
-      this.currentPage = response.pagination?.page || 1;
+      this.currentPage = response.pagination?.currentPage || 1;
 
       // Calcular estadísticas rápidas desde la lista visible
       this.computeStats();
