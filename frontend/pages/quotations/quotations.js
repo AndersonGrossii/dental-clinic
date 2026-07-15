@@ -738,10 +738,14 @@ export class Quotations {
         </html>
       `);
       printWindow.document.close();
+<<<<<<< HEAD
+      printWindow.print();
+=======
       const printBtn = printWindow.document.querySelector('.print-btn');
       if (printBtn) printBtn.addEventListener('click', () => printWindow.print());
       const logo = printWindow.document.querySelector('#print-logo');
       if (logo) logo.addEventListener('error', () => { logo.style.display = 'none'; });
+>>>>>>> 697cd4e (fix: replace inline event handlers (onclick/onerror) with addEventListener to comply with CSP script-src-attr 'none')
     } catch {
       toast.error('Error al generar vista de impresión');
     }
