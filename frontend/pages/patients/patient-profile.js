@@ -952,10 +952,10 @@ export class PatientProfile {
         </style>
       </head>
       <body>
-        <button class="print-btn" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+        <button class="print-btn" id="print-btn">🖨️ Imprimir / Guardar PDF</button>
 
         <div class="header">
-          <img src="${logoUrl}" alt="Logo" style="height: 60px; width: auto; object-fit: contain;" onerror="this.style.display='none'" />
+          <img src="${logoUrl}" alt="Logo" style="height: 60px; width: auto; object-fit: contain;" id="print-logo" />
           <div class="header-info">
             <h2>${clinic.name || 'Clínica Dental'}</h2>
             <p>${clinic.address || ''}${clinic.city ? ', ' + clinic.city : ''}</p>
@@ -1019,5 +1019,9 @@ export class PatientProfile {
       </html>
     `);
     printWindow.document.close();
+    const printBtn = printWindow.document.querySelector('.print-btn');
+    if (printBtn) printBtn.addEventListener('click', () => printWindow.print());
+    const logo = printWindow.document.querySelector('#print-logo');
+    if (logo) logo.addEventListener('error', () => { logo.style.display = 'none'; });
   }
 }
