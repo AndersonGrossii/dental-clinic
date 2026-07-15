@@ -76,7 +76,16 @@ async function initApp() {
         last_name: payload.lastName || '',
         role_name: payload.roleName,
         doctor_id: payload.doctorId || null,
+        clinic_id: payload.clinicId,
       });
+
+      // Restablecer activeClinicId al del usuario solo si no es propietario
+      // (propietario puede cambiar de clínica libremente, respetamos su selección)
+      const cachedClinicId = state.get('activeClinicId');
+      if (payload.roleName !== 'propietario' && payload.clinicId && String(cachedClinicId) !== String(payload.clinicId)) {
+        state.set('activeClinicId', payload.clinicId);
+        localStorage.setItem('activeClinicId', String(payload.clinicId));
+      }
 
       if (currentHash === '#/login') {
         window.location.hash = '#/';
@@ -87,13 +96,28 @@ async function initApp() {
     }
   }
 
-  // Cargar información de la clínica (público) para mostrarla en toda la app
-  try {
-    const clinicInfo = await settingsService.getClinicInfo();
-    state.set('clinicInfo', clinicInfo);
-  } catch {
-    // Si falla, se usará un valor por defecto donde sea necesario
+  // Cargar información de la clínica (público / sin sesión) para login
+  if (!token) {
+    try {
+      const clinicInfo = await settingsService.getClinicInfo();
+      state.set('clinicInfo', clinicInfo);
+    } catch {
+      // Si falla, se usará un valor por defecto donde sea necesario
+    }
   }
+
+  // Suscribirse a cambios de clínica activa para refrescar clinicInfo
+  // (cubre login, clinic-switcher, y cualquier otro cambio de activeClinicId)
+  state.subscribe('activeClinicId', async (newClinicId) => {
+    // Ignorar valores nulos durante logout o si ya está cargando
+    if (!newClinicId) return;
+    try {
+      const clinicInfo = await settingsService.getClinicInfo();
+      state.set('clinicInfo', clinicInfo);
+    } catch {
+      // mantener el valor anterior si falla
+    }
+  });
 
   // Ocultar cargador e iniciar router
   loading.style.opacity = '0';

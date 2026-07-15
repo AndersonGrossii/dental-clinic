@@ -1,7 +1,7 @@
 // ============================================
 // Repositorio de Citas — Operaciones de datos
 // ============================================
-import { query } from '../database/pool.js';
+import { query, scopeClinic } from '../database/pool.js';
 import { BaseRepository } from './base.repository.js';
 
 /**
@@ -31,7 +31,11 @@ class AppointmentRepository extends BaseRepository {
       )`
     ];
     const params = [];
-    let paramIndex = 1;
+
+    // Aplicar scoping de clínica
+    scopeClinic(conditions, params, 'a');
+    
+    let paramIndex = params.length + 1;
 
     if (filters.doctor_id) {
       conditions.push(`a.doctor_id = $${paramIndex++}`);
@@ -147,6 +151,10 @@ class AppointmentRepository extends BaseRepository {
    * @returns {Promise<object|null>}
    */
   async findByIdWithDetails(id) {
+    const conditions = ['a.id = $1', 'a.deleted_at IS NULL'];
+    const params = [id];
+    scopeClinic(conditions, params, 'a');
+
     const result = await query(
       `SELECT
          a.id,
@@ -188,8 +196,8 @@ class AppointmentRepository extends BaseRepository {
        INNER JOIN users u ON d.user_id = u.id
        INNER JOIN appointment_status s ON a.status_id = s.id
        LEFT JOIN treatments t ON a.treatment_id = t.id
-       WHERE a.id = $1 AND a.deleted_at IS NULL`,
-      [id]
+       WHERE ${conditions.join(' AND ')}`,
+      params
     );
     return result.rows[0] || null;
   }
@@ -201,6 +209,10 @@ class AppointmentRepository extends BaseRepository {
    * @returns {Promise<Array>}
    */
   async findByDoctorAndDate(doctorId, date) {
+    const conditions = ['a.doctor_id = $1', 'a.appointment_date = $2', 'a.deleted_at IS NULL'];
+    const params = [doctorId, date];
+    scopeClinic(conditions, params, 'a');
+
     const result = await query(
       `SELECT
          a.id,
@@ -222,11 +234,9 @@ class AppointmentRepository extends BaseRepository {
        INNER JOIN patients p ON a.patient_id = p.id
        INNER JOIN appointment_status s ON a.status_id = s.id
        LEFT JOIN treatments t ON a.treatment_id = t.id
-       WHERE a.doctor_id = $1
-         AND a.appointment_date = $2
-         AND a.deleted_at IS NULL
+       WHERE ${conditions.join(' AND ')}
        ORDER BY a.start_time ASC`,
-      [doctorId, date]
+      params
     );
     return result.rows;
   }
@@ -243,8 +253,6 @@ class AppointmentRepository extends BaseRepository {
     const conditions = [
       'a.deleted_at IS NULL',
       'u.is_active = TRUE',
-      'a.appointment_date >= $1',
-      'a.appointment_date <= $2',
       `NOT EXISTS (
         SELECT 1 
         FROM doctor_unavailability du 
@@ -253,10 +261,17 @@ class AppointmentRepository extends BaseRepository {
           AND a.appointment_date <= du.end_date
       )`
     ];
-    const params = [startDate, endDate];
+    const params = [];
+
+    scopeClinic(conditions, params, 'a');
+
+    conditions.push(`a.appointment_date >= $${params.length + 1}`);
+    params.push(startDate);
+    conditions.push(`a.appointment_date <= $${params.length + 1}`);
+    params.push(endDate);
 
     if (doctorId) {
-      conditions.push('a.doctor_id = $3');
+      conditions.push(`a.doctor_id = $${params.length + 1}`);
       params.push(doctorId);
     }
 
@@ -299,36 +314,40 @@ class AppointmentRepository extends BaseRepository {
    * @returns {Promise<object>}
    */
   async getStats(doctorId = null) {
+    const conditions = ['a.deleted_at IS NULL'];
     const params = [];
-    let doctorClause = '';
+    scopeClinic(conditions, params, 'a');
+
     if (doctorId) {
-      doctorClause = 'AND a.doctor_id = $1';
+      conditions.push(`a.doctor_id = $${params.length + 1}`);
       params.push(doctorId);
     }
+
+    const baseFilter = conditions.join(' AND ');
+
     const result = await query(
       `SELECT
          COUNT(*) FILTER (
-           WHERE a.appointment_date = CURRENT_DATE AND a.deleted_at IS NULL
+           WHERE ${baseFilter} AND a.appointment_date = CURRENT_DATE
          ) AS today_total,
          COUNT(*) FILTER (
-           WHERE a.appointment_date = CURRENT_DATE
-             AND a.deleted_at IS NULL
+           WHERE ${baseFilter}
+             AND a.appointment_date = CURRENT_DATE
              AND a.status_id = (SELECT id FROM appointment_status WHERE name = 'completada')
          ) AS today_completed,
          COUNT(*) FILTER (
-           WHERE a.appointment_date >= CURRENT_DATE
-             AND a.deleted_at IS NULL
+           WHERE ${baseFilter}
+             AND a.appointment_date >= CURRENT_DATE
              AND a.status_id IN (
                SELECT id FROM appointment_status WHERE name IN ('programada', 'confirmada')
              )
          ) AS upcoming,
          COUNT(*) FILTER (
-           WHERE a.appointment_date = CURRENT_DATE
-             AND a.deleted_at IS NULL
+           WHERE ${baseFilter}
+             AND a.appointment_date = CURRENT_DATE
              AND a.status_id = (SELECT id FROM appointment_status WHERE name = 'cancelada')
          ) AS today_cancelled
-       FROM appointments a
-       WHERE a.deleted_at IS NULL ${doctorClause}`,
+       FROM appointments a`,
       params
     );
     return result.rows[0];
@@ -344,17 +363,21 @@ class AppointmentRepository extends BaseRepository {
    * @returns {Promise<object|null>} Cita conflictiva o null
    */
   async checkConflict(doctorId, date, startTime, endTime, excludeId = null) {
-    const conditions = [
-      'a.doctor_id = $1',
-      'a.appointment_date = $2',
-      'a.deleted_at IS NULL',
-      `a.status_id NOT IN (SELECT id FROM appointment_status WHERE name IN ('cancelada', 'no_asistio'))`,
-      '(a.start_time < $4 AND a.end_time > $3)',
-    ];
-    const params = [doctorId, date, startTime, endTime];
+    const conditions = ['a.deleted_at IS NULL'];
+    const params = [];
+
+    scopeClinic(conditions, params, 'a');
+
+    conditions.push(`a.doctor_id = $${params.length + 1}`);
+    params.push(doctorId);
+    conditions.push(`a.appointment_date = $${params.length + 1}`);
+    params.push(date);
+    conditions.push(`(a.start_time < $${params.length + 2} AND a.end_time > $${params.length + 1})`);
+    params.push(startTime, endTime);
+    conditions.push(`a.status_id NOT IN (SELECT id FROM appointment_status WHERE name IN ('cancelada', 'no_asistio'))`);
 
     if (excludeId) {
-      conditions.push(`a.id != $5`);
+      conditions.push(`a.id != $${params.length + 1}`);
       params.push(excludeId);
     }
 
@@ -380,17 +403,21 @@ class AppointmentRepository extends BaseRepository {
    * @returns {Promise<object|null>} Cita conflictiva o null
    */
   async checkCabinetConflict(gabinete, date, startTime, endTime, excludeId = null) {
-    const conditions = [
-      'a.gabinete = $1',
-      'a.appointment_date = $2',
-      'a.deleted_at IS NULL',
-      `a.status_id NOT IN (SELECT id FROM appointment_status WHERE name IN ('cancelada', 'no_asistio'))`,
-      '(a.start_time < $4 AND a.end_time > $3)',
-    ];
-    const params = [gabinete, date, startTime, endTime];
+    const conditions = ['a.deleted_at IS NULL'];
+    const params = [];
+
+    scopeClinic(conditions, params, 'a');
+
+    conditions.push(`a.gabinete = $${params.length + 1}`);
+    params.push(gabinete);
+    conditions.push(`a.appointment_date = $${params.length + 1}`);
+    params.push(date);
+    conditions.push(`(a.start_time < $${params.length + 2} AND a.end_time > $${params.length + 1})`);
+    params.push(startTime, endTime);
+    conditions.push(`a.status_id NOT IN (SELECT id FROM appointment_status WHERE name IN ('cancelada', 'no_asistio'))`);
 
     if (excludeId) {
-      conditions.push(`a.id != $5`);
+      conditions.push(`a.id != $${params.length + 1}`);
       params.push(excludeId);
     }
 

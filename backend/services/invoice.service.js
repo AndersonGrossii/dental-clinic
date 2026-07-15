@@ -3,7 +3,7 @@
 // ============================================
 import invoiceRepository from '../repositories/invoice.repository.js';
 import quotationRepository from '../repositories/quotation.repository.js';
-import { query } from '../database/pool.js';
+import { query, als } from '../database/pool.js';
 import { AppError } from '../utils/errors.js';
 
 /**
@@ -224,29 +224,36 @@ class InvoiceService {
    * Obtiene estadísticas generales de facturación.
    * @returns {Promise<object>} Conteo de pendientes, ingresos totales, etc.
    */
+  getClinicCondition(alias = '') {
+    const store = als.getStore();
+    if (!store || !store.clinicId) return '';
+    const prefix = alias ? `${alias}.` : '';
+    return ` AND ${prefix}clinic_id = ${store.clinicId}`;
+  }
+
   async getStats() {
     const pendingResult = await query(
       `SELECT COUNT(*) AS count
        FROM invoices
-       WHERE status = 'pendiente' AND deleted_at IS NULL`
+       WHERE status = 'pendiente' AND deleted_at IS NULL${this.getClinicCondition()}`
     );
 
     const partialResult = await query(
       `SELECT COUNT(*) AS count
        FROM invoices
-       WHERE status = 'parcial' AND deleted_at IS NULL`
+       WHERE status = 'parcial' AND deleted_at IS NULL${this.getClinicCondition()}`
     );
 
     const revenueResult = await query(
       `SELECT COALESCE(SUM(amount_paid), 0) AS total_revenue
        FROM invoices
-       WHERE deleted_at IS NULL`
+       WHERE deleted_at IS NULL${this.getClinicCondition()}`
     );
 
     const totalInvoicesResult = await query(
       `SELECT COUNT(*) AS count
        FROM invoices
-       WHERE deleted_at IS NULL`
+       WHERE deleted_at IS NULL${this.getClinicCondition()}`
     );
 
     return {

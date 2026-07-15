@@ -2,10 +2,26 @@
 // Pool de Conexiones PostgreSQL
 // ============================================
 import pg from 'pg';
+import { AsyncLocalStorage } from 'async_hooks';
 import config from '../config/app.js';
 import { logger } from '../utils/logger.js';
 
 const { Pool } = pg;
+
+// Contexto de AsyncLocalStorage para almacenar la clínica activa
+export const als = new AsyncLocalStorage();
+
+// Helper para agregar filtro de clinic_id a condiciones WHERE
+export function scopeClinic(conditions, params, alias = '') {
+  const store = als.getStore();
+  if (!store || !store.clinicId) return { conditions, params };
+
+  const prefix = alias ? `${alias}.` : '';
+  const paramIndex = params.length + 1;
+  conditions.push(`${prefix}clinic_id = $${paramIndex}`);
+  params.push(store.clinicId);
+  return { conditions, params };
+}
 
 /**
  * Pool de conexiones a PostgreSQL.

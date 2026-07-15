@@ -11,6 +11,8 @@ class Store {
       theme: localStorage.getItem('theme') || 'light',
       sidebarCollapsed: localStorage.getItem('sidebarCollapsed') === 'true',
       unreadNotificationsCount: 0,
+      clinics: [],
+      activeClinicId: localStorage.getItem('activeClinicId') || null,
     };
     this.subscribers = {};
   }
@@ -64,12 +66,18 @@ class Store {
     this.set('user', null);
     this.set('token', null);
     this.set('refreshToken', null);
+    this.set('activeClinicId', null);
+    this.set('clinicInfo', null);
     localStorage.removeItem('token');
     localStorage.removeItem('refreshToken');
+    localStorage.removeItem('activeClinicId');
   }
 
   /**
    * Guarda las credenciales de sesión.
+   * Restablece la clínica activa a la del usuario que inicia sesión.
+   * - Propietario: conserva la clínica cacheada (para poder cambiar entre clínicas)
+   * - Otros roles: siempre se fijan a su clinic_id
    */
   setAuth(user, token, refreshToken) {
     localStorage.setItem('token', token);
@@ -77,6 +85,17 @@ class Store {
     this.set('token', token);
     this.set('refreshToken', refreshToken);
     this.set('user', user);
+    if (user?.clinic_id) {
+      if (user.role_name === 'propietario') {
+        if (!this.state.activeClinicId) {
+          this.set('activeClinicId', user.clinic_id);
+          localStorage.setItem('activeClinicId', String(user.clinic_id));
+        }
+      } else {
+        this.set('activeClinicId', user.clinic_id);
+        localStorage.setItem('activeClinicId', String(user.clinic_id));
+      }
+    }
   }
 }
 

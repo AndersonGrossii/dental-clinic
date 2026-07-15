@@ -27,7 +27,8 @@ export const updateSetting = async (req, res, next) => {
 
 export const getClinicInfo = async (req, res, next) => {
   try {
-    const info = await settingsService.getClinicInfo();
+    const clinicId = parseInt(req.headers['x-clinic-id'], 10) || undefined;
+    const info = await settingsService.getClinicInfo(clinicId);
     return ApiResponse.success(res, info, 'Información de la clínica obtenida');
   } catch (error) {
     next(error);

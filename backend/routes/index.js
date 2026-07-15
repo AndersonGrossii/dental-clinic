@@ -15,6 +15,8 @@ import reportRoutes from './report.routes.js';
 import notificationRoutes from './notification.routes.js';
 import settingsRoutes from './settings.routes.js';
 import searchRoutes from './search.routes.js';
+import clinicRoutes from './clinic.routes.js';
+import prescriptionRoutes from './prescription.routes.js';
 
 const router = Router();
 
@@ -32,5 +34,7 @@ router.use('/reports', reportRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/settings', settingsRoutes);
 router.use('/search', searchRoutes);
+router.use('/clinics', clinicRoutes);
+router.use('/prescriptions', prescriptionRoutes);
 
 export default router;

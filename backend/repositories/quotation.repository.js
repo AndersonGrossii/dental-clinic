@@ -1,7 +1,7 @@
 // ============================================
 // Repositorio de Cotizaciones
 // ============================================
-import { query, transaction } from '../database/pool.js';
+import { query, transaction, scopeClinic, als } from '../database/pool.js';
 import { BaseRepository } from './base.repository.js';
 
 class QuotationRepository extends BaseRepository {
@@ -12,7 +12,8 @@ class QuotationRepository extends BaseRepository {
   async findAllWithDetails({ limit = 20, offset = 0, sortBy = 'q.created_at', sortOrder = 'DESC', filters = {} } = {}) {
     const conditions = ['q.deleted_at IS NULL'];
     const params = [];
-    let paramIndex = 1;
+    scopeClinic(conditions, params, 'q');
+    let paramIndex = params.length + 1;
 
     if (filters.status) {
       conditions.push(`q.status = $${paramIndex}`);
@@ -81,6 +82,12 @@ class QuotationRepository extends BaseRepository {
   }
 
   async findByIdWithItems(id) {
+    const conditions = ['q.deleted_at IS NULL'];
+    const params = [];
+    scopeClinic(conditions, params, 'q');
+    const whereClause = `WHERE ${conditions.join(' AND ')} AND q.id = $${params.length + 1}`;
+    params.push(id);
+
     const quotationResult = await query(
       `SELECT q.*,
               CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
@@ -92,11 +99,15 @@ class QuotationRepository extends BaseRepository {
        INNER JOIN patients p ON q.patient_id = p.id
        LEFT JOIN doctors d ON q.doctor_id = d.id
        LEFT JOIN users u ON d.user_id = u.id
-       WHERE q.id = $1 AND q.deleted_at IS NULL`,
-      [id]
+       ${whereClause}`,
+      params
     );
 
     if (quotationResult.rows.length === 0) return null;
+
+    const itemConditions = ['qi.quotation_id = $1'];
+    const itemParams = [id];
+    scopeClinic(itemConditions, itemParams, 'qi');
 
     const itemsResult = await query(
       `SELECT qi.*,
@@ -104,9 +115,9 @@ class QuotationRepository extends BaseRepository {
               t.code AS treatment_code
        FROM quotation_items qi
        LEFT JOIN treatments t ON qi.treatment_id = t.id
-       WHERE qi.quotation_id = $1
+       WHERE ${itemConditions.join(' AND ')}
        ORDER BY qi.id ASC`,
-      [id]
+      itemParams
     );
 
     return {
@@ -116,15 +127,27 @@ class QuotationRepository extends BaseRepository {
   }
 
   async generateNumber() {
+    const store = als.getStore();
+    let clinicSuffix = '';
+    if (store?.clinicId) {
+      const codeResult = await query('SELECT code FROM clinics WHERE id = $1', [store.clinicId]);
+      if (codeResult.rows.length > 0) {
+        clinicSuffix = '-' + codeResult.rows[0].code;
+      }
+    }
     const result = await query("SELECT nextval('quotation_number_seq') AS seq");
     const seq = result.rows[0].seq.toString().padStart(4, '0');
-    return `COT-${seq}`;
+    return `COT-${seq}${clinicSuffix}`;
   }
 
   async createWithItems(quotationData, items) {
     return transaction(async (client) => {
-      const quotationKeys = Object.keys(quotationData);
-      const quotationValues = Object.values(quotationData);
+      const store = als.getStore();
+      const clinicId = store?.clinicId;
+      const dataWithClinic = { ...quotationData, clinic_id: clinicId };
+
+      const quotationKeys = Object.keys(dataWithClinic);
+      const quotationValues = Object.values(dataWithClinic);
       const quotationPlaceholders = quotationKeys.map((_, i) => `$${i + 1}`);
 
       const quotationResult = await client.query(
@@ -138,19 +161,14 @@ class QuotationRepository extends BaseRepository {
       const insertedItems = [];
 
       for (const item of items) {
-        const itemResult = await client.query(
-          `INSERT INTO quotation_items (quotation_id, treatment_id, description, quantity, unit_price, discount, total)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
+        const clinicId = store?.clinicId;
+      const itemResult = await client.query(
+          `INSERT INTO quotation_items (quotation_id, treatment_id, description, quantity, unit_price, discount, total${clinicId ? ', clinic_id' : ''})
+           VALUES ($1, $2, $3, $4, $5, $6, $7${clinicId ? ', $8' : ''})
            RETURNING *`,
-          [
-            quotation.id,
-            item.treatment_id || null,
-            item.description,
-            item.quantity,
-            item.unit_price,
-            item.discount || 0,
-            item.total,
-          ]
+          clinicId
+            ? [quotation.id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.discount || 0, item.total, clinicId]
+            : [quotation.id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.discount || 0, item.total]
         );
         insertedItems.push(itemResult.rows[0]);
       }
@@ -161,37 +179,47 @@ class QuotationRepository extends BaseRepository {
 
   async updateWithItems(id, quotationData, items) {
     return transaction(async (client) => {
+      const store = als.getStore();
+      const clinicId = store?.clinicId;
+
       const keys = Object.keys(quotationData);
       const values = Object.values(quotationData);
       const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
 
+      const conditions = [`id = $${keys.length + 1}`, 'deleted_at IS NULL'];
+      const updateParams = [...values, id];
+      if (clinicId) {
+        conditions.push(`clinic_id = $${updateParams.length + 1}`);
+        updateParams.push(clinicId);
+      }
+
       const quotationResult = await client.query(
         `UPDATE quotations
          SET ${setClause}, updated_at = NOW()
-         WHERE id = $${keys.length + 1} AND deleted_at IS NULL
+         WHERE ${conditions.join(' AND ')}
          RETURNING *`,
-        [...values, id]
+        updateParams
       );
 
       if (quotationResult.rows.length === 0) return null;
 
-      await client.query('DELETE FROM quotation_items WHERE quotation_id = $1', [id]);
+      const delConditions = ['quotation_id = $1'];
+      const delParams = [id];
+      if (clinicId) {
+        delConditions.push(`clinic_id = $${delParams.length + 1}`);
+        delParams.push(clinicId);
+      }
+      await client.query(`DELETE FROM quotation_items WHERE ${delConditions.join(' AND ')}`, delParams);
 
       const insertedItems = [];
       for (const item of items) {
         const itemResult = await client.query(
-          `INSERT INTO quotation_items (quotation_id, treatment_id, description, quantity, unit_price, discount, total)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
+          `INSERT INTO quotation_items (quotation_id, treatment_id, description, quantity, unit_price, discount, total${clinicId ? ', clinic_id' : ''})
+           VALUES ($1, $2, $3, $4, $5, $6, $7${clinicId ? ', $8' : ''})
            RETURNING *`,
-          [
-            id,
-            item.treatment_id || null,
-            item.description,
-            item.quantity,
-            item.unit_price,
-            item.discount || 0,
-            item.total,
-          ]
+          clinicId
+            ? [id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.discount || 0, item.total, clinicId]
+            : [id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.discount || 0, item.total]
         );
         insertedItems.push(itemResult.rows[0]);
       }

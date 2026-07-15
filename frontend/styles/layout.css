@@ -23,7 +23,6 @@
   transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
               box-shadow 0.35s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 1px 0 8px rgba(0,0,0,0.04);
-  overflow: hidden;
 }
 
 .sb--hidden {
@@ -65,6 +64,82 @@
   color: var(--color-text);
   white-space: nowrap;
   letter-spacing: -0.02em;
+}
+
+.sb__clinic-switcher {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1;
+  padding: 10px var(--space-3);
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, rgba(15, 134, 236, 0.08), rgba(15, 134, 236, 0.04));
+  color: var(--primary-600);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.sb__clinic-switcher:hover {
+  background: linear-gradient(135deg, rgba(15, 134, 236, 0.12), rgba(15, 134, 236, 0.06));
+  color: var(--primary-700);
+}
+
+.sb__clinic-icon,
+.sb__clinic-chevron {
+  flex-shrink: 0;
+  opacity: 0.75;
+  transition: opacity 0.18s;
+}
+
+.sb__clinic-switcher:hover .sb__clinic-icon,
+.sb__clinic-switcher:hover .sb__clinic-chevron {
+  opacity: 1;
+}
+
+.sb__clinic-select {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: inherit;
+  font-weight: inherit;
+  outline: none;
+  padding: 0;
+}
+
+.sb__clinic-dropdown {
+  display: block;
+  min-width: 180px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: calc(var(--z-sidebar) + 10);
+  overflow: hidden;
+}
+
+.sb__clinic-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px var(--space-3);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.sb__clinic-option:hover {
+  background-color: var(--color-surface-hover);
+}
+
+.sb__clinic-option--active {
+  background: linear-gradient(135deg, rgba(15, 134, 236, 0.08), rgba(15, 134, 236, 0.04));
+  color: var(--primary-600);
+  font-weight: var(--font-semibold);
 }
 
 .sb__collapse-btn {
@@ -341,6 +416,30 @@
 [data-theme='dark'] .sb__expand-float {
   background: var(--gray-800);
   border-color: var(--gray-700);
+}
+
+[data-theme='dark'] .sb__clinic-switcher {
+  background: linear-gradient(135deg, rgba(56, 164, 249, 0.12), rgba(56, 164, 249, 0.05));
+  color: var(--primary-400);
+}
+
+[data-theme='dark'] .sb__clinic-switcher:hover {
+  background: linear-gradient(135deg, rgba(56, 164, 249, 0.18), rgba(56, 164, 249, 0.08));
+  color: var(--primary-300);
+}
+
+[data-theme='dark'] .sb__clinic-dropdown {
+  background: var(--gray-900);
+  border-color: var(--gray-700);
+}
+
+[data-theme='dark'] .sb__clinic-option:hover {
+  background-color: var(--gray-800);
+}
+
+[data-theme='dark'] .sb__clinic-option--active {
+  background: linear-gradient(135deg, rgba(56, 164, 249, 0.12), rgba(56, 164, 249, 0.05));
+  color: var(--primary-400);
 }
 
 /* ── Sidebar Mobile Overlay ── */

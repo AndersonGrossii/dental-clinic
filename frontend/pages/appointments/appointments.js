@@ -1307,6 +1307,13 @@ export class Appointments {
           </div>
         </div>
         <div class="form-group" style="margin-top: var(--space-3);">
+          <label class="form-label">Gabinete</label>
+          <select name="gabinete" class="form-select">
+            <option value="Gabinete 1">Gabinete 1</option>
+            <option value="Gabinete 2">Gabinete 2</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-top: var(--space-3);">
           <label class="form-label">Motivo de la Cita</label>
           <textarea name="reason" class="form-textarea" rows="2" placeholder="Escriba el motivo para usarlo luego en la cotización..."></textarea>
         </div>
@@ -1592,6 +1599,13 @@ export class Appointments {
             </div>
 
             <div class="form-group" style="margin-top: var(--space-3);">
+              <label class="form-label" style="font-size: var(--text-xs);">Gabinete</label>
+              <select name="gabinete" class="form-select">
+                <option value="Gabinete 1" ${appt.gabinete === 'Gabinete 1' ? 'selected' : ''}>Gabinete 1</option>
+                <option value="Gabinete 2" ${appt.gabinete === 'Gabinete 2' ? 'selected' : ''}>Gabinete 2</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-top: var(--space-3);">
               <label class="form-label" style="font-size: var(--text-xs);">Motivo de la Cita</label>
               <textarea name="reason" class="form-textarea" rows="3" placeholder="Escriba el motivo...">${appt.reason || ''}</textarea>
             </div>
@@ -1628,6 +1642,7 @@ export class Appointments {
         const appointmentDate = form.querySelector('[name="appointment_date"]').value;
         const startTimeInput = form.querySelector('[name="start_time"]').value;
         const endTimeInput = form.querySelector('[name="end_time"]').value;
+        const gabinete = form.querySelector('[name="gabinete"]').value;
         const reason = form.querySelector('[name="reason"]').value.trim();
 
         // Validar fin de semana para nueva fecha
@@ -1643,12 +1658,14 @@ export class Appointments {
         const originalStartTime = appt.start_time ? String(appt.start_time).substring(0, 5) : '';
         const originalEndTime = appt.end_time ? String(appt.end_time).substring(0, 5) : '';
         const originalReason = appt.reason || '';
+        const originalGabinete = appt.gabinete || 'Gabinete 1';
 
         const hasRescheduled =
           doctorId !== appt.doctor_id ||
           appointmentDate !== targetDate ||
           startTimeInput !== originalStartTime ||
           endTimeInput !== originalEndTime ||
+          gabinete !== originalGabinete ||
           reason !== originalReason;
 
         try {
@@ -1658,6 +1675,7 @@ export class Appointments {
               appointment_date: appointmentDate,
               start_time: startTimeInput,
               end_time: endTimeInput,
+              gabinete,
               reason: reason || null
             });
           }

@@ -2,7 +2,7 @@
 // Repositorio de Usuarios
 // ============================================
 import { BaseRepository } from './base.repository.js';
-import { query } from '../database/pool.js';
+import { query, scopeClinic } from '../database/pool.js';
 
 /**
  * Repositorio para operaciones de datos de usuarios.
@@ -37,7 +37,10 @@ class UserRepository extends BaseRepository {
   async findAllWithRoles({ limit = 20, offset = 0, sortBy = 'u.created_at', sortOrder = 'DESC', filters = {} } = {}) {
     const conditions = ['u.deleted_at IS NULL'];
     const params = [];
-    let paramIndex = 1;
+
+    // Filtro por clínica
+    scopeClinic(conditions, params, 'u');
+    let paramIndex = params.length + 1;
 
     // Filtro por rol
     if (filters.roleId) {
@@ -94,6 +97,10 @@ class UserRepository extends BaseRepository {
    * @returns {Promise<object|null>}
    */
   async findByIdWithRole(id) {
+    const conditions = ['u.id = $1', 'u.deleted_at IS NULL'];
+    const params = [id];
+    scopeClinic(conditions, params, 'u');
+
     const result = await query(
       `SELECT u.id, u.role_id, u.first_name, u.last_name, u.email, u.phone,
               u.avatar_url, u.is_active, u.last_login, u.created_at, u.updated_at,
@@ -102,8 +109,8 @@ class UserRepository extends BaseRepository {
        FROM users u
        INNER JOIN roles r ON u.role_id = r.id
        LEFT JOIN doctors d ON d.user_id = u.id AND d.deleted_at IS NULL
-       WHERE u.id = $1 AND u.deleted_at IS NULL`,
-      [id]
+       WHERE ${conditions.join(' AND ')}`,
+      params
     );
     return result.rows[0] || null;
   }

@@ -2,7 +2,7 @@
 // Repositorio de Pacientes
 // ============================================
 import { BaseRepository } from './base.repository.js';
-import { query } from '../database/pool.js';
+import { query, scopeClinic } from '../database/pool.js';
 
 /**
  * Repositorio para operaciones de datos de pacientes.
@@ -22,7 +22,11 @@ class PatientRepository extends BaseRepository {
     // Construir condiciones WHERE dinámicas con prefijo de alias
     const conditions = ['p.deleted_at IS NULL'];
     const params = [];
-    let paramIndex = 1;
+
+    // Aplicar filtro por clínica
+    scopeClinic(conditions, params, 'p');
+
+    let paramIndex = params.length + 1;
 
     for (const [key, value] of Object.entries(filters)) {
       if (value !== undefined && value !== null && value !== '') {
@@ -83,20 +87,28 @@ class PatientRepository extends BaseRepository {
   async search(term, { limit = 20, offset = 0 } = {}) {
     const searchPattern = `%${term}%`;
 
+    const conditions = ['p.deleted_at IS NULL'];
+    const params = [];
+    scopeClinic(conditions, params, 'p');
+
+    const searchClause = `(
+      p.first_name ILIKE $${params.length + 1}
+      OR p.last_name ILIKE $${params.length + 1}
+      OR CONCAT(p.first_name, ' ', p.last_name) ILIKE $${params.length + 1}
+      OR p.dni ILIKE $${params.length + 1}
+      OR p.phone ILIKE $${params.length + 1}
+      OR p.mobile ILIKE $${params.length + 1}
+      OR p.email ILIKE $${params.length + 1}
+      OR p.custom_id ILIKE $${params.length + 1}
+    )`;
+    conditions.push(searchClause);
+    params.push(searchPattern);
+
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
+
     const countResult = await query(
-      `SELECT COUNT(*) AS total FROM patients
-       WHERE deleted_at IS NULL
-         AND (
-           first_name ILIKE $1
-           OR last_name ILIKE $1
-           OR CONCAT(first_name, ' ', last_name) ILIKE $1
-           OR dni ILIKE $1
-           OR phone ILIKE $1
-           OR mobile ILIKE $1
-           OR email ILIKE $1
-           OR custom_id ILIKE $1
-         )`,
-      [searchPattern]
+      `SELECT COUNT(*) AS total FROM patients p ${whereClause}`,
+      params
     );
     const total = parseInt(countResult.rows[0].total, 10);
 
@@ -116,20 +128,10 @@ class PatientRepository extends BaseRepository {
          WHERE status != 'cancelada' AND deleted_at IS NULL
          GROUP BY patient_id
        ) inv ON inv.patient_id = p.id
-       WHERE p.deleted_at IS NULL
-         AND (
-           p.first_name ILIKE $1
-           OR p.last_name ILIKE $1
-           OR CONCAT(p.first_name, ' ', p.last_name) ILIKE $1
-           OR p.dni ILIKE $1
-           OR p.phone ILIKE $1
-           OR p.mobile ILIKE $1
-           OR p.email ILIKE $1
-           OR p.custom_id ILIKE $1
-         )
+       ${whereClause}
        ORDER BY p.last_name ASC, p.first_name ASC
-       LIMIT $2 OFFSET $3`,
-      [searchPattern, limit, offset]
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, limit, offset]
     );
 
     return { rows: dataResult.rows, total };
@@ -141,6 +143,11 @@ class PatientRepository extends BaseRepository {
    * @returns {Promise<object|null>}
    */
   async findWithHistory(id) {
+    const conditions = ['p.id = $1', 'p.deleted_at IS NULL'];
+    const params = [id];
+    scopeClinic(conditions, params, 'p');
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
+
     const result = await query(
       `SELECT p.*,
               COALESCE(mh.medical_count, 0)::integer AS medical_history_count,
@@ -186,8 +193,8 @@ class PatientRepository extends BaseRepository {
          GROUP BY patient_id
        ) inv ON inv.patient_id = p.id
        LEFT JOIN users u ON u.id = p.created_by
-       WHERE p.id = $1 AND p.deleted_at IS NULL`,
-      [id]
+       ${whereClause}`,
+      params
     );
 
     return result.rows[0] || null;
@@ -198,19 +205,25 @@ class PatientRepository extends BaseRepository {
    * @returns {Promise<object>}
    */
   async getStats() {
+    const conditions = ['deleted_at IS NULL'];
+    const params = [];
+    scopeClinic(conditions, params);
+    const clinicFilter = conditions.join(' AND ');
+
     const result = await query(
       `SELECT
-         COUNT(*) FILTER (WHERE is_active = TRUE AND deleted_at IS NULL) AS active_patients,
-         COUNT(*) FILTER (WHERE deleted_at IS NULL) AS total_patients,
+         COUNT(*) FILTER (WHERE is_active = TRUE AND ${clinicFilter}) AS active_patients,
+         COUNT(*) FILTER (WHERE ${clinicFilter}) AS total_patients,
          COUNT(*) FILTER (
-           WHERE deleted_at IS NULL
+           WHERE ${clinicFilter}
              AND created_at >= DATE_TRUNC('month', CURRENT_DATE)
          ) AS new_this_month,
          COUNT(*) FILTER (
-           WHERE deleted_at IS NULL
+           WHERE ${clinicFilter}
              AND created_at >= DATE_TRUNC('week', CURRENT_DATE)
          ) AS new_this_week
-       FROM patients`
+       FROM patients`,
+      params
     );
 
     return result.rows[0];
@@ -222,13 +235,20 @@ class PatientRepository extends BaseRepository {
    * @returns {Promise<Array>}
    */
   async getMedicalHistory(patientId) {
+    const clinicId = this.getClinicId();
+    const conditions = ['mh.patient_id = $1'];
+    const params = [patientId];
+    if (clinicId) {
+      conditions.push(`mh.clinic_id = $${params.length + 1}`);
+      params.push(clinicId);
+    }
     const result = await query(
       `SELECT mh.*, u.first_name AS created_by_name, u.last_name AS created_by_lastname
        FROM medical_history mh
        LEFT JOIN users u ON u.id = mh.created_by
-       WHERE mh.patient_id = $1 AND mh.deleted_at IS NULL
+       WHERE ${conditions.join(' AND ')} AND mh.deleted_at IS NULL
        ORDER BY mh.created_at DESC`,
-      [patientId]
+      params
     );
     return result.rows;
   }
@@ -239,6 +259,13 @@ class PatientRepository extends BaseRepository {
    * @returns {Promise<Array>}
    */
   async getDentalHistory(patientId) {
+    const clinicId = this.getClinicId();
+    const conditions = ['dh.patient_id = $1'];
+    const params = [patientId];
+    if (clinicId) {
+      conditions.push(`dh.clinic_id = $${params.length + 1}`);
+      params.push(clinicId);
+    }
     const result = await query(
       `SELECT dh.*,
               doc.specialty,
@@ -246,9 +273,9 @@ class PatientRepository extends BaseRepository {
        FROM dental_history dh
        LEFT JOIN doctors doc ON doc.id = dh.doctor_id
        LEFT JOIN users u ON u.id = doc.user_id
-       WHERE dh.patient_id = $1 AND dh.deleted_at IS NULL
+       WHERE ${conditions.join(' AND ')} AND dh.deleted_at IS NULL
        ORDER BY dh.created_at DESC`,
-      [patientId]
+      params
     );
     return result.rows;
   }
@@ -260,10 +287,19 @@ class PatientRepository extends BaseRepository {
    * @returns {Promise<{ rows: Array, total: number }>}
    */
   async getAppointments(patientId, { limit = 20, offset = 0 } = {}) {
+    const clinicId = this.getClinicId();
+    const conditions = ['patient_id = $1'];
+    const params = [patientId];
+    if (clinicId) {
+      conditions.push(`clinic_id = $${params.length + 1}`);
+      params.push(clinicId);
+    }
+    const where = conditions.join(' AND ');
+
     const countResult = await query(
       `SELECT COUNT(*) AS total FROM appointments
-       WHERE patient_id = $1 AND deleted_at IS NULL`,
-      [patientId]
+       WHERE ${where} AND deleted_at IS NULL`,
+      params
     );
     const total = parseInt(countResult.rows[0].total, 10);
 
@@ -280,7 +316,9 @@ class PatientRepository extends BaseRepository {
        WHERE a.patient_id = $1 AND a.deleted_at IS NULL
        ORDER BY a.appointment_date DESC, a.start_time DESC
        LIMIT $2 OFFSET $3`,
-      [patientId, limit, offset]
+      clinicId
+        ? [patientId, clinicId, limit, offset]
+        : [patientId, limit, offset]
     );
 
     return { rows: dataResult.rows, total };
@@ -293,10 +331,19 @@ class PatientRepository extends BaseRepository {
    * @returns {Promise<{ rows: Array, total: number }>}
    */
   async getTreatments(patientId, { limit = 20, offset = 0 } = {}) {
+    const clinicId = this.getClinicId();
+    const conditions = ['patient_id = $1'];
+    const params = [patientId];
+    if (clinicId) {
+      conditions.push(`clinic_id = $${params.length + 1}`);
+      params.push(clinicId);
+    }
+    const where = conditions.join(' AND ');
+
     const countResult = await query(
       `SELECT COUNT(*) AS total FROM treatments
-       WHERE patient_id = $1 AND deleted_at IS NULL`,
-      [patientId]
+       WHERE ${where} AND deleted_at IS NULL`,
+      params
     );
     const total = parseInt(countResult.rows[0].total, 10);
 
@@ -308,7 +355,9 @@ class PatientRepository extends BaseRepository {
        WHERE t.patient_id = $1 AND t.deleted_at IS NULL
        ORDER BY t.created_at DESC
        LIMIT $2 OFFSET $3`,
-      [patientId, limit, offset]
+      clinicId
+        ? [patientId, clinicId, limit, offset]
+        : [patientId, limit, offset]
     );
 
     return { rows: dataResult.rows, total };
@@ -321,10 +370,19 @@ class PatientRepository extends BaseRepository {
    * @returns {Promise<{ rows: Array, total: number }>}
    */
   async getImages(patientId, { limit = 20, offset = 0 } = {}) {
+    const clinicId = this.getClinicId();
+    const conditions = ['patient_id = $1'];
+    const params = [patientId];
+    if (clinicId) {
+      conditions.push(`clinic_id = $${params.length + 1}`);
+      params.push(clinicId);
+    }
+    const where = conditions.join(' AND ');
+
     const countResult = await query(
       `SELECT COUNT(*) AS total FROM patient_images
-       WHERE patient_id = $1 AND deleted_at IS NULL`,
-      [patientId]
+       WHERE ${where} AND deleted_at IS NULL`,
+      params
     );
     const total = parseInt(countResult.rows[0].total, 10);
 
@@ -335,7 +393,9 @@ class PatientRepository extends BaseRepository {
        WHERE pi.patient_id = $1 AND pi.deleted_at IS NULL
        ORDER BY pi.created_at DESC
        LIMIT $2 OFFSET $3`,
-      [patientId, limit, offset]
+      clinicId
+        ? [patientId, clinicId, limit, offset]
+        : [patientId, limit, offset]
     );
 
     return { rows: dataResult.rows, total };
@@ -348,10 +408,19 @@ class PatientRepository extends BaseRepository {
    * @returns {Promise<{ rows: Array, total: number }>}
    */
   async getInvoices(patientId, { limit = 20, offset = 0 } = {}) {
+    const clinicId = this.getClinicId();
+    const conditions = ['patient_id = $1'];
+    const params = [patientId];
+    if (clinicId) {
+      conditions.push(`clinic_id = $${params.length + 1}`);
+      params.push(clinicId);
+    }
+    const where = conditions.join(' AND ');
+
     const countResult = await query(
       `SELECT COUNT(*) AS total FROM invoices
-       WHERE patient_id = $1 AND deleted_at IS NULL`,
-      [patientId]
+       WHERE ${where} AND deleted_at IS NULL`,
+      params
     );
     const total = parseInt(countResult.rows[0].total, 10);
 
@@ -361,7 +430,9 @@ class PatientRepository extends BaseRepository {
        WHERE i.patient_id = $1 AND i.deleted_at IS NULL
        ORDER BY i.created_at DESC
        LIMIT $2 OFFSET $3`,
-      [patientId, limit, offset]
+      clinicId
+        ? [patientId, clinicId, limit, offset]
+        : [patientId, limit, offset]
     );
 
     return { rows: dataResult.rows, total };
@@ -373,6 +444,13 @@ class PatientRepository extends BaseRepository {
    * @returns {Promise<Array>}
    */
   async getNotes(patientId) {
+    const clinicId = this.getClinicId();
+    const conditions = ['n.patient_id = $1'];
+    const params = [patientId];
+    if (clinicId) {
+      conditions.push(`n.clinic_id = $${params.length + 1}`);
+      params.push(clinicId);
+    }
     const result = await query(
       `SELECT n.*,
               u.first_name AS author_name, u.last_name AS author_lastname,
@@ -380,9 +458,9 @@ class PatientRepository extends BaseRepository {
        FROM patient_notes n
        INNER JOIN users u ON u.id = n.user_id
        INNER JOIN roles r ON u.role_id = r.id
-       WHERE n.patient_id = $1 AND n.deleted_at IS NULL
+       WHERE ${conditions.join(' AND ')} AND n.deleted_at IS NULL
        ORDER BY n.created_at DESC`,
-      [patientId]
+      params
     );
     return result.rows;
   }
@@ -397,11 +475,14 @@ class PatientRepository extends BaseRepository {
    * @returns {Promise<object>}
    */
   async createNote(patientId, userId, title, content, type = 'clinica') {
+    const clinicId = this.getClinicId();
     const result = await query(
-      `INSERT INTO patient_notes (patient_id, user_id, title, content, type)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO patient_notes (patient_id, user_id, title, content, type${clinicId ? ', clinic_id' : ''})
+       VALUES ($1, $2, $3, $4, $5${clinicId ? ', $6' : ''})
        RETURNING *`,
-      [patientId, userId, title, content, type]
+      clinicId
+        ? [patientId, userId, title, content, type, clinicId]
+        : [patientId, userId, title, content, type]
     );
     return result.rows[0];
   }

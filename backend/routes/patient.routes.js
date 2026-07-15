@@ -8,6 +8,7 @@ import { validate } from '../middlewares/validation.middleware.js';
 import { createPatientRules, updatePatientRules } from '../validators/patient.validator.js';
 import { auditMiddleware } from '../middlewares/audit.middleware.js';
 import * as patientController from '../controllers/patient.controller.js';
+import * as prescriptionController from '../controllers/prescription.controller.js';
 
 const router = Router();
 
@@ -111,5 +112,12 @@ router.get('/:id/notes', allRoles, patientController.getNotes);
  * @access  Propietario, Dirección, Doctor
  */
 router.post('/:id/notes', roleMiddleware('propietario', 'direccion', 'doctor'), patientController.createNote);
+
+/**
+ * @route   GET /api/v1/patients/:id/prescriptions
+ * @desc    Obtener prescripciones del paciente
+ * @access  Todos los roles
+ */
+router.get('/:id/prescriptions', allRoles, prescriptionController.getByPatient);
 
 export default router;

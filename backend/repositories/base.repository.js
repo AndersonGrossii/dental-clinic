@@ -1,7 +1,7 @@
 // ============================================
 // Repositorio Base — Operaciones CRUD genéricas
 // ============================================
-import { query, transaction } from '../database/pool.js';
+import { query, transaction, als } from '../database/pool.js';
 
 /**
  * Clase base para repositorios.
@@ -13,6 +13,22 @@ export class BaseRepository {
    */
   constructor(tableName) {
     this.tableName = tableName;
+    this.excludedTables = ['roles', 'permissions', 'role_permissions', 'clinics', 'appointment_status', 'payment_methods', '_migrations', '_seeders'];
+  }
+
+  /**
+   * Helper para verificar si la tabla debe ser aislada por clínica.
+   */
+  isClinicSpecific() {
+    return !this.excludedTables.includes(this.tableName);
+  }
+
+  /**
+   * Helper para obtener el clinicId del contexto.
+   */
+  getClinicId() {
+    const store = als.getStore();
+    return store ? store.clinicId : null;
   }
 
   /**
@@ -21,10 +37,18 @@ export class BaseRepository {
    * @returns {Promise<object|null>}
    */
   async findById(id) {
-    const result = await query(
-      `SELECT * FROM ${this.tableName} WHERE id = $1 AND deleted_at IS NULL`,
-      [id]
-    );
+    let sql = `SELECT * FROM ${this.tableName} WHERE id = $1 AND deleted_at IS NULL`;
+    const params = [id];
+
+    if (this.isClinicSpecific()) {
+      const clinicId = this.getClinicId();
+      if (clinicId) {
+        sql += ` AND clinic_id = $2`;
+        params.push(clinicId);
+      }
+    }
+
+    const result = await query(sql, params);
     return result.rows[0] || null;
   }
 
@@ -37,7 +61,17 @@ export class BaseRepository {
     // Construir condiciones WHERE dinámicas
     const conditions = ['deleted_at IS NULL'];
     const params = [];
-    let paramIndex = 1;
+
+    // Aplicar scoping de clínica
+    if (this.isClinicSpecific()) {
+      const clinicId = this.getClinicId();
+      if (clinicId) {
+        conditions.push('clinic_id = $1');
+        params.push(clinicId);
+      }
+    }
+
+    let paramIndex = params.length + 1;
 
     for (const [key, value] of Object.entries(filters)) {
       if (value !== undefined && value !== null && value !== '') {
@@ -81,6 +115,13 @@ export class BaseRepository {
    * @returns {Promise<object>} Registro creado
    */
   async create(data) {
+    if (this.isClinicSpecific()) {
+      const clinicId = this.getClinicId();
+      if (clinicId && !data.clinic_id) {
+        data.clinic_id = clinicId;
+      }
+    }
+
     const keys = Object.keys(data);
     const values = Object.values(data);
     const placeholders = keys.map((_, i) => `$${i + 1}`);
@@ -106,13 +147,19 @@ export class BaseRepository {
     const values = Object.values(data);
     const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
 
-    const result = await query(
-      `UPDATE ${this.tableName}
-       SET ${setClause}, updated_at = NOW()
-       WHERE id = $${keys.length + 1} AND deleted_at IS NULL
-       RETURNING *`,
-      [...values, id]
-    );
+    let sql = `UPDATE ${this.tableName} SET ${setClause}, updated_at = NOW() WHERE id = $${keys.length + 1} AND deleted_at IS NULL`;
+    const params = [...values, id];
+
+    if (this.isClinicSpecific()) {
+      const clinicId = this.getClinicId();
+      if (clinicId) {
+        sql += ` AND clinic_id = $${keys.length + 2}`;
+        params.push(clinicId);
+      }
+    }
+    sql += ` RETURNING *`;
+
+    const result = await query(sql, params);
 
     return result.rows[0] || null;
   }
@@ -123,11 +170,18 @@ export class BaseRepository {
    * @returns {Promise<boolean>}
    */
   async softDelete(id) {
-    const result = await query(
-      `UPDATE ${this.tableName} SET deleted_at = NOW(), updated_at = NOW()
-       WHERE id = $1 AND deleted_at IS NULL`,
-      [id]
-    );
+    let sql = `UPDATE ${this.tableName} SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL`;
+    const params = [id];
+
+    if (this.isClinicSpecific()) {
+      const clinicId = this.getClinicId();
+      if (clinicId) {
+        sql += ` AND clinic_id = $2`;
+        params.push(clinicId);
+      }
+    }
+
+    const result = await query(sql, params);
     return result.rowCount > 0;
   }
 
@@ -137,10 +191,18 @@ export class BaseRepository {
    * @returns {Promise<boolean>}
    */
   async hardDelete(id) {
-    const result = await query(
-      `DELETE FROM ${this.tableName} WHERE id = $1`,
-      [id]
-    );
+    let sql = `DELETE FROM ${this.tableName} WHERE id = $1`;
+    const params = [id];
+
+    if (this.isClinicSpecific()) {
+      const clinicId = this.getClinicId();
+      if (clinicId) {
+        sql += ` AND clinic_id = $2`;
+        params.push(clinicId);
+      }
+    }
+
+    const result = await query(sql, params);
     return result.rowCount > 0;
   }
 
@@ -152,10 +214,18 @@ export class BaseRepository {
    */
   async findByField(field, value) {
     const safeField = /^[a-zA-Z_]+$/.test(field) ? field : 'id';
-    const result = await query(
-      `SELECT * FROM ${this.tableName} WHERE ${safeField} = $1 AND deleted_at IS NULL`,
-      [value]
-    );
+    let sql = `SELECT * FROM ${this.tableName} WHERE ${safeField} = $1 AND deleted_at IS NULL`;
+    const params = [value];
+
+    if (this.isClinicSpecific()) {
+      const clinicId = this.getClinicId();
+      if (clinicId) {
+        sql += ` AND clinic_id = $2`;
+        params.push(clinicId);
+      }
+    }
+
+    const result = await query(sql, params);
     return result.rows[0] || null;
   }
 
@@ -167,7 +237,16 @@ export class BaseRepository {
   async count(filters = {}) {
     const conditions = ['deleted_at IS NULL'];
     const params = [];
-    let paramIndex = 1;
+
+    if (this.isClinicSpecific()) {
+      const clinicId = this.getClinicId();
+      if (clinicId) {
+        conditions.push('clinic_id = $1');
+        params.push(clinicId);
+      }
+    }
+
+    let paramIndex = params.length + 1;
 
     for (const [key, value] of Object.entries(filters)) {
       if (value !== undefined && value !== null) {

@@ -1,7 +1,7 @@
 // ============================================
 // Repositorio de Pagos
 // ============================================
-import { query } from '../database/pool.js';
+import { query, scopeClinic } from '../database/pool.js';
 import { BaseRepository } from './base.repository.js';
 
 /**
@@ -19,14 +19,19 @@ class PaymentRepository extends BaseRepository {
    * @returns {Promise<Array>}
    */
   async findByInvoice(invoiceId) {
+    const conditions = ['pay.deleted_at IS NULL'];
+    const params = [];
+    scopeClinic(conditions, params, 'pay');
+    conditions.push(`pay.invoice_id = $${params.length + 1}`);
+    params.push(invoiceId);
     const result = await query(
       `SELECT pay.*,
               pm.name AS payment_method_name
        FROM payments pay
        LEFT JOIN payment_methods pm ON pay.payment_method_id = pm.id
-       WHERE pay.invoice_id = $1 AND pay.deleted_at IS NULL
+       WHERE ${conditions.join(' AND ')}
        ORDER BY pay.payment_date DESC`,
-      [invoiceId]
+      params
     );
     return result.rows;
   }
@@ -39,7 +44,8 @@ class PaymentRepository extends BaseRepository {
   async findAllWithDetails({ limit = 20, offset = 0, sortBy = 'pay.created_at', sortOrder = 'DESC', filters = {} } = {}) {
     const conditions = ['pay.deleted_at IS NULL'];
     const params = [];
-    let paramIndex = 1;
+    scopeClinic(conditions, params, 'pay');
+    let paramIndex = params.length + 1;
 
     if (filters.invoice_id) {
       conditions.push(`pay.invoice_id = $${paramIndex}`);
@@ -128,12 +134,18 @@ class PaymentRepository extends BaseRepository {
    * @returns {Promise<number>}
    */
   async getRevenueByDateRange(startDate, endDate) {
+    const conditions = ['deleted_at IS NULL'];
+    const params = [];
+    scopeClinic(conditions, params);
+    conditions.push(`payment_date >= $${params.length + 1}`);
+    params.push(startDate);
+    conditions.push(`payment_date <= $${params.length + 1}`);
+    params.push(endDate);
     const result = await query(
       `SELECT COALESCE(SUM(amount), 0) AS total_revenue
        FROM payments
-       WHERE payment_date >= $1 AND payment_date <= $2
-         AND deleted_at IS NULL`,
-      [startDate, endDate]
+       WHERE ${conditions.join(' AND ')}`,
+      params
     );
     return parseFloat(result.rows[0].total_revenue);
   }

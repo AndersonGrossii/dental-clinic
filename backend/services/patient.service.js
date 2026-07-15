@@ -5,6 +5,7 @@ import patientRepository from '../repositories/patient.repository.js';
 import { toPatientDTO, toPatientListDTO } from '../dtos/patient.dto.js';
 import { AppError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
+import { als, query } from '../database/pool.js';
 
 /**
  * Servicio encargado de la gestión de pacientes.
@@ -58,31 +59,40 @@ class PatientService {
   }
 
   /**
-   * Genera el siguiente ID personalizado de paciente ("año-número").
+   * Genera el siguiente ID personalizado de paciente ("año-número-código").
    * @returns {Promise<string>}
    */
   async generateNextCustomId() {
+    const store = als.getStore();
+    const clinicId = store ? store.clinicId : null;
+
+    if (!clinicId) {
+      throw new AppError('No se pudo determinar la clínica actual.', 500);
+    }
+
+    // Obtener código de la clínica
+    const clinicRes = await query('SELECT code FROM clinics WHERE id = $1', [clinicId]);
+    const clinicCode = clinicRes.rows[0]?.code || 'XUQ';
+
     const currentYear = new Date().getFullYear();
     const prefix = `${currentYear}-`;
 
     const result = await patientRepository.rawQuery(
       `SELECT custom_id FROM patients 
-       WHERE custom_id LIKE $1 AND deleted_at IS NULL
+       WHERE custom_id LIKE $1 AND clinic_id = $2 AND deleted_at IS NULL
        ORDER BY custom_id DESC LIMIT 1`,
-      [`${prefix}%`]
+      [`${prefix}%-${clinicCode}`, clinicId]
     );
 
-    if (result.rows.length === 0) {
-      return `${currentYear}-0001`;
+    let nextNum = 1;
+    if (result.rows.length > 0) {
+      const lastCustomId = result.rows[0].custom_id;
+      const parts = lastCustomId.split('-');
+      nextNum = parseInt(parts[1], 10) + 1;
     }
-
-    const lastCustomId = result.rows[0].custom_id;
-    const parts = lastCustomId.split('-');
-    const lastNum = parseInt(parts[1], 10);
-    const nextNum = lastNum + 1;
+    
     const paddedNum = String(nextNum).padStart(4, '0');
-
-    return `${currentYear}-${paddedNum}`;
+    return `${currentYear}-${paddedNum}-${clinicCode}`;
   }
 
   /**

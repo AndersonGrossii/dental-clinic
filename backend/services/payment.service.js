@@ -5,7 +5,7 @@ import paymentRepository from '../repositories/payment.repository.js';
 import invoiceRepository from '../repositories/invoice.repository.js';
 import { AppError } from '../utils/errors.js';
 import { buildPaginationMeta } from '../utils/pagination.js';
-import { transaction } from '../database/pool.js';
+import { transaction, als } from '../database/pool.js';
 
 class PaymentService {
   /**
@@ -46,10 +46,13 @@ class PaymentService {
     }
 
     return await transaction(async (client) => {
+      const store = als.getStore();
+      const clinicId = store?.clinicId;
+
       // 1. Obtener la factura para validar el saldo
       const invoiceResult = await client.query(
-        `SELECT id, total, amount_paid, balance, status FROM invoices WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
-        [invoice_id]
+        `SELECT id, total, amount_paid, balance, status FROM invoices WHERE id = $1${clinicId ? ' AND clinic_id = $2' : ''} AND deleted_at IS NULL FOR UPDATE`,
+        clinicId ? [invoice_id, clinicId] : [invoice_id]
       );
       const invoice = invoiceResult.rows[0];
 
@@ -71,10 +74,12 @@ class PaymentService {
 
       // 2. Insertar el pago
       const paymentResult = await client.query(
-        `INSERT INTO payments (invoice_id, payment_method_id, amount, reference_number, notes, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO payments (invoice_id, payment_method_id, amount, reference_number, notes, created_by${clinicId ? ', clinic_id' : ''})
+         VALUES ($1, $2, $3, $4, $5, $6${clinicId ? ', $7' : ''})
          RETURNING *`,
-        [invoice_id, payment_method_id, paymentAmount, reference_number || null, notes || null, userId]
+        clinicId
+          ? [invoice_id, payment_method_id, paymentAmount, reference_number || null, notes || null, userId, clinicId]
+          : [invoice_id, payment_method_id, paymentAmount, reference_number || null, notes || null, userId]
       );
       const payment = paymentResult.rows[0];
 
@@ -90,8 +95,8 @@ class PaymentService {
       await client.query(
         `UPDATE invoices
          SET amount_paid = $1, balance = $2, status = $3, updated_at = NOW()
-         WHERE id = $4`,
-        [newAmountPaid, newBalance, newStatus, invoice_id]
+         WHERE id = $4${clinicId ? ' AND clinic_id = $5' : ''}`,
+        clinicId ? [newAmountPaid, newBalance, newStatus, invoice_id, clinicId] : [newAmountPaid, newBalance, newStatus, invoice_id]
       );
 
       return payment;
@@ -103,10 +108,13 @@ class PaymentService {
    */
   async delete(id) {
     return await transaction(async (client) => {
+      const store = als.getStore();
+      const clinicId = store?.clinicId;
+
       // 1. Obtener el pago
       const paymentResult = await client.query(
-        `SELECT id, invoice_id, amount FROM payments WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
-        [id]
+        `SELECT id, invoice_id, amount FROM payments WHERE id = $1${clinicId ? ' AND clinic_id = $2' : ''} AND deleted_at IS NULL FOR UPDATE`,
+        clinicId ? [id, clinicId] : [id]
       );
       const payment = paymentResult.rows[0];
 
@@ -116,14 +124,14 @@ class PaymentService {
 
       // 2. Soft-delete del pago
       await client.query(
-        `UPDATE payments SET deleted_at = NOW() WHERE id = $1`,
-        [id]
+        `UPDATE payments SET deleted_at = NOW() WHERE id = $1${clinicId ? ' AND clinic_id = $2' : ''}`,
+        clinicId ? [id, clinicId] : [id]
       );
 
       // 3. Obtener la factura para actualizarla
       const invoiceResult = await client.query(
-        `SELECT id, total, amount_paid FROM invoices WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
-        [payment.invoice_id]
+        `SELECT id, total, amount_paid FROM invoices WHERE id = $1${clinicId ? ' AND clinic_id = $2' : ''} AND deleted_at IS NULL FOR UPDATE`,
+        clinicId ? [payment.invoice_id, clinicId] : [payment.invoice_id]
       );
       const invoice = invoiceResult.rows[0];
 
@@ -141,8 +149,8 @@ class PaymentService {
         await client.query(
           `UPDATE invoices
            SET amount_paid = $1, balance = $2, status = $3, updated_at = NOW()
-           WHERE id = $4`,
-          [newAmountPaid, newBalance, newStatus, invoice.id]
+           WHERE id = $4${clinicId ? ' AND clinic_id = $5' : ''}`,
+          clinicId ? [newAmountPaid, newBalance, newStatus, invoice.id, clinicId] : [newAmountPaid, newBalance, newStatus, invoice.id]
         );
       }
 

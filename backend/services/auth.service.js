@@ -25,6 +25,7 @@ class AuthService {
     const result = await query(
       `SELECT u.id, u.email, u.first_name, u.last_name, u.phone,
               u.avatar_url, u.is_active, u.password_hash, u.role_id,
+              u.clinic_id,
               r.name AS role_name,
               d.id AS doctor_id
        FROM users u
@@ -62,6 +63,7 @@ class AuthService {
       doctorId: user.doctor_id || null,
       firstName: user.first_name,
       lastName: user.last_name,
+      clinicId: user.clinic_id,
       sessionId,
     };
 

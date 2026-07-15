@@ -1,7 +1,7 @@
 // ============================================
 // Repositorio de Facturas
 // ============================================
-import { query, transaction } from '../database/pool.js';
+import { query, scopeClinic, transaction, als } from '../database/pool.js';
 import { BaseRepository } from './base.repository.js';
 
 /**
@@ -22,7 +22,8 @@ class InvoiceRepository extends BaseRepository {
   async findAllWithDetails({ limit = 20, offset = 0, sortBy = 'i.created_at', sortOrder = 'DESC', filters = {} } = {}) {
     const conditions = ['i.deleted_at IS NULL'];
     const params = [];
-    let paramIndex = 1;
+    scopeClinic(conditions, params, 'i');
+    let paramIndex = params.length + 1;
 
     if (filters.status) {
       conditions.push(`i.status = $${paramIndex}`);
@@ -96,6 +97,11 @@ class InvoiceRepository extends BaseRepository {
    * @returns {Promise<object|null>}
    */
   async findByIdWithItems(id) {
+    const conditions = ['i.deleted_at IS NULL'];
+    const params = [id];
+    scopeClinic(conditions, params, 'i');
+    conditions.push(`i.id = $1`);
+
     const invoiceResult = await query(
       `SELECT i.*,
               CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
@@ -110,11 +116,16 @@ class InvoiceRepository extends BaseRepository {
        FROM invoices i
        INNER JOIN patients p ON i.patient_id = p.id
        LEFT JOIN users u ON i.doctor_id = u.id
-       WHERE i.id = $1 AND i.deleted_at IS NULL`,
-      [id]
+       WHERE ${conditions.join(' AND ')}`,
+      params
     );
 
     if (invoiceResult.rows.length === 0) return null;
+
+    const itemConditions = [];
+    const itemParams = [id];
+    scopeClinic(itemConditions, itemParams, 'ii');
+    itemConditions.push(`ii.invoice_id = $1`);
 
     const itemsResult = await query(
       `SELECT ii.*,
@@ -122,19 +133,24 @@ class InvoiceRepository extends BaseRepository {
               t.code AS treatment_code
        FROM invoice_items ii
        LEFT JOIN treatments t ON ii.treatment_id = t.id
-       WHERE ii.invoice_id = $1
+       WHERE ${itemConditions.join(' AND ')}
        ORDER BY ii.id ASC`,
-      [id]
+      itemParams
     );
+
+    const payConditions = ['pay.deleted_at IS NULL'];
+    const payParams = [id];
+    scopeClinic(payConditions, payParams, 'pay');
+    payConditions.push(`pay.invoice_id = $1`);
 
     const paymentsResult = await query(
       `SELECT pay.*,
               pm.name AS payment_method_name
        FROM payments pay
        LEFT JOIN payment_methods pm ON pay.payment_method_id = pm.id
-       WHERE pay.invoice_id = $1 AND pay.deleted_at IS NULL
+       WHERE ${payConditions.join(' AND ')}
        ORDER BY pay.payment_date DESC`,
-      [id]
+      payParams
     );
 
     return {
@@ -145,13 +161,21 @@ class InvoiceRepository extends BaseRepository {
   }
 
   /**
-   * Genera un número de factura secuencial con formato FAC-XXXX.
+   * Genera un número de factura secuencial con formato FAC-XXXX-CCC.
    * @returns {Promise<string>}
    */
   async generateNumber() {
+    const store = als.getStore();
+    let clinicSuffix = '';
+    if (store?.clinicId) {
+      const codeResult = await query('SELECT code FROM clinics WHERE id = $1', [store.clinicId]);
+      if (codeResult.rows.length > 0) {
+        clinicSuffix = '-' + codeResult.rows[0].code;
+      }
+    }
     const result = await query("SELECT nextval('invoice_number_seq') AS seq");
     const seq = result.rows[0].seq.toString().padStart(4, '0');
-    return `FAC-${seq}`;
+    return `FAC-${seq}${clinicSuffix}`;
   }
 
   /**
@@ -162,8 +186,11 @@ class InvoiceRepository extends BaseRepository {
    */
   async createWithItems(invoiceData, items) {
     return transaction(async (client) => {
-      const invoiceKeys = Object.keys(invoiceData);
-      const invoiceValues = Object.values(invoiceData);
+      const clinicId = this.getClinicId();
+      const dataWithClinic = { ...invoiceData, clinic_id: clinicId };
+
+      const invoiceKeys = Object.keys(dataWithClinic);
+      const invoiceValues = Object.values(dataWithClinic);
       const invoicePlaceholders = invoiceKeys.map((_, i) => `$${i + 1}`);
 
       const invoiceResult = await client.query(
@@ -178,18 +205,12 @@ class InvoiceRepository extends BaseRepository {
 
       for (const item of items) {
         const itemResult = await client.query(
-          `INSERT INTO invoice_items (invoice_id, treatment_id, description, quantity, unit_price, total, tooth_number)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
+          `INSERT INTO invoice_items (invoice_id, treatment_id, description, quantity, unit_price, total, tooth_number${clinicId ? ', clinic_id' : ''})
+           VALUES ($1, $2, $3, $4, $5, $6, $7${clinicId ? ', $8' : ''})
            RETURNING *`,
-          [
-            invoice.id,
-            item.treatment_id || null,
-            item.description,
-            item.quantity,
-            item.unit_price,
-            item.subtotal,
-            item.tooth_number || null,
-          ]
+          clinicId
+            ? [invoice.id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.subtotal, item.tooth_number || null, clinicId]
+            : [invoice.id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.subtotal, item.tooth_number || null]
         );
         insertedItems.push(itemResult.rows[0]);
       }
@@ -205,18 +226,28 @@ class InvoiceRepository extends BaseRepository {
    * @returns {Promise<object>} Factura actualizada
    */
   async updateAmountPaid(invoiceId) {
+    const sumConditions = ['deleted_at IS NULL'];
+    const sumParams = [invoiceId];
+    scopeClinic(sumConditions, sumParams);
+    sumConditions.push('invoice_id = $1');
+
     const sumResult = await query(
       `SELECT COALESCE(SUM(amount), 0) AS total_paid
        FROM payments
-       WHERE invoice_id = $1 AND deleted_at IS NULL`,
-      [invoiceId]
+       WHERE ${sumConditions.join(' AND ')}`,
+      sumParams
     );
 
     const totalPaid = parseFloat(sumResult.rows[0].total_paid);
 
+    const invConditions = ['deleted_at IS NULL'];
+    const invParams = [invoiceId];
+    scopeClinic(invConditions, invParams);
+    invConditions.push('id = $1');
+
     const invoiceResult = await query(
-      'SELECT total FROM invoices WHERE id = $1 AND deleted_at IS NULL',
-      [invoiceId]
+      `SELECT total FROM invoices WHERE ${invConditions.join(' AND ')}`,
+      invParams
     );
 
     if (invoiceResult.rows.length === 0) return null;
@@ -232,12 +263,16 @@ class InvoiceRepository extends BaseRepository {
       status = 'parcial';
     }
 
+    const updateConditions = ['id = $3', 'deleted_at IS NULL'];
+    const updateParams = [totalPaid, status, invoiceId];
+    scopeClinic(updateConditions, updateParams);
+
     const updateResult = await query(
       `UPDATE invoices
        SET amount_paid = $1, status = $2, updated_at = NOW()
-       WHERE id = $3 AND deleted_at IS NULL
+       WHERE ${updateConditions.join(' AND ')}
        RETURNING *`,
-      [totalPaid, status, invoiceId]
+      updateParams
     );
 
     return updateResult.rows[0] || null;

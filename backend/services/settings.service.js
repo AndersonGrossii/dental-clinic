@@ -2,7 +2,7 @@
 // Servicio de Configuración y Auditoría
 // ============================================
 import settingsRepository from '../repositories/settings.repository.js';
-import { query } from '../database/pool.js';
+import { query, scopeClinic } from '../database/pool.js';
 import { AppError } from '../utils/errors.js';
 import { buildPaginationMeta } from '../utils/pagination.js';
 
@@ -11,7 +11,11 @@ class SettingsService {
    * Obtiene todas las configuraciones.
    */
   async getAll() {
-    const result = await query(`SELECT * FROM settings ORDER BY category, key`);
+    const conditions = [];
+    const params = [];
+    scopeClinic(conditions, params);
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const result = await query(`SELECT * FROM settings ${whereClause} ORDER BY category, key`, params);
     return result.rows;
   }
 
@@ -40,8 +44,8 @@ class SettingsService {
   /**
    * Obtiene la información de la clínica.
    */
-  async getClinicInfo() {
-    const info = await settingsRepository.getClinicInfo();
+  async getClinicInfo(clinicId) {
+    const info = await settingsRepository.getClinicInfo(clinicId);
     if (!info) {
       throw new AppError('Información de la clínica no configurada', 404);
     }

@@ -3,7 +3,7 @@
 // ============================================
 import appointmentRepository from '../repositories/appointment.repository.js';
 import notificationService from './notification.service.js';
-import { query } from '../database/pool.js';
+import { query, als } from '../database/pool.js';
 import { AppError } from '../utils/errors.js';
 import { toAppointmentDTO, toCalendarEventDTO } from '../dtos/appointment.dto.js';
 import { formatDateSQL } from '../utils/date.js';
@@ -12,6 +12,13 @@ import { formatDateSQL } from '../utils/date.js';
  * Servicio que encapsula la lógica de negocio para la gestión de citas.
  */
 class AppointmentService {
+  getClinicCondition(alias = '') {
+    const store = als.getStore();
+    if (!store || !store.clinicId) return '';
+    const prefix = alias ? `${alias}.` : '';
+    return ` AND ${prefix}clinic_id = ${store.clinicId}`;
+  }
+
   /**
    * Obtiene todas las citas con paginación y filtros.
    * @param {object} options - { limit, offset, sortBy, sortOrder, filters }
@@ -47,7 +54,7 @@ class AppointmentService {
   async create(data, userId) {
     // Verificar que el paciente existe
     const patientResult = await query(
-      'SELECT id, first_name, last_name FROM patients WHERE id = $1 AND deleted_at IS NULL',
+      `SELECT id, first_name, last_name FROM patients WHERE id = $1 AND deleted_at IS NULL${this.getClinicCondition()}`,
       [data.patient_id]
     );
     if (patientResult.rows.length === 0) {
@@ -59,7 +66,7 @@ class AppointmentService {
       `SELECT d.id, u.first_name, u.last_name, d.user_id
        FROM doctors d
        INNER JOIN users u ON d.user_id = u.id
-       WHERE d.id = $1 AND d.deleted_at IS NULL`,
+       WHERE d.id = $1 AND d.deleted_at IS NULL${this.getClinicCondition('d')}`,
       [data.doctor_id]
     );
     if (doctorResult.rows.length === 0) {
@@ -102,7 +109,7 @@ class AppointmentService {
 
     // Verificar si es primera visita del paciente
     const previousVisits = await query(
-      'SELECT COUNT(*) AS total FROM appointments WHERE patient_id = $1 AND deleted_at IS NULL',
+      `SELECT COUNT(*) AS total FROM appointments WHERE patient_id = $1 AND deleted_at IS NULL${this.getClinicCondition()}`,
       [data.patient_id]
     );
     const isFirstVisit = parseInt(previousVisits.rows[0].total, 10) === 0;
@@ -301,7 +308,7 @@ class AppointmentService {
       try {
         // Obtener user_id del doctor para notificar
         const doctorUserResult = await query(
-          'SELECT user_id FROM doctors WHERE id = $1',
+          `SELECT user_id FROM doctors WHERE id = $1${this.getClinicCondition()}`,
           [existing.doctor_id]
         );
         if (doctorUserResult.rows[0]) {
@@ -328,24 +335,24 @@ class AppointmentService {
     let resolvedUserId = userId;
     if (!resolvedUserId) {
       const userRes = await query(
-        'SELECT d.user_id FROM appointments a JOIN doctors d ON a.doctor_id = d.id WHERE a.id = $1',
+        `SELECT d.user_id FROM appointments a JOIN doctors d ON a.doctor_id = d.id WHERE a.id = $1${this.getClinicCondition('a')}`,
         [appointmentId]
       );
       resolvedUserId = userRes.rows[0]?.user_id || 1; // Fallback al propietario
     }
 
     const existingNoteResult = await query(
-      'SELECT id FROM patient_notes WHERE appointment_id = $1 AND deleted_at IS NULL',
+      `SELECT id FROM patient_notes WHERE appointment_id = $1 AND deleted_at IS NULL${this.getClinicCondition()}`,
       [appointmentId]
     );
 
     if (existingNoteResult.rows.length > 0) {
       await query(
-        'UPDATE patient_notes SET content = $1, updated_at = NOW() WHERE id = $2',
+        `UPDATE patient_notes SET content = $1, updated_at = NOW() WHERE id = $2${this.getClinicCondition()}`,
         [notes, existingNoteResult.rows[0].id]
       );
     } else {
-      const apptResult = await query('SELECT appointment_date FROM appointments WHERE id = $1', [appointmentId]);
+      const apptResult = await query(`SELECT appointment_date FROM appointments WHERE id = $1${this.getClinicCondition()}`, [appointmentId]);
       const apptDate = apptResult.rows[0]?.appointment_date;
 
       let formattedDate = new Date().toISOString().split('T')[0];

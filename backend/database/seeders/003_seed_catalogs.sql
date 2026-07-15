@@ -63,12 +63,22 @@ INSERT INTO treatments (category_id, name, code, description, default_price, dur
   ((SELECT id FROM treatment_categories WHERE name = 'Periodoncia'), 'Cirugía Periodontal', 'PER-002', 'Cirugía periodontal por cuadrante', 5000.00, 90)
 ON CONFLICT DO NOTHING;
 
--- Información de la clínica
-INSERT INTO clinic_information (name, legal_name, tax_id, address, city, state, country, postal_code, phone, email, currency, tax_rate)
-SELECT 'Clinica Vides Dental', 'Clinica Vides Dental S.A. de C.V.', 'CDS850101ABC',
+-- Información de la clínica (una por clínica)
+INSERT INTO clinic_information (clinic_id, name, legal_name, tax_id, address, city, state, country, postal_code, phone, email, currency, tax_rate)
+SELECT c.id, 'Vides Dental Xuquer', 'Vides Dental Xuquer S.A. de C.V.', 'CDS850101ABC',
   'Av. Reforma 1234, Col. Centro', 'Ciudad de México', 'CDMX', 'México', '06000',
   '+52 55 1234 5678', 'contacto@dentalsonrisa.com', 'MXN', 16.00
-WHERE NOT EXISTS (SELECT 1 FROM clinic_information LIMIT 1);
+FROM clinics c
+WHERE c.code = 'XUQ'
+  AND NOT EXISTS (SELECT 1 FROM clinic_information ci WHERE ci.clinic_id = c.id);
+
+INSERT INTO clinic_information (clinic_id, name, legal_name, tax_id, address, city, state, country, postal_code, phone, email, currency, tax_rate)
+SELECT c.id, 'Vides Dental Cabanes', 'Vides Dental Cabanes S.L.', 'B12345678',
+  'Calle Cabanes 123', 'Cabanes', 'Castellón', 'España', '12180',
+  '+34 612 345 678', 'cabanes@videsdental.com', 'EUR', 21.00
+FROM clinics c
+WHERE c.code = 'CAB'
+  AND NOT EXISTS (SELECT 1 FROM clinic_information ci WHERE ci.clinic_id = c.id);
 
 -- Configuraciones por defecto
 INSERT INTO settings (key, value, description, category) VALUES

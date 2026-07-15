@@ -708,6 +708,7 @@ export class Invoices {
     try {
       const invoice = await invoiceService.getById(id);
       const clinic = state.get('clinicInfo') || {};
+      const logoUrl = '/assets/videsDentalLogo.jpg';
 
       const printWindow = window.open('', '_blank');
       printWindow.document.write(`
@@ -715,38 +716,57 @@ export class Invoices {
         <head>
           <title>Factura # ${invoice.invoice_number}</title>
           <style>
-            body { font-family: sans-serif; padding: 40px; color: #333; }
-            .header { display: flex; justify-content: space-between; border-bottom: 2px solid #ccc; padding-bottom: 20px; }
-            .details { margin: 30px 0; display: flex; justify-content: space-between; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-            th { background-color: #f5f5f5; }
-            .totals { text-align: right; margin-top: 30px; font-size: 1.1em; }
+            @page { margin: 20mm 15mm; }
+            body { font-family: 'Segoe UI', Arial, sans-serif; padding: 0; margin: 0; color: #333; font-size: 13px; }
+            .header { display: flex; align-items: center; gap: 20px; border-bottom: 2px solid #0f86ec; padding-bottom: 16px; margin-bottom: 20px; }
+            .header-info { flex: 1; }
+            .header-info h2 { margin: 0 0 4px 0; font-size: 18px; color: #0f86ec; }
+            .header-info p { margin: 2px 0; color: #555; font-size: 12px; }
+            .title-section { text-align: right; margin-bottom: 16px; }
+            .title-section h1 { font-size: 22px; color: #111; margin: 0; letter-spacing: 2px; text-transform: uppercase; }
+            .title-section p { color: #0f86ec; font-size: 14px; margin: 4px 0 0 0; font-weight: 600; }
+            .details { display: flex; justify-content: space-between; margin: 16px 0; padding: 12px 14px; background: #f8f9fa; border-radius: 6px; }
+            .details div { font-size: 13px; }
+            .details strong { color: #111; }
+            table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+            th { background-color: #0f86ec; color: white; padding: 10px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+            td { padding: 10px; border: 1px solid #ddd; font-size: 13px; }
+            .totals { text-align: right; margin-top: 24px; padding: 16px; background: #f8f9fa; border-radius: 6px; }
+            .totals p { margin: 4px 0; font-size: 14px; }
+            .totals h2 { margin: 8px 0 0 0; font-size: 18px; }
+            .totals hr { border: none; border-top: 1px solid #ddd; margin: 8px 0; }
+            .footer { margin-top: 30px; display: flex; justify-content: space-between; align-items: end; }
+            .footer-info { font-size: 11px; color: #999; text-align: right; }
+            .print-btn { display: block; margin: 20px auto; padding: 10px 30px; background: #0f86ec; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
+            .print-btn:hover { background: #0b6cc4; }
+            @media print { .print-btn { display: none !important; } body { padding: 0; } }
           </style>
         </head>
         <body>
+          <button class="print-btn" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+
           <div class="header">
-            <div>
-              <h2>${clinic.name || 'Clinica Vides Dental'}</h2>
-              <p>${clinic.address || 'Av. Reforma 1234, Centro'}</p>
-              <p>${clinic.tax_id ? 'NIF: ' + clinic.tax_id : 'NIF: 0000000000'}</p>
-            </div>
-            <div>
-              <h1>FACTURA</h1>
-              <p><strong>No:</strong> ${invoice.invoice_number}</p>
-              <p><strong>Fecha:</strong> ${formatDate(invoice.created_at)}</p>
+            <img src="${logoUrl}" alt="Logo" style="height: 60px; width: auto; object-fit: contain;" onerror="this.style.display='none'" />
+            <div class="header-info">
+              <h2>${clinic.name || 'Clínica Dental'}</h2>
+              <p>${clinic.address || ''}${clinic.city ? ', ' + clinic.city : ''}</p>
+              <p>${clinic.phone ? 'Tel: ' + clinic.phone : ''}${clinic.email ? ' | ' + clinic.email : ''}${clinic.tax_id ? ' | NIF: ' + clinic.tax_id : ''}</p>
             </div>
           </div>
-          
+
+          <div class="title-section">
+            <h1>Factura</h1>
+            <p>${invoice.invoice_number}</p>
+          </div>
+
           <div class="details">
             <div>
-              <h3>Receptor:</h3>
-              <p><strong>Nombre:</strong> ${invoice.patient_name || 'N/A'}</p>
-              <p><strong>NIF:</strong> ${invoice.patient_dni || 'N/A'}</p>
+              <strong>Paciente:</strong> ${invoice.patient_name || 'N/A'}<br>
+              <strong>DNI:</strong> ${invoice.patient_dni || 'N/A'}
             </div>
-            <div>
-              <h3>Especialista:</h3>
-              <p>Dr/a. ${invoice.doctor_name || 'N/A'}</p>
+            <div style="text-align: right;">
+              <strong>Fecha de Emisión:</strong> ${formatDate(invoice.created_at)}<br>
+              <strong>Especialista:</strong> Dr/a. ${invoice.doctor_name || 'N/A'}
             </div>
           </div>
 
@@ -778,13 +798,20 @@ export class Invoices {
             <p>Montante Pagado: ${formatCurrency(invoice.amount_paid)}</p>
             <hr/>
             <h2>Saldo Restante: ${formatCurrency(invoice.balance)}</h2>
-            <h2>TOTAL FACTURA: ${formatCurrency(invoice.total)}</h2>
+            <h2 style="color: #0f86ec;">TOTAL FACTURA: ${formatCurrency(invoice.total)}</h2>
+          </div>
+
+          <div class="footer">
+            <div></div>
+            <div class="footer-info">
+              Documento generado por Sistema de Gestión Clínica<br>
+              ${new Date().toLocaleDateString()}
+            </div>
           </div>
         </body>
         </html>
       `);
       printWindow.document.close();
-      printWindow.print();
     } catch {
       toast.error('Error al generar vista de impresión de factura');
     }

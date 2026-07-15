@@ -1,7 +1,7 @@
 // ============================================
 // Servicio de Búsqueda Global — Lógica de negocio
 // ============================================
-import { query } from '../database/pool.js';
+import { query, als } from '../database/pool.js';
 import { AppError } from '../utils/errors.js';
 
 /**
@@ -9,6 +9,13 @@ import { AppError } from '../utils/errors.js';
  * Busca en múltiples entidades respetando los permisos del rol.
  */
 class SearchService {
+  getClinicCondition(alias = '') {
+    const store = als.getStore();
+    if (!store || !store.clinicId) return '';
+    const prefix = alias ? `${alias}.` : '';
+    return ` AND ${prefix}clinic_id = ${store.clinicId}`;
+  }
+
   /**
    * Ejecuta una búsqueda global en múltiples entidades del sistema.
    * @param {string} term - Término de búsqueda
@@ -26,27 +33,26 @@ class SearchService {
     const results = {};
 
     // === Búsqueda de Pacientes ===
-    // Todos los roles pueden buscar pacientes
     const patientsResult = await query(
       `SELECT
-         id,
-         first_name,
-         last_name,
-         CONCAT(first_name, ' ', last_name) AS full_name,
-         dni,
-         phone,
-         email,
-         custom_id
-       FROM patients
-       WHERE deleted_at IS NULL
+         p.id,
+         p.first_name,
+         p.last_name,
+         CONCAT(p.first_name, ' ', p.last_name) AS full_name,
+         p.dni,
+         p.phone,
+         p.email,
+         p.custom_id
+       FROM patients p
+       WHERE p.deleted_at IS NULL ${this.getClinicCondition('p')}
          AND (
-           CONCAT(first_name, ' ', last_name) ILIKE $1
-           OR dni ILIKE $1
-           OR phone ILIKE $1
-           OR email ILIKE $1
-           OR custom_id ILIKE $1
+           CONCAT(p.first_name, ' ', p.last_name) ILIKE $1
+           OR p.dni ILIKE $1
+           OR p.phone ILIKE $1
+           OR p.email ILIKE $1
+           OR p.custom_id ILIKE $1
          )
-       ORDER BY last_name, first_name
+       ORDER BY p.last_name, p.first_name
        LIMIT 10`,
       [likeTerm]
     );
@@ -67,7 +73,7 @@ class SearchService {
        FROM doctors d
        INNER JOIN users u ON d.user_id = u.id
        WHERE d.deleted_at IS NULL
-         AND u.deleted_at IS NULL
+         AND u.deleted_at IS NULL ${this.getClinicCondition('d')}
          AND CONCAT(u.first_name, ' ', u.last_name) ILIKE $1
        ORDER BY u.last_name, u.first_name
        LIMIT 10`,
@@ -95,7 +101,7 @@ class SearchService {
        INNER JOIN doctors d ON a.doctor_id = d.id
        INNER JOIN users u ON d.user_id = u.id
        INNER JOIN appointment_status s ON a.status_id = s.id
-       WHERE a.deleted_at IS NULL
+       WHERE a.deleted_at IS NULL ${this.getClinicCondition('a')}
          AND (
            CONCAT(p.first_name, ' ', p.last_name) ILIKE $1
            OR CAST(a.appointment_date AS TEXT) ILIKE $1
@@ -122,7 +128,7 @@ class SearchService {
          tc.name AS category_name
        FROM treatments t
        LEFT JOIN treatment_categories tc ON t.category_id = tc.id
-       WHERE t.deleted_at IS NULL
+       WHERE t.deleted_at IS NULL ${this.getClinicCondition('t')}
          AND t.is_active = TRUE
          AND (
            t.name ILIKE $1
@@ -152,7 +158,7 @@ class SearchService {
            CONCAT(p.first_name, ' ', p.last_name) AS patient_name
          FROM invoices i
          INNER JOIN patients p ON i.patient_id = p.id
-         WHERE i.deleted_at IS NULL
+         WHERE i.deleted_at IS NULL ${this.getClinicCondition('i')}
            AND (
              i.invoice_number ILIKE $1
              OR CONCAT(p.first_name, ' ', p.last_name) ILIKE $1

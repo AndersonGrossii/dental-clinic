@@ -3,6 +3,9 @@
 // ============================================
 import state from '../../scripts/state.js';
 import auth from '../../services/auth.service.js';
+import clinicService from '../../services/clinic.service.js';
+
+let clinicDropdown = null;
 
 // SVG icons (Lucide-style) for a crisp, professional look
 const icons = {
@@ -34,6 +37,8 @@ export class Sidebar {
     const isCollapsed = state.get('sidebarCollapsed') || false;
     const theme = state.get('theme');
     const mobileOpen = state.get('mobileSidebarOpen') || false;
+    const clinics = state.get('clinics') || [];
+    const activeClinicId = state.get('activeClinicId');
 
     const menuItems = [
       { path: '#/', label: 'Dashboard', icon: icons.dashboard, roles: ['propietario', 'direccion', 'recepcionista', 'doctor', 'higienista'] },
@@ -83,7 +88,13 @@ export class Sidebar {
             <div class="sb__logo">
               <img src="/assets/videsDentalLogo.jpg" alt="Vides Dental" style="width: 36px; height: 36px; object-fit: contain; border-radius: var(--radius-md);" onerror="this.outerHTML='<svg xmlns=&quot;http://www.w3.org/2000/svg&quot; width=&quot;22&quot; height=&quot;22&quot; viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;white&quot; stroke-width=&quot;2&quot;><path d=&quot;M12 2C8 2 6 5 6 8c0 3 2 5 4 7l2 2 2-2c2-2 4-4 4-7 0-3-2-6-6-6z&quot;/></svg>';" />
             </div>
-            <span class="sb__brand-name">${clinicName}</span>
+            ${role === 'propietario' ? `
+              <div class="sb__clinic-switcher" id="clinic-switcher-btn">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="sb__clinic-icon"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                <span class="sb__clinic-select" id="clinic-switcher-label">${clinics.find(c => c.id === parseInt(activeClinicId))?.name || 'Seleccionar clínica'}</span>
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="sb__clinic-chevron"><polyline points="6 9 12 15 18 9"/></svg>
+              </div>
+            ` : `<span class="sb__brand-name">${clinicName}</span>`}
           </div>
           <button id="sb-close-mobile" class="sb__collapse-btn" title="Cerrar menú" style="display: ${isMobile ? 'flex' : 'none'};">
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -186,6 +197,66 @@ export class Sidebar {
       });
     }
 
+    // Clinic switcher (owner only)
+    const switcherBtn = this.container.querySelector('#clinic-switcher-btn');
+    if (switcherBtn) {
+      switcherBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+
+        if (clinicDropdown) {
+          clinicDropdown.remove();
+          clinicDropdown = null;
+          return;
+        }
+
+        let clinics = state.get('clinics') || [];
+        const activeClinicId = state.get('activeClinicId');
+
+        // Show loading dropdown immediately
+        clinicDropdown = document.createElement('div');
+        clinicDropdown.className = 'sb__clinic-dropdown';
+        clinicDropdown.innerHTML = '<div class="sb__clinic-option" style="cursor:default;color:var(--color-text-tertiary);">Cargando clínicas…</div>';
+
+        const rect = switcherBtn.getBoundingClientRect();
+        clinicDropdown.style.position = 'fixed';
+        clinicDropdown.style.left = rect.left + 'px';
+        clinicDropdown.style.top = (rect.bottom + 4) + 'px';
+        clinicDropdown.style.minWidth = Math.max(rect.width, 180) + 'px';
+        document.body.appendChild(clinicDropdown);
+
+        // If not loaded yet, wait for them
+        if (clinics.length === 0) {
+          await this.loadClinics();
+          clinics = state.get('clinics') || [];
+        }
+
+        // Replace loading state with actual clinic options
+        clinicDropdown.innerHTML = '';
+        if (clinics.length === 0) {
+          clinicDropdown.innerHTML = '<div class="sb__clinic-option" style="cursor:default;color:var(--color-text-tertiary);">Sin clínicas disponibles</div>';
+        } else {
+          clinics.forEach(c => {
+            const opt = document.createElement('div');
+            opt.className = `sb__clinic-option${c.id === parseInt(activeClinicId) ? ' sb__clinic-option--active' : ''}`;
+            opt.dataset.clinicId = c.id;
+            opt.innerHTML = `
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="sb__clinic-icon"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+              <span>${c.name}</span>
+              ${c.id === parseInt(activeClinicId) ? '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-left:auto;"><polyline points="20 6 9 17 4 12"/></svg>' : ''}
+            `;
+            opt.addEventListener('click', () => {
+              clinicDropdown.remove();
+              clinicDropdown = null;
+              state.set('activeClinicId', c.id);
+              localStorage.setItem('activeClinicId', c.id);
+              window.location.reload();
+            });
+            clinicDropdown.appendChild(opt);
+          });
+        }
+      });
+    }
+
     // Theme toggle
     const themeBtn = this.container.querySelector('#sb-theme-toggle');
     if (themeBtn) {
@@ -209,6 +280,12 @@ export class Sidebar {
   }
 
   mount() {
+    // Restore activeClinicId from localStorage immediately so API calls send the X-Clinic-Id header
+    const savedClinicId = localStorage.getItem('activeClinicId');
+    if (savedClinicId && !state.get('activeClinicId')) {
+      state.set('activeClinicId', savedClinicId);
+    }
+
     this.render();
     this.bindEvents();
 
@@ -230,13 +307,61 @@ export class Sidebar {
       this.render();
       this.bindEvents();
     });
+    this.unsubscribeClinics = state.subscribe('clinics', () => {
+      this.render();
+      this.bindEvents();
+    });
+
+    // Fetch clinics for owner
+    const user = state.get('user');
+    if (user?.role_name === 'propietario') {
+      this.loadClinics();
+    }
+
+    // Single global click handler to close clinic dropdown
+    this._onDocClick = (e) => {
+      if (!clinicDropdown) return;
+      const btn = this.container.querySelector('#clinic-switcher-btn');
+      if (btn && !btn.contains(e.target) && !clinicDropdown.contains(e.target)) {
+        clinicDropdown.remove();
+        clinicDropdown = null;
+      }
+    };
+    document.addEventListener('click', this._onDocClick);
+  }
+
+  async loadClinics() {
+    // Si ya se está cargando, esperar a que termine
+    if (this._clinicsPromise) return this._clinicsPromise;
+    this._clinicsPromise = (async () => {
+      try {
+        const clinics = await clinicService.getAll();
+        state.set('clinics', clinics);
+        let activeClinicId = state.get('activeClinicId') || localStorage.getItem('activeClinicId');
+        if (!activeClinicId && clinics.length > 0) {
+          activeClinicId = String(clinics[0].id);
+        }
+        if (activeClinicId) {
+          state.set('activeClinicId', activeClinicId);
+          localStorage.setItem('activeClinicId', String(activeClinicId));
+        }
+      } catch (err) {
+        console.error('Error al cargar clínicas:', err);
+      } finally {
+        this._clinicsPromise = null;
+      }
+    })();
+    return this._clinicsPromise;
   }
 
   destroy() {
     if (this.unsubscribe) this.unsubscribe();
     if (this.unsubscribeMobile) this.unsubscribeMobile();
     if (this.unsubscribeClinic) this.unsubscribeClinic();
+    if (this.unsubscribeClinics) this.unsubscribeClinics();
     if (this._onHashChange) window.removeEventListener('hashchange', this._onHashChange);
     if (this._onResize) window.removeEventListener('resize', this._onResize);
+    if (this._onDocClick) document.removeEventListener('click', this._onDocClick);
+    if (clinicDropdown) { clinicDropdown.remove(); clinicDropdown = null; }
   }
 }

@@ -1,7 +1,7 @@
 // ============================================
 // Repositorio de Tratamientos — Operaciones de datos
 // ============================================
-import { query } from '../database/pool.js';
+import { query, scopeClinic, als } from '../database/pool.js';
 import { BaseRepository } from './base.repository.js';
 
 /**
@@ -22,7 +22,8 @@ class TreatmentRepository extends BaseRepository {
   async findAllWithCategory({ limit = 20, offset = 0, sortBy = 't.name', sortOrder = 'ASC', filters = {} } = {}) {
     const conditions = ['t.deleted_at IS NULL'];
     const params = [];
-    let paramIndex = 1;
+    scopeClinic(conditions, params, 't');
+    let paramIndex = params.length + 1;
 
     if (filters.category_id) {
       conditions.push(`t.category_id = $${paramIndex++}`);
@@ -144,6 +145,10 @@ class TreatmentRepository extends BaseRepository {
    * @returns {Promise<Array>}
    */
   async getPatientTreatments(patientId) {
+    const conditions = ['pt.patient_id = $1', 'pt.deleted_at IS NULL'];
+    const params = [patientId];
+    scopeClinic(conditions, params, 'pt');
+
     const result = await query(
       `SELECT
          pt.id,
@@ -170,9 +175,9 @@ class TreatmentRepository extends BaseRepository {
        LEFT JOIN treatment_categories tc ON t.category_id = tc.id
        LEFT JOIN doctors d ON pt.doctor_id = d.id
        LEFT JOIN users u ON d.user_id = u.id
-       WHERE pt.patient_id = $1 AND pt.deleted_at IS NULL
+       WHERE ${conditions.join(' AND ')}
        ORDER BY pt.created_at DESC`,
-      [patientId]
+      params
     );
     return result.rows;
   }
@@ -185,6 +190,14 @@ class TreatmentRepository extends BaseRepository {
   async createPatientTreatment(data) {
     const keys = Object.keys(data);
     const values = Object.values(data);
+
+    const store = als.getStore();
+    const clinicId = store?.clinicId;
+    if (clinicId) {
+      keys.push('clinic_id');
+      values.push(clinicId);
+    }
+
     const placeholders = keys.map((_, i) => `$${i + 1}`);
 
     const result = await query(
@@ -207,12 +220,16 @@ class TreatmentRepository extends BaseRepository {
     const values = Object.values(data);
     const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
 
+    const conditions = [`id = $${keys.length + 1}`, 'deleted_at IS NULL'];
+    const params = [...values, id];
+    scopeClinic(conditions, params);
+
     const result = await query(
       `UPDATE patient_treatments
        SET ${setClause}, updated_at = NOW()
-       WHERE id = $${keys.length + 1} AND deleted_at IS NULL
+       WHERE ${conditions.join(' AND ')}
        RETURNING *`,
-      [...values, id]
+      params
     );
     return result.rows[0] || null;
   }

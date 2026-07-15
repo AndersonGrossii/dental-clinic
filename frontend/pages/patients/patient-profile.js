@@ -5,6 +5,7 @@ import patientService from '../../services/patient.service.js';
 import treatmentService from '../../services/treatment.service.js';
 import appointmentService from '../../services/appointment.service.js';
 import quotationService from '../../services/quotation.service.js';
+import prescriptionService from '../../services/prescription.service.js';
 import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
 import state from '../../scripts/state.js';
@@ -19,6 +20,7 @@ export class PatientProfile {
     this.appointments = [];
     this.quotations = [];
     this.clinicalNotes = [];
+    this.prescriptions = [];
     this.activeTab = 'info';
   }
 
@@ -30,6 +32,8 @@ export class PatientProfile {
       const quotesRes = await quotationService.getAll({ patient_id: this.patientId, limit: 999 });
       this.quotations = Array.isArray(quotesRes) ? quotesRes : (quotesRes.rows || []);
       this.clinicalNotes = await patientService.getNotes(this.patientId) || [];
+      const prescRes = await prescriptionService.getByPatient(this.patientId, { limit: 999 });
+      this.prescriptions = Array.isArray(prescRes) ? prescRes : (prescRes.rows || []);
       
       this.renderProfile();
     } catch (err) {
@@ -288,6 +292,53 @@ export class PatientProfile {
           ${noteRows}
         </div>
       `;
+    } else if (this.activeTab === 'prescriptions') {
+      const userRole = state.get('user')?.role_name;
+      const canPrescribe = ['propietario', 'direccion', 'doctor'].includes(userRole);
+
+      let prescRows = (this.prescriptions || []).map(p => `
+        <tr>
+          <td><strong>${p.prescription_number}</strong></td>
+          <td>${p.issued_date ? formatDate(p.issued_date) : 'N/A'}</td>
+          <td>Dr/a. ${p.doctor_name || 'N/A'}</td>
+          <td>
+            <button class="btn btn-sm btn-outline view-prescription-btn" data-id="${p.id}">Ver / Imprimir</button>
+            <button class="btn btn-sm btn-danger delete-prescription-btn" data-id="${p.id}">Eliminar</button>
+          </td>
+        </tr>
+      `).join('');
+
+      if (!this.prescriptions || this.prescriptions.length === 0) {
+        prescRows = `
+          <tr>
+            <td colspan="4" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
+              No se han registrado prescripciones para este paciente.
+            </td>
+          </tr>
+        `;
+      }
+
+      tabContent = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
+          <h3>Prescripciones Médicas</h3>
+          ${canPrescribe ? `<button id="profile-add-prescription-btn" class="btn btn-sm btn-primary">+ Nueva Prescripción</button>` : ''}
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>No. Prescripción</th>
+                <th>Fecha de Emisión</th>
+                <th>Doctor</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${prescRows}
+            </tbody>
+          </table>
+        </div>
+      `;
     }
 
     this.container.innerHTML = `
@@ -322,6 +373,7 @@ export class PatientProfile {
         ${tabLink('appointments', 'Historial de Citas')}
         ${tabLink('quotations', 'Presupuestos')}
         ${tabLink('notes', 'Notas de Evolución')}
+        ${tabLink('prescriptions', 'Prescripciones')}
       </div>
 
       <div class="card" style="padding: var(--space-6);">
@@ -378,6 +430,30 @@ export class PatientProfile {
     if (tabScheduleBtn) {
       tabScheduleBtn.addEventListener('click', prefillAndGo);
     }
+
+    // Prescription buttons
+    const addPrescBtn = this.container.querySelector('#profile-add-prescription-btn');
+    if (addPrescBtn) {
+      addPrescBtn.addEventListener('click', () => this.showAddPrescriptionModal());
+    }
+
+    this.container.querySelectorAll('.view-prescription-btn').forEach(btn => {
+      btn.addEventListener('click', () => this.showPrescriptionPreview(btn.dataset.id));
+    });
+
+    this.container.querySelectorAll('.delete-prescription-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('¿Eliminar esta prescripción?')) return;
+        try {
+          await prescriptionService.remove(btn.dataset.id);
+          toast.success('Prescripción eliminada');
+          await this.render();
+          this.mount();
+        } catch (err) {
+          toast.error(err.message || 'Error al eliminar');
+        }
+      });
+    });
   }
 
   async showPatientModal() {
@@ -651,5 +727,297 @@ export class PatientProfile {
         }
       }
     });
+  }
+
+  async showAddPrescriptionModal() {
+    const user = state.get('user');
+    const doctorId = user?.doctor_id;
+
+    if (!doctorId) {
+      toast.error('Solo los doctores pueden crear prescripciones.');
+      return;
+    }
+
+    const content = `
+      <form id="add-prescription-form">
+        <input type="hidden" name="doctor_id" value="${doctorId}" />
+        <div class="form-group">
+          <label class="form-label">Fecha de Emisión</label>
+          <input type="date" name="issued_date" class="form-input" value="${new Date().toISOString().split('T')[0]}" required />
+        </div>
+        <div class="form-group" style="margin-top: var(--space-3);">
+          <label class="form-label">Válido Hasta</label>
+          <input type="date" name="valid_until" class="form-input" />
+        </div>
+
+        <div style="margin-top: var(--space-4); border-top: 1px solid var(--color-border); padding-top: var(--space-3);">
+          <h4 style="margin: 0 0 var(--space-3) 0;">Medicamentos</h4>
+          <div id="prescription-items-container">
+            <div class="prescription-item-row" style="border: 1px solid var(--color-border-light); border-radius: var(--radius-md); padding: var(--space-3); margin-bottom: var(--space-3);">
+              <div class="form-row-responsive">
+                <div class="form-group" style="margin: 0; flex: 2;">
+                  <label class="form-label" style="font-size: var(--text-xs);">Medicamento *</label>
+                  <input type="text" name="medication_name[]" class="form-input" placeholder="Nombre del medicamento" required />
+                </div>
+                <div class="form-group" style="margin: 0; flex: 1;">
+                  <label class="form-label" style="font-size: var(--text-xs);">Dosis</label>
+                  <input type="text" name="dosage[]" class="form-input" placeholder="Ej: 500mg" />
+                </div>
+              </div>
+              <div class="form-row-responsive" style="margin-top: var(--space-2);">
+                <div class="form-group" style="margin: 0; flex: 1;">
+                  <label class="form-label" style="font-size: var(--text-xs);">Frecuencia</label>
+                  <input type="text" name="frequency[]" class="form-input" placeholder="Ej: Cada 8 horas" />
+                </div>
+                <div class="form-group" style="margin: 0; flex: 1;">
+                  <label class="form-label" style="font-size: var(--text-xs);">Duración</label>
+                  <input type="text" name="duration[]" class="form-input" placeholder="Ej: 7 días" />
+                </div>
+              </div>
+              <div class="form-group" style="margin-top: var(--space-2);">
+                <label class="form-label" style="font-size: var(--text-xs);">Instrucciones</label>
+                <input type="text" name="instructions[]" class="form-input" placeholder="Indicaciones específicas..." />
+              </div>
+              <button type="button" class="btn btn-sm btn-outline remove-prescription-item-btn" style="margin-top: var(--space-2); color: var(--danger-600);">Eliminar</button>
+            </div>
+          </div>
+          <button type="button" id="add-prescription-item-btn" class="btn btn-sm btn-secondary">+ Agregar Medicamento</button>
+        </div>
+
+        <div class="form-group" style="margin-top: var(--space-4);">
+          <label class="form-label">Notas / Indicaciones Generales</label>
+          <textarea name="notes" class="form-textarea" rows="3" placeholder="Instrucciones generales para el paciente..."></textarea>
+        </div>
+      </form>
+    `;
+
+    Modal.show({
+      title: 'Nueva Prescripción Médica',
+      content: content,
+      confirmText: 'Crear Prescripción',
+      size: 'md',
+      onConfirm: async (modalBody) => {
+        const form = modalBody.querySelector('#add-prescription-form');
+        const formData = new FormData(form);
+        const entries = Array.from(formData.entries());
+
+        const medicationNames = entries.filter(([k]) => k === 'medication_name[]').map(([, v]) => v).filter(v => v.trim());
+        if (medicationNames.length === 0) {
+          toast.error('Debe agregar al menos un medicamento.');
+          return false;
+        }
+
+        const dosages = entries.filter(([k]) => k === 'dosage[]').map(([, v]) => v);
+        const frequencies = entries.filter(([k]) => k === 'frequency[]').map(([, v]) => v);
+        const durations = entries.filter(([k]) => k === 'duration[]').map(([, v]) => v);
+        const instructions = entries.filter(([k]) => k === 'instructions[]').map(([, v]) => v);
+
+        const items = medicationNames.map((name, i) => ({
+          medication_name: name,
+          dosage: dosages[i] || '',
+          frequency: frequencies[i] || '',
+          duration: durations[i] || '',
+          instructions: instructions[i] || '',
+        }));
+
+        const data = {
+          patient_id: Number(this.patientId),
+          doctor_id: Number(doctorId),
+          issued_date: form.querySelector('[name="issued_date"]').value,
+          valid_until: form.querySelector('[name="valid_until"]').value || null,
+          notes: form.querySelector('[name="notes"]').value || null,
+          items,
+        };
+
+        try {
+          await prescriptionService.create(data);
+          toast.success('Prescripción creada exitosamente');
+          await this.render();
+          this.mount();
+          return true;
+        } catch (err) {
+          toast.error(err.message || 'Error al crear prescripción');
+          return false;
+        }
+      }
+    });
+
+    // Dynamic item add/remove
+    const overlay = document.querySelector('.modal-overlay');
+    if (!overlay) return;
+
+    overlay.querySelector('#add-prescription-item-btn')?.addEventListener('click', () => {
+      const container = overlay.querySelector('#prescription-items-container');
+      const row = document.createElement('div');
+      row.className = 'prescription-item-row';
+      row.style.cssText = 'border: 1px solid var(--color-border-light); border-radius: var(--radius-md); padding: var(--space-3); margin-bottom: var(--space-3);';
+      row.innerHTML = `
+        <div class="form-row-responsive">
+          <div class="form-group" style="margin: 0; flex: 2;">
+            <label class="form-label" style="font-size: var(--text-xs);">Medicamento *</label>
+            <input type="text" name="medication_name[]" class="form-input" placeholder="Nombre del medicamento" required />
+          </div>
+          <div class="form-group" style="margin: 0; flex: 1;">
+            <label class="form-label" style="font-size: var(--text-xs);">Dosis</label>
+            <input type="text" name="dosage[]" class="form-input" placeholder="Ej: 500mg" />
+          </div>
+        </div>
+        <div class="form-row-responsive" style="margin-top: var(--space-2);">
+          <div class="form-group" style="margin: 0; flex: 1;">
+            <label class="form-label" style="font-size: var(--text-xs);">Frecuencia</label>
+            <input type="text" name="frequency[]" class="form-input" placeholder="Ej: Cada 8 horas" />
+          </div>
+          <div class="form-group" style="margin: 0; flex: 1;">
+            <label class="form-label" style="font-size: var(--text-xs);">Duración</label>
+            <input type="text" name="duration[]" class="form-input" placeholder="Ej: 7 días" />
+          </div>
+        </div>
+        <div class="form-group" style="margin-top: var(--space-2);">
+          <label class="form-label" style="font-size: var(--text-xs);">Instrucciones</label>
+          <input type="text" name="instructions[]" class="form-input" placeholder="Indicaciones específicas..." />
+        </div>
+        <button type="button" class="btn btn-sm btn-outline remove-prescription-item-btn" style="margin-top: var(--space-2); color: var(--danger-600);">Eliminar</button>
+      `;
+      container.appendChild(row);
+    });
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target.closest('.remove-prescription-item-btn')) {
+        const rows = overlay.querySelectorAll('.prescription-item-row');
+        if (rows.length > 1) {
+          e.target.closest('.prescription-item-row').remove();
+        } else {
+          toast.error('Debe haber al menos un medicamento.');
+        }
+      }
+    });
+  }
+
+  async showPrescriptionPreview(id) {
+    let prescription;
+    try {
+      prescription = await prescriptionService.getById(id);
+    } catch (err) {
+      toast.error('Error al cargar la prescripción');
+      return;
+    }
+
+    const clinic = state.get('clinicInfo') || {};
+    const logoUrl = clinic.logo_url || '/assets/videsDentalLogo.jpg';
+
+    const itemsHtml = prescription.items.map((item, i) => `
+      <tr>
+        <td style="text-align: center; padding: 8px 10px; border: 1px solid #ddd;">${i + 1}</td>
+        <td style="padding: 8px 10px; border: 1px solid #ddd; font-weight: 600;">${item.medication_name}</td>
+        <td style="padding: 8px 10px; border: 1px solid #ddd;">${item.dosage || '—'}</td>
+        <td style="padding: 8px 10px; border: 1px solid #ddd;">${item.frequency || '—'}</td>
+        <td style="padding: 8px 10px; border: 1px solid #ddd;">${item.duration || '—'}</td>
+        <td style="padding: 8px 10px; border: 1px solid #ddd;">${item.instructions || '—'}</td>
+      </tr>
+    `).join('');
+
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+      <html>
+      <head>
+        <title>Prescripción # ${prescription.prescription_number}</title>
+        <style>
+          @page { margin: 20mm 15mm; }
+          body { font-family: 'Segoe UI', Arial, sans-serif; padding: 0; margin: 0; color: #333; font-size: 13px; }
+          .header { display: flex; align-items: center; gap: 20px; border-bottom: 2px solid #0f86ec; padding-bottom: 16px; margin-bottom: 20px; }
+          .header-info { flex: 1; }
+          .header-info h2 { margin: 0 0 4px 0; font-size: 18px; color: #0f86ec; }
+          .header-info p { margin: 2px 0; color: #555; font-size: 12px; }
+          .title-section { text-align: center; margin: 20px 0; }
+          .title-section h1 { font-size: 22px; color: #111; margin: 0; letter-spacing: 2px; text-transform: uppercase; }
+          .title-section p { color: #0f86ec; font-size: 12px; margin: 4px 0 0 0; font-weight: 600; }
+          .details { display: flex; justify-content: space-between; margin: 16px 0; padding: 12px 14px; background: #f8f9fa; border-radius: 6px; }
+          .details div { font-size: 13px; }
+          .details strong { color: #111; }
+          table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+          th { background-color: #0f86ec; color: white; padding: 10px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+          td { padding: 10px; border: 1px solid #ddd; font-size: 13px; }
+          .notes-section { margin-top: 20px; padding: 14px; background: #fffbe6; border-left: 3px solid #f59e0b; border-radius: 4px; }
+          .notes-section h4 { margin: 0 0 6px 0; font-size: 13px; color: #92400e; }
+          .notes-section p { margin: 0; color: #555; font-size: 12px; white-space: pre-wrap; }
+          .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: end; }
+          .signature-line { border-top: 1px solid #333; width: 250px; padding-top: 6px; text-align: center; font-size: 12px; color: #555; }
+          .footer-info { font-size: 11px; color: #999; text-align: right; }
+          .print-btn { display: block; margin: 20px auto; padding: 10px 30px; background: #0f86ec; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
+          .print-btn:hover { background: #0b6cc4; }
+          @media print {
+            .print-btn { display: none !important; }
+            body { padding: 0; }
+          }
+        </style>
+      </head>
+      <body>
+        <button class="print-btn" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+
+        <div class="header">
+          <img src="${logoUrl}" alt="Logo" style="height: 60px; width: auto; object-fit: contain;" onerror="this.style.display='none'" />
+          <div class="header-info">
+            <h2>${clinic.name || 'Clínica Dental'}</h2>
+            <p>${clinic.address || ''}${clinic.city ? ', ' + clinic.city : ''}</p>
+            <p>${clinic.phone ? 'Tel: ' + clinic.phone : ''}${clinic.email ? ' | ' + clinic.email : ''}</p>
+          </div>
+        </div>
+
+        <div class="title-section">
+          <h1>Prescripción Médica</h1>
+          <p>${prescription.prescription_number}</p>
+        </div>
+
+        <div class="details">
+          <div>
+            <strong>Paciente:</strong> ${prescription.patient_name || 'N/A'}<br>
+            <strong>DNI:</strong> ${prescription.patient_dni || 'N/A'}
+          </div>
+          <div style="text-align: right;">
+            <strong>Fecha de Emisión:</strong> ${prescription.issued_date ? formatDate(prescription.issued_date) : 'N/A'}<br>
+            ${prescription.valid_until ? `<strong>Válido Hasta:</strong> ${formatDate(prescription.valid_until)}` : ''}
+          </div>
+        </div>
+
+        <div style="margin-bottom: 12px;">
+          <strong>Médico:</strong> Dr/a. ${prescription.doctor_name || 'N/A'}${prescription.doctor_specialty ? ' (' + prescription.doctor_specialty + ')' : ''}
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 40px;">#</th>
+              <th>Medicamento</th>
+              <th>Dosis</th>
+              <th>Frecuencia</th>
+              <th>Duración</th>
+              <th>Instrucciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHtml}
+          </tbody>
+        </table>
+
+        ${prescription.notes ? `
+          <div class="notes-section">
+            <h4>📋 Indicaciones Generales</h4>
+            <p>${prescription.notes}</p>
+          </div>
+        ` : ''}
+
+        <div class="footer">
+          <div class="signature-line">
+            Firma del Doctor
+          </div>
+          <div class="footer-info">
+            Documento generado por Sistema de Gestión Clínica<br>
+            ${new Date().toLocaleDateString()}
+          </div>
+        </div>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
   }
 }

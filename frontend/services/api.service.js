@@ -26,6 +26,12 @@ class ApiService {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
+    // Agregar clínica activa
+    const activeClinicId = state.get('activeClinicId');
+    if (activeClinicId) {
+      headers['X-Clinic-Id'] = activeClinicId;
+    }
+
     // Configurar body
     let body = options.body;
     if (body && !(body instanceof FormData) && typeof body === 'object') {
