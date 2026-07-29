@@ -59,7 +59,7 @@ export class Doctors {
       <div class="card" style="border-top: 4px solid ${doc.color || '#0891b2'}; ${doc.is_active === false ? 'opacity: 0.7;' : ''}">
         <div style="display: flex; flex-direction: column; align-items: center; text-align: center; padding: var(--space-4);">
           <span style="font-size: 24px; font-weight: bold; background-color: ${doc.color || '#0891b2'}; color: white; width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: var(--space-3);">
-            ${doc.first_name[0].toUpperCase()}${doc.last_name[0].toUpperCase()}
+            ${((doc.first_name || 'D')[0] || 'D').toUpperCase()}${((doc.last_name || 'D')[0] || 'D').toUpperCase()}
           </span>
           <h3 style="margin: 0;">Dr/a. ${doc.first_name} ${doc.last_name}</h3>
           <p style="color: var(--primary-600); font-weight: 500; font-size: var(--text-sm); margin: var(--space-1) 0;">${doc.specialty}</p>
