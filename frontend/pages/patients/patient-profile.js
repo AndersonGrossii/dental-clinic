@@ -10,6 +10,7 @@ import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
 import state from '../../scripts/state.js';
 import { formatDate, formatCurrency } from '../../utils/helpers.js';
+import { Quotations } from '../quotations/quotations.js';
 
 export class PatientProfile {
   constructor(container, params) {
@@ -220,7 +221,7 @@ export class PatientProfile {
           <td><span class="badge ${STATUS_BADGES[q.status] || 'badge-secondary'}">${STATUS_LABELS[q.status] || q.status}</span></td>
           <td>${q.created_at ? formatDate(q.created_at) : 'N/A'}</td>
           <td>
-            <a href="#/quotations" class="btn btn-sm btn-outline">Ver Detalle</a>
+            <button class="btn btn-sm btn-outline view-quotation-btn" data-id="${q.id}">Ver Detalle</button>
           </td>
         </tr>
       `).join('');
@@ -436,6 +437,13 @@ export class PatientProfile {
     if (addPrescBtn) {
       addPrescBtn.addEventListener('click', () => this.showAddPrescriptionModal());
     }
+
+    // Quotation buttons
+    this.container.querySelectorAll('.view-quotation-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        new Quotations().printQuote(btn.dataset.id);
+      });
+    });
 
     this.container.querySelectorAll('.view-prescription-btn').forEach(btn => {
       btn.addEventListener('click', () => this.showPrescriptionPreview(btn.dataset.id));
