@@ -361,16 +361,19 @@ class AppointmentService {
         formattedDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       }
 
+      const store = als.getStore();
+      const clinicId = store?.clinicId;
       await query(
-        `INSERT INTO patient_notes (patient_id, user_id, title, content, type, appointment_id)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
+        `INSERT INTO patient_notes (patient_id, user_id, title, content, type, appointment_id, clinic_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [
           patientId,
           resolvedUserId,
           `Nota de Cita - ${formattedDate}`,
           notes,
           'clinica',
-          appointmentId
+          appointmentId,
+          clinicId
         ]
       );
     }

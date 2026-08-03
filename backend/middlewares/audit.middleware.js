@@ -23,8 +23,8 @@ export const auditMiddleware = (action, tableName) => {
         const recordId = req.params?.id || body?.data?.id || null;
 
         query(
-          `INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values, ip_address, user_agent)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          `INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values, ip_address, user_agent, clinic_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
           [
             req.user.id,
             action,
@@ -34,6 +34,7 @@ export const auditMiddleware = (action, tableName) => {
             JSON.stringify(req.body || null),
             req.ip || req.connection?.remoteAddress,
             req.headers['user-agent'] || 'desconocido',
+            req.user.clinicId || null,
           ]
         ).catch((err) => {
           logger.error('Error al registrar auditoría:', err.message);

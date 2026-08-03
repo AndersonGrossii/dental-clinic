@@ -99,9 +99,10 @@ class NotificationRepository extends BaseRepository {
    * @returns {Promise<object>}
    */
   async createNotification(data) {
+    const clinicId = this.getClinicId();
     const result = await query(
-      `INSERT INTO notifications (user_id, title, message, type, reference_type, reference_id)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO notifications (user_id, title, message, type, reference_type, reference_id, clinic_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
       [
         data.user_id,
@@ -110,6 +111,7 @@ class NotificationRepository extends BaseRepository {
         data.type || 'info',
         data.reference_type || null,
         data.reference_id || null,
+        clinicId,
       ]
     );
     return result.rows[0];
