@@ -79,3 +79,58 @@ export const changeStatus = async (req, res, next) => {
     next(error);
   }
 };
+
+export const updateItemStatus = async (req, res, next) => {
+  try {
+    const { itemId } = req.params;
+    const { status } = req.body;
+    const updated = await quotationService.updateItemStatus(itemId, status);
+    return ApiResponse.success(res, updated, `Estado del ítem cambiado a ${status}`);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const acceptAll = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const quotation = await quotationService.acceptAllItems(id);
+    return ApiResponse.success(res, quotation, 'Presupuesto completo aceptado exitosamente');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateItemsStatusBulk = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { items } = req.body; // Array of { id, status }
+    const quotation = await quotationService.updateItemsStatusBulk(id, items);
+    return ApiResponse.success(res, quotation, 'Estados de los ítems actualizados exitosamente');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getAcceptedItemsByPatient = async (req, res, next) => {
+  try {
+    const { patientId } = req.params;
+    const items = await quotationService.getAcceptedItemsByPatient(patientId);
+    return ApiResponse.success(res, items, 'Tratamientos aceptados del paciente');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateExecutionStatus = async (req, res, next) => {
+  try {
+    const { itemId } = req.params;
+    const { executionStatus, execution_status } = req.body;
+    const targetStatus = executionStatus || execution_status;
+    const userId = req.user.id;
+    const updated = await quotationService.updateExecutionStatus(itemId, targetStatus, userId);
+    return ApiResponse.success(res, updated, `Estado de ejecución clínica actualizado a ${targetStatus}`);
+  } catch (error) {
+    next(error);
+  }
+};

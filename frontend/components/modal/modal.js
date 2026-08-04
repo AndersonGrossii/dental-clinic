@@ -11,6 +11,10 @@ class Modal {
     modals.forEach(m => m.remove());
   }
 
+  static close() {
+    this.closeAll();
+  }
+
   /**
    * Muestra un modal dinámico.
    */

@@ -91,4 +91,4 @@ INSERT INTO settings (key, value, description, category) VALUES
   ('date_format', 'DD/MM/YYYY', 'Formato de fecha', 'general'),
   ('time_format', '24h', 'Formato de hora', 'general'),
   ('theme', 'light', 'Tema visual predeterminado', 'apariencia')
-ON CONFLICT (key) DO NOTHING;
+ON CONFLICT (clinic_id, key) DO NOTHING;

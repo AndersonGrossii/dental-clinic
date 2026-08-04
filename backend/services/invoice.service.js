@@ -165,38 +165,53 @@ class InvoiceService {
    * @returns {Promise<object>} Factura creada
    * @throws {AppError} Si la cotización no existe o no está aceptada
    */
-  async createFromQuotation(quotationId, userId) {
+  async createFromQuotation(quotationId, userId, selectedItemIds = null) {
     const quotation = await quotationRepository.findByIdWithItems(quotationId);
     if (!quotation) {
       throw new AppError('Cotización no encontrada.', 404);
     }
 
-    if (quotation.status !== 'aceptada') {
-      throw new AppError('Solo se pueden facturar cotizaciones con estado "aceptada".', 400);
+    let itemsToBill = quotation.items || [];
+    if (Array.isArray(selectedItemIds) && selectedItemIds.length > 0) {
+      const idSet = new Set(selectedItemIds.map(id => String(id)));
+      itemsToBill = quotation.items.filter(item => idSet.has(String(item.id)));
     }
+
+    if (itemsToBill.length === 0) {
+      throw new AppError('Debe seleccionar al menos un ítem válido para facturar.', 400);
+    }
+
+    // Calcular subtotales y totales para los ítems seleccionados
+    const subtotal = parseFloat(itemsToBill.reduce((acc, item) => acc + parseFloat(item.total || 0), 0).toFixed(2));
+    const taxRate = parseFloat(quotation.tax_rate || 0);
+    const discountPct = parseFloat(quotation.discount_percentage || 0);
+    const discountAmount = parseFloat((subtotal * (discountPct / 100)).toFixed(2));
+    const taxableAmount = subtotal - discountAmount;
+    const taxAmount = parseFloat((taxableAmount * (taxRate / 100)).toFixed(2));
+    const total = parseFloat((taxableAmount + taxAmount).toFixed(2));
 
     const invoiceNumber = await invoiceRepository.generateNumber();
 
+    const isPartial = itemsToBill.length < (quotation.items || []).length;
     const invoiceData = {
       invoice_number: invoiceNumber,
       quotation_id: quotation.id,
       patient_id: quotation.patient_id,
       doctor_id: quotation.doctor_id,
-      subtotal: quotation.subtotal,
-      tax_rate: quotation.tax_rate,
-      tax_amount: quotation.tax_amount,
-      discount_amount: quotation.discount_amount || 0.00,
-      discount_percentage: quotation.discount_percentage || 0.00,
-      total: quotation.total,
-      balance: quotation.total,
+      subtotal,
+      tax_rate: taxRate,
+      tax_amount: taxAmount,
+      discount_amount: discountAmount,
+      discount_percentage: discountPct,
+      total,
+      balance: total,
       amount_paid: 0,
       status: 'pendiente',
-      notes: `Generada desde cotización ${quotation.quote_number}`,
+      notes: `Generada desde cotización ${quotation.quote_number}${isPartial ? ' (Aceptación parcial de ítems)' : ''}`,
       created_by: userId,
     };
 
-    // Copiar items de la cotización
-    const items = quotation.items.map((item) => ({
+    const items = itemsToBill.map((item) => ({
       treatment_id: item.treatment_id,
       description: item.description,
       quantity: item.quantity,
@@ -204,7 +219,20 @@ class InvoiceService {
       subtotal: item.total,
     }));
 
-    return invoiceRepository.createWithItems(invoiceData, items);
+    // Actualizar estado de cotización a 'aceptada' si estaba en borrador/enviada
+    if (quotation.status !== 'aceptada') {
+      await quotationRepository.update(quotation.id, { status: 'aceptada' });
+    }
+
+    const createdInvoice = await invoiceRepository.createWithItems(invoiceData, items);
+
+    // Marcar ítems de la cotización como facturados (vinculados al ID de factura)
+    const billedItemIds = itemsToBill.map(i => i.id);
+    if (billedItemIds.length > 0) {
+      await quotationRepository.markItemsInvoiced(billedItemIds, createdInvoice.id);
+    }
+
+    return createdInvoice;
   }
 
   /**

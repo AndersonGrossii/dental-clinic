@@ -64,7 +64,8 @@ class InvoiceRepository extends BaseRepository {
       `SELECT COUNT(*) AS total
        FROM invoices i
        INNER JOIN patients p ON i.patient_id = p.id
-       LEFT JOIN users u ON i.doctor_id = u.id
+       LEFT JOIN doctors d ON i.doctor_id = d.id
+       LEFT JOIN users u ON d.user_id = u.id
        ${whereClause}`,
       params
     );
@@ -78,10 +79,12 @@ class InvoiceRepository extends BaseRepository {
               p.dni AS patient_dni,
               CONCAT(u.first_name, ' ', u.last_name) AS doctor_name,
               u.first_name AS doctor_first_name,
-              u.last_name AS doctor_last_name
+              u.last_name AS doctor_last_name,
+              d.specialty AS doctor_specialty
        FROM invoices i
        INNER JOIN patients p ON i.patient_id = p.id
-       LEFT JOIN users u ON i.doctor_id = u.id
+       LEFT JOIN doctors d ON i.doctor_id = d.id
+       LEFT JOIN users u ON d.user_id = u.id
        ${whereClause}
        ORDER BY ${safeSortBy} ${safeSortOrder}
        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
@@ -112,10 +115,12 @@ class InvoiceRepository extends BaseRepository {
               p.phone AS patient_phone,
               CONCAT(u.first_name, ' ', u.last_name) AS doctor_name,
               u.first_name AS doctor_first_name,
-              u.last_name AS doctor_last_name
+              u.last_name AS doctor_last_name,
+              d.specialty AS doctor_specialty
        FROM invoices i
        INNER JOIN patients p ON i.patient_id = p.id
-       LEFT JOIN users u ON i.doctor_id = u.id
+       LEFT JOIN doctors d ON i.doctor_id = d.id
+       LEFT JOIN users u ON d.user_id = u.id
        WHERE ${conditions.join(' AND ')}`,
       params
     );

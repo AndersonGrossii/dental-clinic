@@ -17,6 +17,14 @@ export class Invoices {
   constructor(container) {
     this.container = container;
     this.invoicesList = [];
+    this.abortController = null;
+  }
+
+  destroy() {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
   }
 
   async render() {
@@ -33,7 +41,7 @@ export class Invoices {
     let rows = this.invoicesList.map(inv => {
       const statusInfo = getInvoiceStatusInfo(inv.status);
       return `
-        <tr>
+        <tr class="clickable-table-row invoice-main-row" data-id="${inv.id}">
           <td><strong># ${inv.invoice_number}</strong></td>
           <td>${inv.patient_name || 'N/A'}</td>
           <td><strong>${formatCurrency(inv.total)}</strong></td>
@@ -41,11 +49,23 @@ export class Invoices {
           <td style="color: var(--danger-600);"><strong>${formatCurrency(inv.balance)}</strong></td>
           <td><span class="badge ${statusInfo.class}">${statusInfo.label}</span></td>
           <td>${formatDate(inv.created_at)}</td>
-          <td>
-            <div style="display: flex; gap: var(--space-1);">
-              <button class="btn btn-sm btn-outline print-invoice-btn" data-id="${inv.id}">Imprimir</button>
-              ${parseFloat(inv.balance || 0) > 0 ? `<button class="btn btn-sm btn-primary pay-invoice-btn" data-id="${inv.id}">Pagar</button>` : ''}
-              ${inv.status === 'pendiente' && parseFloat(inv.balance || 0) === parseFloat(inv.total || 0) ? `<button class="btn btn-sm btn-danger delete-invoice-btn" data-id="${inv.id}">Eliminar</button>` : ''}
+          <td style="text-align: right;">
+            <button type="button" class="btn btn-sm btn-outline toggle-invoice-actions-btn" data-id="${inv.id}">
+              Acciones ▾
+            </button>
+          </td>
+        </tr>
+        <tr class="invoice-actions-bar-row" id="invoice-actions-${inv.id}" style="display: none; background: var(--gray-50);">
+          <td colspan="8" style="padding: 12px 16px; border-bottom: 2px solid var(--primary-400);">
+            <div style="display: flex; gap: var(--space-3); align-items: center; justify-content: space-between; flex-wrap: wrap;">
+              <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);">
+                🧾 Opciones para Factura #${inv.invoice_number}:
+              </div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="btn btn-sm btn-outline print-invoice-btn" data-id="${inv.id}">🖨️ Ver / Imprimir Factura</button>
+                ${parseFloat(inv.balance || 0) > 0 ? `<button class="btn btn-sm btn-success pay-invoice-btn" data-id="${inv.id}">💳 Registrar Pago</button>` : ''}
+                ${inv.status === 'pendiente' && parseFloat(inv.balance || 0) === parseFloat(inv.total || 0) ? `<button class="btn btn-sm btn-danger delete-invoice-btn" data-id="${inv.id}">✕ Eliminar Factura</button>` : ''}
+              </div>
             </div>
           </td>
         </tr>
@@ -80,7 +100,7 @@ export class Invoices {
                 <th>Saldo Restante</th>
                 <th>Estado</th>
                 <th>Fecha Emisión</th>
-                <th>Acciones</th>
+                <th style="text-align: right;">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -93,33 +113,57 @@ export class Invoices {
   }
 
   mount() {
-    // Facturar manual
-    const addInvoiceBtn = this.container.querySelector('#add-invoice-btn');
-    if (addInvoiceBtn) {
-      addInvoiceBtn.addEventListener('click', () => this.showAddInvoiceModal());
-    }
+    this.destroy();
+    this.abortController = new AbortController();
+    const signal = this.abortController.signal;
 
-    // Facturar desde presupuesto
-    const quoteBtn = this.container.querySelector('#add-invoice-from-quote-btn');
-    if (quoteBtn) {
-      quoteBtn.addEventListener('click', () => this.showInvoiceFromQuoteModal());
-    }
-
-    // Eventos de fila
     this.container.addEventListener('click', (e) => {
-      if (e.target.classList.contains('print-invoice-btn')) {
-        const id = e.target.getAttribute('data-id');
-        this.printInvoice(id);
+      const addInvoiceBtn = e.target.closest('#add-invoice-btn');
+      if (addInvoiceBtn) {
+        this.showAddInvoiceModal();
+        return;
       }
-      if (e.target.classList.contains('pay-invoice-btn')) {
-        const id = e.target.getAttribute('data-id');
-        this.showRegisterPaymentModal(id);
+
+      const quoteBtn = e.target.closest('#add-invoice-from-quote-btn');
+      if (quoteBtn) {
+        this.showInvoiceFromQuoteModal();
+        return;
       }
-      if (e.target.classList.contains('delete-invoice-btn')) {
-        const id = e.target.getAttribute('data-id');
-        this.confirmDeleteInvoice(id);
+
+      const actionBtn = e.target.closest('.print-invoice-btn, .pay-invoice-btn, .delete-invoice-btn');
+      if (actionBtn) {
+        const id = actionBtn.getAttribute('data-id');
+        if (actionBtn.classList.contains('print-invoice-btn')) {
+          this.printInvoice(id);
+        }
+        if (actionBtn.classList.contains('pay-invoice-btn')) {
+          this.showRegisterPaymentModal(id);
+        }
+        if (actionBtn.classList.contains('delete-invoice-btn')) {
+          this.confirmDeleteInvoice(id);
+        }
+        return;
       }
-    });
+
+      // Handle row clicking to reveal/toggle action bar
+      const mainRow = e.target.closest('.invoice-main-row');
+      if (mainRow) {
+        const id = mainRow.getAttribute('data-id');
+        const targetActionsRow = this.container.querySelector(`#invoice-actions-${id}`);
+        if (targetActionsRow) {
+          const isOpen = targetActionsRow.style.display !== 'none';
+          
+          // Close all open action rows & remove row active states
+          this.container.querySelectorAll('.invoice-actions-bar-row').forEach(row => row.style.display = 'none');
+          this.container.querySelectorAll('.invoice-main-row').forEach(row => row.classList.remove('row-active'));
+
+          if (!isOpen) {
+            targetActionsRow.style.display = 'table-row';
+            mainRow.classList.add('row-active');
+          }
+        }
+      }
+    }, { signal });
   }
 
   /**

@@ -67,8 +67,10 @@ export const remove = async (req, res, next) => {
 export const createFromQuotation = async (req, res, next) => {
   try {
     const { quotationId } = req.params;
+    const { itemIds, item_ids } = req.body || {};
+    const selectedItemIds = itemIds || item_ids || null;
     const userId = req.user.id;
-    const invoice = await invoiceService.createFromQuotation(quotationId, userId);
+    const invoice = await invoiceService.createFromQuotation(quotationId, userId, selectedItemIds);
     return ApiResponse.created(res, invoice, 'Factura generada desde cotización exitosamente');
   } catch (error) {
     next(error);

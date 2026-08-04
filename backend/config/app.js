@@ -3,6 +3,7 @@
 // ============================================
 import dotenv from 'dotenv';
 dotenv.config();
+dotenv.config({ path: '../.env' });
 
 // Parse Railway DATABASE_URL into individual fields
 if (process.env.DATABASE_URL) {

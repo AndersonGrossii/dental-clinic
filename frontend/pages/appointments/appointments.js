@@ -93,6 +93,13 @@ export class Appointments {
   }
 
   async render(filters = {}, onlyRefreshAppointments = false) {
+    const targetDate = state.get('targetAppointmentDate');
+    if (targetDate) {
+      state.set('targetAppointmentDate', null);
+      this.currentDate = new Date(targetDate.substring(0, 10) + 'T12:00:00');
+      this.viewMode = 'day';
+    }
+
     await this.loadData(filters, onlyRefreshAppointments);
     this.renderView();
     const prefilled = state.get('prefilledAppointment');

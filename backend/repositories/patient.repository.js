@@ -56,19 +56,25 @@ class PatientRepository extends BaseRepository {
     // Query para datos con agregación de facturas
     const dataResult = await query(
       `SELECT p.*,
-              COALESCE(inv.total_debit, 0) AS total_debit,
-              COALESCE(inv.total_credit, 0) AS total_credit,
-              COALESCE(inv.balance, 0) AS balance
+              COALESCE(dbt.total_debit, 0)  AS total_debit,
+              COALESCE(crd.total_credit, 0) AS total_credit,
+              COALESCE(crd.total_credit, 0) - COALESCE(dbt.total_debit, 0) AS balance
        FROM patients p
        LEFT JOIN (
+         SELECT pt.patient_id,
+                SUM(pt.price * (1 + COALESCE(i.tax_rate, 21) / 100.0)) AS total_debit
+         FROM patient_treatments pt
+         LEFT JOIN invoices i ON i.id = pt.invoice_id AND i.deleted_at IS NULL
+         WHERE pt.status = 'completado' AND pt.deleted_at IS NULL
+         GROUP BY pt.patient_id
+       ) dbt ON dbt.patient_id = p.id
+       LEFT JOIN (
          SELECT patient_id,
-                COALESCE(SUM(total), 0) AS total_debit,
-                COALESCE(SUM(amount_paid), 0) AS total_credit,
-                COALESCE(SUM(total), 0) - COALESCE(SUM(amount_paid), 0) AS balance
+                SUM(amount_paid) AS total_credit
          FROM invoices
          WHERE status != 'cancelada' AND deleted_at IS NULL
          GROUP BY patient_id
-       ) inv ON inv.patient_id = p.id
+       ) crd ON crd.patient_id = p.id
        ${whereClause}
        ORDER BY ${safeSortBy} ${safeSortOrder}
        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
@@ -115,19 +121,25 @@ class PatientRepository extends BaseRepository {
     const dataResult = await query(
       `SELECT p.id, p.first_name, p.last_name, p.dni, p.phone, p.mobile, p.email,
               p.birth_date, p.gender, p.is_active, p.photo_url, p.created_at, p.custom_id,
-              COALESCE(inv.total_debit, 0) AS total_debit,
-              COALESCE(inv.total_credit, 0) AS total_credit,
-              COALESCE(inv.balance, 0) AS balance
+              COALESCE(dbt.total_debit, 0)  AS total_debit,
+              COALESCE(crd.total_credit, 0) AS total_credit,
+              COALESCE(crd.total_credit, 0) - COALESCE(dbt.total_debit, 0) AS balance
        FROM patients p
        LEFT JOIN (
+         SELECT pt.patient_id,
+                SUM(pt.price * (1 + COALESCE(i.tax_rate, 21) / 100.0)) AS total_debit
+         FROM patient_treatments pt
+         LEFT JOIN invoices i ON i.id = pt.invoice_id AND i.deleted_at IS NULL
+         WHERE pt.status = 'completado' AND pt.deleted_at IS NULL
+         GROUP BY pt.patient_id
+       ) dbt ON dbt.patient_id = p.id
+       LEFT JOIN (
          SELECT patient_id,
-                COALESCE(SUM(total), 0) AS total_debit,
-                COALESCE(SUM(amount_paid), 0) AS total_credit,
-                COALESCE(SUM(total), 0) - COALESCE(SUM(amount_paid), 0) AS balance
+                SUM(amount_paid) AS total_credit
          FROM invoices
          WHERE status != 'cancelada' AND deleted_at IS NULL
          GROUP BY patient_id
-       ) inv ON inv.patient_id = p.id
+       ) crd ON crd.patient_id = p.id
        ${whereClause}
        ORDER BY p.last_name ASC, p.first_name ASC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
@@ -154,9 +166,9 @@ class PatientRepository extends BaseRepository {
               COALESCE(dh.dental_count, 0)::integer AS dental_history_count,
               COALESCE(ap.appointment_count, 0)::integer AS appointment_count,
               COALESCE(pi.image_count, 0)::integer AS image_count,
-              COALESCE(inv.total_debit, 0) AS total_debit,
-              COALESCE(inv.total_credit, 0) AS total_credit,
-              COALESCE(inv.balance, 0) AS balance,
+              COALESCE(dbt.total_debit, 0)  AS total_debit,
+              COALESCE(crd.total_credit, 0) AS total_credit,
+              COALESCE(crd.total_credit, 0) - COALESCE(dbt.total_debit, 0) AS balance,
               u.first_name AS created_by_name, u.last_name AS created_by_lastname
        FROM patients p
        LEFT JOIN (
@@ -184,14 +196,20 @@ class PatientRepository extends BaseRepository {
          GROUP BY patient_id
        ) pi ON pi.patient_id = p.id
        LEFT JOIN (
+         SELECT pt.patient_id,
+                SUM(pt.price * (1 + COALESCE(i.tax_rate, 21) / 100.0)) AS total_debit
+         FROM patient_treatments pt
+         LEFT JOIN invoices i ON i.id = pt.invoice_id AND i.deleted_at IS NULL
+         WHERE pt.status = 'completado' AND pt.deleted_at IS NULL
+         GROUP BY pt.patient_id
+       ) dbt ON dbt.patient_id = p.id
+       LEFT JOIN (
          SELECT patient_id,
-                COALESCE(SUM(total), 0) AS total_debit,
-                COALESCE(SUM(amount_paid), 0) AS total_credit,
-                COALESCE(SUM(total), 0) - COALESCE(SUM(amount_paid), 0) AS balance
+                SUM(amount_paid) AS total_credit
          FROM invoices
          WHERE status != 'cancelada' AND deleted_at IS NULL
          GROUP BY patient_id
-       ) inv ON inv.patient_id = p.id
+       ) crd ON crd.patient_id = p.id
        LEFT JOIN users u ON u.id = p.created_by
        ${whereClause}`,
       params

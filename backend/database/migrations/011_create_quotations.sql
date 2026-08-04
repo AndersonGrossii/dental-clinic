@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS quotations (
   quote_number VARCHAR(20) NOT NULL UNIQUE,
   patient_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
   doctor_id INTEGER REFERENCES doctors(id),
-  status VARCHAR(20) DEFAULT 'borrador' CHECK (status IN ('borrador', 'enviada', 'aceptada', 'rechazada', 'expirada')),
+  status VARCHAR(20) DEFAULT 'borrador' CHECK (status IN ('borrador', 'enviada', 'parcial', 'aceptada', 'rechazada', 'expirada')),
   subtotal DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   tax_rate DECIMAL(5,2) DEFAULT 16.00,
   tax_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,

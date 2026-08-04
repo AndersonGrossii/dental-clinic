@@ -126,8 +126,10 @@ export class Patients {
 
     let rows = this.patientsList.map(pat => {
       const balance = parseFloat(pat.balance || 0);
-      const balanceColor = balance > 0 ? 'var(--danger-600)' : 'var(--success-600)';
-      const balanceLabel = balance > 0 ? formatCurrency(balance) : 'Al corriente';
+      let balanceColor = 'var(--primary-600)';
+      if (balance < 0) balanceColor = 'var(--danger-600)';
+      else if (balance > 0) balanceColor = 'var(--success-600)';
+      const balanceLabel = formatCurrency(balance);
       return `
       <tr>
         <td><code class="text-primary" style="font-weight: 600;">${pat.custom_id || 'N/A'}</code></td>

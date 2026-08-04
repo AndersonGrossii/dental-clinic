@@ -164,6 +164,10 @@ class TreatmentRepository extends BaseRepository {
          pt.end_date,
          pt.created_at,
          pt.updated_at,
+         pt.invoice_id,
+         inv.invoice_number,
+         inv.status AS invoice_status,
+         inv.total AS invoice_total,
          t.name AS treatment_name,
          t.code AS treatment_code,
          tc.name AS category_name,
@@ -175,6 +179,7 @@ class TreatmentRepository extends BaseRepository {
        LEFT JOIN treatment_categories tc ON t.category_id = tc.id
        LEFT JOIN doctors d ON pt.doctor_id = d.id
        LEFT JOIN users u ON d.user_id = u.id
+       LEFT JOIN invoices inv ON pt.invoice_id = inv.id
        WHERE ${conditions.join(' AND ')}
        ORDER BY pt.created_at DESC`,
       params

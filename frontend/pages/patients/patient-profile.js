@@ -5,12 +5,14 @@ import patientService from '../../services/patient.service.js';
 import treatmentService from '../../services/treatment.service.js';
 import appointmentService from '../../services/appointment.service.js';
 import quotationService from '../../services/quotation.service.js';
+import invoiceService from '../../services/invoice.service.js';
 import prescriptionService from '../../services/prescription.service.js';
 import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
 import state from '../../scripts/state.js';
 import { formatDate, formatCurrency } from '../../utils/helpers.js';
 import { Quotations } from '../quotations/quotations.js';
+import { Invoices } from '../invoices/invoices.js';
 
 export class PatientProfile {
   constructor(container, params) {
@@ -19,10 +21,20 @@ export class PatientProfile {
     this.patient = null;
     this.clinicalTreatments = [];
     this.appointments = [];
+    this.invoices = [];
     this.quotations = [];
     this.clinicalNotes = [];
     this.prescriptions = [];
+    this.acceptedTreatments = [];
     this.activeTab = 'info';
+    this.abortController = null;
+  }
+
+  destroy() {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
   }
 
   async render() {
@@ -30,11 +42,15 @@ export class PatientProfile {
       this.patient = await patientService.getById(this.patientId);
       this.clinicalTreatments = await treatmentService.getPatientTreatments(this.patientId);
       this.appointments = await appointmentService.getAll({ patient_id: this.patientId, limit: 999 });
+      const invRes = await invoiceService.getAll({ patient_id: this.patientId, limit: 999 });
+      this.invoices = Array.isArray(invRes) ? invRes : (invRes.invoices || invRes.data || []);
       const quotesRes = await quotationService.getAll({ patient_id: this.patientId, limit: 999 });
       this.quotations = Array.isArray(quotesRes) ? quotesRes : (quotesRes.rows || []);
       this.clinicalNotes = await patientService.getNotes(this.patientId) || [];
       const prescRes = await prescriptionService.getByPatient(this.patientId, { limit: 999 });
       this.prescriptions = Array.isArray(prescRes) ? prescRes : (prescRes.rows || []);
+      const acceptedRes = await quotationService.getAcceptedItemsByPatient(this.patientId);
+      this.acceptedTreatments = Array.isArray(acceptedRes) ? acceptedRes : (acceptedRes?.data || []);
       
       this.renderProfile();
     } catch (err) {
@@ -91,16 +107,16 @@ export class PatientProfile {
                 <h3 style="margin-bottom: var(--space-4); border-bottom: 2px solid var(--gray-100); padding-bottom: 4px;">Resumen Financiero</h3>
                 <div style="display: flex; flex-direction: column; gap: var(--space-3); background-color: var(--gray-50); padding: var(--space-4); border-radius: var(--radius-md); border: 1px solid var(--border-color);">
                   <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="color: var(--text-secondary); font-weight: 500;">Total Facturado (Débito):</span>
-                    <span style="font-weight: 600; color: var(--text-primary);">${formatCurrency(pat.total_debit || pat.financial?.totalDebit || 0)}</span>
+                    <span style="color: var(--text-secondary); font-weight: 500;">Débito (Total facturado):</span>
+                    <span style="font-weight: 600; color: var(--danger-600);">${formatCurrency(pat.total_debit || pat.financial?.totalDebit || 0)}</span>
                   </div>
                   <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="color: var(--text-secondary); font-weight: 500;">Total Pagado (Crédito):</span>
+                    <span style="color: var(--text-secondary); font-weight: 500;">Crédito (Total pagado):</span>
                     <span style="font-weight: 600; color: var(--success-600);">${formatCurrency(pat.total_credit || pat.financial?.totalCredit || 0)}</span>
                   </div>
                   <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding-top: var(--space-2); margin-top: var(--space-1);">
                     <span style="font-weight: 700; color: var(--text-primary);">Saldo Pendiente:</span>
-                    <span style="font-weight: 700; color: ${parseFloat(pat.balance || 0) > 0 ? 'var(--danger-600)' : 'var(--success-600)'};">
+                    <span style="font-weight: 700; color: ${parseFloat(pat.balance || 0) > 0 ? 'var(--danger-600)' : parseFloat(pat.balance || 0) < 0 ? 'var(--success-600)' : 'var(--primary-600)'};">
                       ${formatCurrency(pat.balance || pat.financial?.balance || 0)}
                     </span>
                   </div>
@@ -111,20 +127,29 @@ export class PatientProfile {
         </div>
       `;
     } else if (this.activeTab === 'treatments') {
-      let treatmentRows = this.clinicalTreatments.map(t => `
-        <tr>
-          <td>${t.created_at ? formatDate(t.created_at) : 'N/A'}</td>
-          <td>${t.treatment_name}</td>
-          <td>${t.tooth_number ? `Pieza ${t.tooth_number}` : 'General'}</td>
-          <td><span class="badge ${t.status === 'completado' ? 'badge-success' : 'badge-warning'}">${t.status.toUpperCase()}</span></td>
-          <td>${t.notes || ''}</td>
-        </tr>
-      `).join('');
+      let treatmentRows = this.clinicalTreatments.map(t => {
+        const invBadge = t.invoice_number 
+          ? `<a href="#/invoices" class="badge badge-info" style="font-weight: 600; text-decoration: none;">📄 #${t.invoice_number}</a>
+             <span class="badge ${t.invoice_status === 'pagada' ? 'badge-success' : 'badge-warning'}" style="font-size: 10px; margin-left: 4px;">${t.invoice_status === 'pagada' ? 'Pagada' : 'Pendiente'}</span>`
+          : `<span style="color: var(--text-secondary); font-size: 12px;">Sin Factura</span>`;
+
+        return `
+          <tr>
+            <td>${t.created_at ? formatDate(t.created_at) : 'N/A'}</td>
+            <td><strong>${t.treatment_name}</strong></td>
+            <td>${t.tooth_number ? `Pieza #${t.tooth_number}` : 'General'}</td>
+            <td><strong>${formatCurrency(t.price)}</strong></td>
+            <td><span class="badge ${t.status === 'completado' ? 'badge-success' : 'badge-warning'}">${(t.status || 'completado').toUpperCase()}</span></td>
+            <td>${invBadge}</td>
+            <td style="color: var(--text-secondary); font-size: 13px;">${t.notes || ''}</td>
+          </tr>
+        `;
+      }).join('');
 
       if (this.clinicalTreatments.length === 0) {
         treatmentRows = `
           <tr>
-            <td colspan="5" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
+            <td colspan="7" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
               No se han registrado tratamientos en el expediente de este paciente.
             </td>
           </tr>
@@ -133,7 +158,12 @@ export class PatientProfile {
 
       tabContent = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
-          <h3>Historial Dental de Tratamientos</h3>
+          <div>
+            <h3 style="margin: 0;">Historial Dental de Tratamientos</h3>
+            <p style="margin: 4px 0 0 0; font-size: var(--text-xs); color: var(--text-secondary);">
+              Tratamientos realizados y vinculación automática a facturas.
+            </p>
+          </div>
           <button id="add-treatment-history-btn" class="btn btn-sm btn-primary">+ Agregar Tratamiento</button>
         </div>
         <div class="table-container">
@@ -143,8 +173,10 @@ export class PatientProfile {
                 <th>Fecha</th>
                 <th>Tratamiento</th>
                 <th>Pieza</th>
+                <th>Precio</th>
                 <th>Estado</th>
-                <th>Notas</th>
+                <th>Factura Asociada</th>
+                <th>Notas / Origen</th>
               </tr>
             </thead>
             <tbody>
@@ -155,19 +187,22 @@ export class PatientProfile {
       `;
     } else if (this.activeTab === 'appointments') {
       let appointmentRows = (this.appointments || []).map(a => `
-        <tr>
-          <td>${a.appointment_date ? formatDate(a.appointment_date) : 'N/A'}</td>
+        <tr class="profile-appointment-row" data-date="${a.appointment_date}" data-id="${a.id}" style="cursor: pointer;" title="Haga clic para ver esta cita en la agenda">
+          <td><strong>${a.appointment_date ? formatDate(a.appointment_date) : 'N/A'}</strong></td>
           <td>${a.start_time ? a.start_time.substring(0, 5) : ''} - ${a.end_time ? a.end_time.substring(0, 5) : ''}</td>
           <td>Dr/a. ${a.doctor_name || ''}</td>
           <td>${a.reason || ''}</td>
           <td><span class="badge" style="background-color: ${a.status_color || '#cbd5e1'}; color: white;">${a.status_label || ''}</span></td>
+          <td>
+            <button class="btn btn-sm btn-outline go-agenda-btn" data-date="${a.appointment_date}">📅 Ver en Agenda</button>
+          </td>
         </tr>
       `).join('');
 
       if (!this.appointments || this.appointments.length === 0) {
         appointmentRows = `
           <tr>
-            <td colspan="5" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
+            <td colspan="6" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
               No se han registrado citas para este paciente.
             </td>
           </tr>
@@ -188,10 +223,79 @@ export class PatientProfile {
                 <th>Doctor</th>
                 <th>Motivo</th>
                 <th>Estado</th>
+                <th>Acción</th>
               </tr>
             </thead>
             <tbody>
               ${appointmentRows}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } else if (this.activeTab === 'invoices') {
+      const STATUS_LABELS = {
+        pendiente: 'Abierta / Pendiente',
+        parcial: 'Parcialmente Pagada',
+        pagada: 'Pagada',
+        cancelada: 'Cancelada',
+      };
+
+      const STATUS_BADGES = {
+        pendiente: 'badge-warning',
+        parcial: 'badge-info',
+        pagada: 'badge-success',
+        cancelada: 'badge-danger',
+      };
+
+      let invoiceRows = (this.invoices || []).map(inv => `
+        <tr>
+          <td><strong># ${inv.invoice_number}</strong></td>
+          <td>${inv.doctor_name ? `Dr/a. ${inv.doctor_name}` : 'N/A'}</td>
+          <td><strong>${formatCurrency(inv.total)}</strong></td>
+          <td style="color: var(--success-600);">${formatCurrency(inv.amount_paid)}</td>
+          <td style="color: var(--danger-600);"><strong>${formatCurrency(inv.balance)}</strong></td>
+          <td><span class="badge ${STATUS_BADGES[inv.status] || 'badge-secondary'}">${STATUS_LABELS[inv.status] || inv.status}</span></td>
+          <td>${inv.created_at ? formatDate(inv.created_at) : 'N/A'}</td>
+          <td>
+            <div style="display: flex; gap: var(--space-1);">
+              <button class="btn btn-sm btn-outline print-profile-invoice-btn" data-id="${inv.id}">Imprimir</button>
+              ${parseFloat(inv.balance || 0) > 0 ? `<button class="btn btn-sm btn-primary pay-profile-invoice-btn" data-id="${inv.id}">Pagar</button>` : ''}
+            </div>
+          </td>
+        </tr>
+      `).join('');
+
+      if (!this.invoices || this.invoices.length === 0) {
+        invoiceRows = `
+          <tr>
+            <td colspan="8" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
+              No se han registrado facturas para este paciente.
+            </td>
+          </tr>
+        `;
+      }
+
+      tabContent = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
+          <h3>Historial de Facturas</h3>
+          <a href="#/invoices" class="btn btn-sm btn-primary">+ Nueva Factura</a>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>No. Factura</th>
+                <th>Doctor</th>
+                <th>Monto Total</th>
+                <th>Pagado</th>
+                <th>Saldo Restante</th>
+                <th>Estado</th>
+                <th>Fecha Emisión</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${invoiceRows}
             </tbody>
           </table>
         </div>
@@ -255,6 +359,160 @@ export class PatientProfile {
             </thead>
             <tbody>
               ${quotationRows}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } else if (this.activeTab === 'accepted-treatments') {
+      const allAccepted = this.acceptedTreatments || [];
+      const totalCount = allAccepted.length;
+      const completedCount = allAccepted.filter(t => t.execution_status === 'realizado').length;
+      const inProgressCount = allAccepted.filter(t => t.execution_status === 'en_proceso').length;
+      const pendingCount = allAccepted.filter(t => (!t.execution_status || t.execution_status === 'pendiente')).length;
+      const totalFinancialValue = allAccepted.reduce((acc, t) => acc + parseFloat(t.total || 0), 0);
+      const completionPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+
+      const EXEC_BADGES = {
+        pendiente: 'badge-warning',
+        en_proceso: 'badge-info',
+        realizado: 'badge-success'
+      };
+
+      const EXEC_LABELS = {
+        pendiente: '⏳ Pendiente',
+        en_proceso: '⚙️ En Proceso',
+        realizado: '✅ Realizado'
+      };
+
+      let acceptedRows = allAccepted.map(t => {
+        const execStatus = t.execution_status || 'pendiente';
+
+        return `
+          <tr>
+            <td><strong class="badge badge-info" style="font-family: monospace; font-size: 13px;"># ${t.quote_number}</strong></td>
+            <td>
+              <strong style="color: var(--text-primary);">${t.description}</strong>
+              ${t.tooth_number ? `<span class="badge badge-secondary" style="font-size: 11px; margin-left: 6px; padding: 2px 6px;">🦷 Diente #${t.tooth_number}</span>` : ''}
+            </td>
+            <td>${t.doctor_first_name ? `Dr/a. ${t.doctor_first_name} ${t.doctor_last_name || ''}` : '<span style="color: var(--text-secondary); italic">Sin asignar</span>'}</td>
+            <td><strong style="color: var(--primary-700);">${formatCurrency(t.total)}</strong></td>
+            <td>
+              <span class="badge ${EXEC_BADGES[execStatus] || 'badge-secondary'}" style="font-weight: 600; padding: 4px 10px;">
+                ${EXEC_LABELS[execStatus] || execStatus}
+              </span>
+            </td>
+            <td style="text-align: center;">
+              <div class="status-toggle-segmented">
+                <button type="button" 
+                  class="status-toggle-btn btn-status-pending ${execStatus === 'pendiente' ? 'active' : ''} set-exec-status-btn" 
+                  data-id="${t.id}" data-status="pendiente" title="Marcar como pendiente">
+                  ⏳ Pendiente
+                </button>
+                <button type="button" 
+                  class="status-toggle-btn btn-status-in-progress ${execStatus === 'en_proceso' ? 'active' : ''} set-exec-status-btn" 
+                  data-id="${t.id}" data-status="en_proceso" title="Marcar en proceso">
+                  ⚙️ En Proceso
+                </button>
+                <button type="button" 
+                  class="status-toggle-btn btn-status-completed ${execStatus === 'realizado' ? 'active' : ''} set-exec-status-btn" 
+                  data-id="${t.id}" data-status="realizado" title="Marcar como realizado y añadir al historial odontológico">
+                  ✅ Realizado
+                </button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      if (totalCount === 0) {
+        acceptedRows = `
+          <tr>
+            <td colspan="6" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
+              No hay tratamientos aceptados en los presupuestos de este paciente.
+            </td>
+          </tr>
+        `;
+      }
+
+      tabContent = `
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: var(--space-4); flex-wrap: wrap; gap: var(--space-3);">
+          <div>
+            <h3 style="margin: 0;">Tratamientos Aceptados por el Paciente</h3>
+            <p style="margin: 4px 0 0 0; font-size: var(--text-xs); color: var(--text-secondary);">
+              Tratamientos aprobados en presupuestos. Al cambiar el estado a <strong>Realizado</strong>, se añadirán automáticamente al Historial Odontológico.
+            </p>
+          </div>
+          <span class="badge badge-success" style="font-size: 13px; padding: 6px 12px; font-weight: 600;">
+            ${completedCount} de ${totalCount} Completados (${completionPct}%)
+          </span>
+        </div>
+
+        <div class="exec-stats-grid">
+          <div class="exec-stat-card">
+            <div class="exec-stat-icon" style="background-color: var(--primary-50); color: var(--primary-700);">
+              📋
+            </div>
+            <div>
+              <div class="exec-stat-val">${totalCount}</div>
+              <div class="exec-stat-lbl">Total Aceptados</div>
+            </div>
+          </div>
+
+          <div class="exec-stat-card">
+            <div class="exec-stat-icon" style="background-color: var(--success-50); color: var(--success-700);">
+              ✅
+            </div>
+            <div>
+              <div class="exec-stat-val" style="color: var(--success-600);">${completedCount}</div>
+              <div class="exec-stat-lbl">Realizados (Historial)</div>
+            </div>
+          </div>
+
+          <div class="exec-stat-card">
+            <div class="exec-stat-icon" style="background-color: var(--info-50); color: var(--info-700);">
+              ⚙️
+            </div>
+            <div>
+              <div class="exec-stat-val" style="color: var(--info-600);">${inProgressCount}</div>
+              <div class="exec-stat-lbl">En Proceso</div>
+            </div>
+          </div>
+
+          <div class="exec-stat-card">
+            <div class="exec-stat-icon" style="background-color: var(--warning-50); color: var(--warning-700);">
+              ⏳
+            </div>
+            <div>
+              <div class="exec-stat-val" style="color: var(--warning-600);">${pendingCount}</div>
+              <div class="exec-stat-lbl">Pendientes</div>
+            </div>
+          </div>
+
+          <div class="exec-stat-card">
+            <div class="exec-stat-icon" style="background-color: var(--purple-50, #f3e8ff); color: var(--purple-700, #7e22ce);">
+              💎
+            </div>
+            <div>
+              <div class="exec-stat-val" style="color: var(--primary-800);">${formatCurrency(totalFinancialValue)}</div>
+              <div class="exec-stat-lbl">Valor Total Aceptado</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Presupuesto</th>
+                <th>Tratamiento / Descripción</th>
+                <th>Doctor</th>
+                <th>Monto</th>
+                <th>Estado Ejecución</th>
+                <th style="text-align: center;">Acción de Estado Clínico</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${acceptedRows}
             </tbody>
           </table>
         </div>
@@ -353,8 +611,8 @@ export class PatientProfile {
             <div style="display: flex; gap: var(--space-2); align-items: center; margin-top: 4px;">
               <span class="badge badge-info" style="font-size: var(--text-sm); font-weight: 600; padding: 2px 8px;">ID: ${pat.custom_id || 'N/A'}</span>
               ${isDoctor ? '' : `
-                <span class="badge ${parseFloat(pat.balance || 0) > 0 ? 'badge-danger' : 'badge-success'}" style="font-size: var(--text-sm); font-weight: 600; padding: 2px 8px;">
-                  ${parseFloat(pat.balance || 0) > 0 ? `Pendiente: ${formatCurrency(pat.balance)}` : 'Al corriente'}
+                <span class="badge ${parseFloat(pat.balance || 0) < 0 ? 'badge-danger' : parseFloat(pat.balance || 0) > 0 ? 'badge-success' : 'badge-info'}" style="font-size: var(--text-sm); font-weight: 600; padding: 2px 8px;">
+                  Saldo: ${formatCurrency(pat.balance || 0)}
                 </span>
               `}
               <p style="color: var(--text-secondary); margin: 0; font-size: var(--text-sm);">Expediente Clínico #EXP-${pat.id.toString().padStart(5, '0')}</p>
@@ -368,10 +626,12 @@ export class PatientProfile {
         </div>
       </div>
 
-      <div class="tabs" style="display: flex; gap: var(--space-2); margin-bottom: var(--space-4); border-bottom: 1px solid var(--border-color); padding-bottom: var(--space-2);">
+      <div class="tabs" style="display: flex; gap: var(--space-2); margin-bottom: var(--space-4); border-bottom: 1px solid var(--border-color); padding-bottom: var(--space-2); flex-wrap: wrap;">
         ${tabLink('info', 'Ficha Técnica')}
         ${tabLink('treatments', 'Historial Odontológico')}
+        ${tabLink('accepted-treatments', 'Tratamientos Aceptados')}
         ${tabLink('appointments', 'Historial de Citas')}
+        ${tabLink('invoices', 'Facturas')}
         ${tabLink('quotations', 'Presupuestos')}
         ${tabLink('notes', 'Notas de Evolución')}
         ${tabLink('prescriptions', 'Prescripciones')}
@@ -384,6 +644,10 @@ export class PatientProfile {
   }
 
   mount() {
+    this.destroy();
+    this.abortController = new AbortController();
+    const signal = this.abortController.signal;
+
     // Escuchar cambio de pestañas
     const tabs = this.container.querySelectorAll('.tab-item');
     tabs.forEach(tab => {
@@ -391,25 +655,25 @@ export class PatientProfile {
         this.activeTab = tab.getAttribute('data-tab');
         this.renderProfile();
         this.mount();
-      });
+      }, { signal });
     });
 
     // Agregar tratamiento al historial
     const addHistoryBtn = this.container.querySelector('#add-treatment-history-btn');
     if (addHistoryBtn) {
-      addHistoryBtn.addEventListener('click', () => this.showAddTreatmentModal());
+      addHistoryBtn.addEventListener('click', () => this.showAddTreatmentModal(), { signal });
     }
 
     // Agregar nota clínica
     const addNoteBtn = this.container.querySelector('#profile-add-note-btn');
     if (addNoteBtn) {
-      addNoteBtn.addEventListener('click', () => this.showAddNoteModal());
+      addNoteBtn.addEventListener('click', () => this.showAddNoteModal(), { signal });
     }
 
     // Editar datos del paciente
     const editBtn = this.container.querySelector('#edit-patient-profile-btn');
     if (editBtn) {
-      editBtn.addEventListener('click', () => this.showPatientModal());
+      editBtn.addEventListener('click', () => this.showPatientModal(), { signal });
     }
 
     // Agendar cita
@@ -424,29 +688,74 @@ export class PatientProfile {
 
     const scheduleBtn = this.container.querySelector('#schedule-appointment-btn');
     if (scheduleBtn) {
-      scheduleBtn.addEventListener('click', prefillAndGo);
+      scheduleBtn.addEventListener('click', prefillAndGo, { signal });
     }
 
     const tabScheduleBtn = this.container.querySelector('#profile-add-appointment-btn');
     if (tabScheduleBtn) {
-      tabScheduleBtn.addEventListener('click', prefillAndGo);
+      tabScheduleBtn.addEventListener('click', prefillAndGo, { signal });
     }
 
     // Prescription buttons
     const addPrescBtn = this.container.querySelector('#profile-add-prescription-btn');
     if (addPrescBtn) {
-      addPrescBtn.addEventListener('click', () => this.showAddPrescriptionModal());
+      addPrescBtn.addEventListener('click', () => this.showAddPrescriptionModal(), { signal });
     }
+
+    // Appointment history row click -> navigate to agenda on that specific day
+    this.container.querySelectorAll('.profile-appointment-row, .go-agenda-btn').forEach(el => {
+      el.addEventListener('click', () => {
+        const apptDate = el.dataset.date || el.closest('tr')?.dataset.date;
+        if (apptDate) {
+          state.set('targetAppointmentDate', apptDate);
+          window.location.hash = '#/appointments';
+        }
+      }, { signal });
+    });
+
+    // Invoice buttons in patient profile
+    this.container.querySelectorAll('.print-profile-invoice-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        new Invoices(this.container).printInvoice(btn.dataset.id);
+      }, { signal });
+    });
+
+    this.container.querySelectorAll('.pay-profile-invoice-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        new Invoices(this.container).showRegisterPaymentModal(btn.dataset.id);
+      }, { signal });
+    });
 
     // Quotation buttons
     this.container.querySelectorAll('.view-quotation-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        new Quotations().printQuote(btn.dataset.id);
-      });
+        new Quotations(this.container).printQuote(btn.dataset.id);
+      }, { signal });
     });
 
     this.container.querySelectorAll('.view-prescription-btn').forEach(btn => {
-      btn.addEventListener('click', () => this.showPrescriptionPreview(btn.dataset.id));
+      btn.addEventListener('click', () => this.showPrescriptionPreview(btn.dataset.id), { signal });
+    });
+
+    // Execution status buttons for accepted treatments
+    this.container.querySelectorAll('.set-exec-status-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const itemId = btn.getAttribute('data-id');
+        const status = btn.getAttribute('data-status');
+        try {
+          btn.disabled = true;
+          await quotationService.updateExecutionStatus(itemId, status);
+          if (status === 'realizado') {
+            toast.success('¡Tratamiento completado! Se ha añadido al Historial Odontológico.');
+          } else {
+            toast.success(`Estado de ejecución actualizado a: ${status}`);
+          }
+          await this.render();
+          this.mount();
+        } catch (err) {
+          toast.error(err.message || 'Error al actualizar estado del tratamiento');
+        }
+      }, { signal });
     });
 
     this.container.querySelectorAll('.delete-prescription-btn').forEach(btn => {

@@ -2,6 +2,7 @@
 // Servicio de Tratamientos — Lógica de negocio
 // ============================================
 import treatmentRepository from '../repositories/treatment.repository.js';
+import invoiceRepository from '../repositories/invoice.repository.js';
 import { AppError } from '../utils/errors.js';
 
 /**
@@ -190,18 +191,62 @@ class TreatmentService {
       throw new AppError('El tratamiento seleccionado no existe.', 404);
     }
 
+    let invoiceId = data.invoice_id || null;
+    const price = parseFloat(data.price !== undefined ? data.price : (treatment.default_price || 0));
+
+    if (!invoiceId && data.create_invoice !== false) {
+      const invoiceNumber = await invoiceRepository.generateNumber();
+
+      const subtotal = price;
+      const taxRate = 16.00; // IVA 16%
+      const discountAmount = 0.00;
+      const discountPct = 0.00;
+      const taxable = subtotal - discountAmount;
+      const taxAmount = parseFloat((taxable * (taxRate / 100)).toFixed(2));
+      const total = parseFloat((taxable + taxAmount).toFixed(2));
+
+      const invoiceData = {
+        invoice_number: invoiceNumber,
+        patient_id: data.patient_id,
+        doctor_id: data.doctor_id || null,
+        subtotal,
+        tax_rate: taxRate,
+        tax_amount: taxAmount,
+        discount_amount: discountAmount,
+        discount_percentage: discountPct,
+        total,
+        balance: total,
+        amount_paid: 0,
+        status: 'pendiente',
+        notes: `Factura por tratamiento registrado en historial: ${treatment.name}`,
+        created_by: data.created_by || null,
+      };
+
+      const items = [{
+        treatment_id: treatment.id,
+        description: treatment.name,
+        quantity: 1,
+        unit_price: price,
+        subtotal: price,
+      }];
+
+      const createdInvoice = await invoiceRepository.createWithItems(invoiceData, items);
+      invoiceId = createdInvoice.id;
+    }
+
     const ptData = {
       patient_id: data.patient_id,
       treatment_id: data.treatment_id,
       doctor_id: data.doctor_id || null,
       appointment_id: data.appointment_id || null,
       tooth_number: data.tooth_number || null,
-      price: data.price || 0,
-      status: data.status || 'pendiente',
+      price,
+      status: data.status || 'completado',
       notes: data.notes || null,
       start_date: data.start_date || null,
       end_date: data.end_date || null,
       created_by: data.created_by || null,
+      invoice_id: invoiceId,
     };
 
     return treatmentRepository.createPatientTreatment(ptData);

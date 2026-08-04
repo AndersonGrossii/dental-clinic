@@ -14,7 +14,8 @@ import { formatDate, formatCurrency } from '../../utils/helpers.js';
 const STATUS_LABELS = {
   borrador: 'Borrador',
   enviada: 'Enviada',
-  aceptada: 'Aceptada',
+  parcial: 'Aceptado Parcial',
+  aceptada: 'Aceptado Completo',
   rechazada: 'Rechazada',
   expirada: 'Expirada',
 };
@@ -22,6 +23,7 @@ const STATUS_LABELS = {
 const STATUS_BADGES = {
   borrador: 'badge-secondary',
   enviada: 'badge-info',
+  parcial: 'badge-warning',
   aceptada: 'badge-success',
   rechazada: 'badge-danger',
   expirada: 'badge-warning',
@@ -30,7 +32,8 @@ const STATUS_BADGES = {
 const STATUS_OPTIONS = [
   { value: 'borrador', label: 'Borrador' },
   { value: 'enviada', label: 'Enviada' },
-  { value: 'aceptada', label: 'Aceptada' },
+  { value: 'parcial', label: 'Aceptado Parcial' },
+  { value: 'aceptada', label: 'Aceptado Completo' },
   { value: 'rechazada', label: 'Rechazada' },
   { value: 'expirada', label: 'Expirada' },
 ];
@@ -41,6 +44,14 @@ export class Quotations {
     this.quotationsList = [];
     this.searchQuery = '';
     this.statusFilter = '';
+    this.abortController = null;
+  }
+
+  destroy() {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
   }
 
   async render() {
@@ -71,7 +82,8 @@ export class Quotations {
             <option value="">Todos los estados</option>
             <option value="borrador" ${this.statusFilter === 'borrador' ? 'selected' : ''}>Borrador</option>
             <option value="enviada" ${this.statusFilter === 'enviada' ? 'selected' : ''}>Enviada</option>
-            <option value="aceptada" ${this.statusFilter === 'aceptada' ? 'selected' : ''}>Aceptada</option>
+            <option value="parcial" ${this.statusFilter === 'parcial' ? 'selected' : ''}>Aceptado Parcial</option>
+            <option value="aceptada" ${this.statusFilter === 'aceptada' ? 'selected' : ''}>Aceptado Completo</option>
             <option value="rechazada" ${this.statusFilter === 'rechazada' ? 'selected' : ''}>Rechazada</option>
             <option value="expirada" ${this.statusFilter === 'expirada' ? 'selected' : ''}>Expirada</option>
           </select>
@@ -118,7 +130,7 @@ export class Quotations {
     });
 
     let rows = filtered.map(q => `
-      <tr>
+      <tr class="clickable-table-row quote-main-row" data-id="${q.id}">
         <td><strong># ${q.quote_number}</strong></td>
         <td>${q.patient_name || '—'}</td>
         <td>${q.doctor_name || 'Sin asignar'}</td>
@@ -128,14 +140,26 @@ export class Quotations {
           ${q.invoice_id ? `<span class="badge" style="background-color: var(--primary-100); color: var(--primary-800); font-size: 10px; margin-left: 4px; padding: 2px 4px;">Facturado</span>` : ''}
         </td>
         <td>${formatDate(q.created_at)}</td>
-        <td>
-          <div style="display: flex; gap: var(--space-1); flex-wrap: nowrap;">
-            <button class="btn btn-sm btn-outline view-quote-btn" data-id="${q.id}" title="Ver / Imprimir">👁</button>
-            ${q.status === 'aceptada' ? `<button class="btn btn-sm btn-success convert-appointment-btn" data-id="${q.id}" title="Agendar Cita">📅</button>` : ''}
-            ${q.status === 'aceptada' && !q.invoice_id ? `<button class="btn btn-sm btn-info convert-invoice-btn" data-id="${q.id}" title="Generar Factura">📄</button>` : ''}
-            <button class="btn btn-sm btn-primary edit-quote-btn" data-id="${q.id}" title="Editar">✎</button>
-            <button class="btn btn-sm btn-secondary status-quote-btn" data-id="${q.id}" title="Cambiar estado">⇄</button>
-            <button class="btn btn-sm btn-danger delete-quote-btn" data-id="${q.id}" title="Eliminar">✕</button>
+        <td style="text-align: right;">
+          <button type="button" class="btn btn-sm btn-outline toggle-quote-actions-btn" data-id="${q.id}">
+            Acciones ▾
+          </button>
+        </td>
+      </tr>
+      <tr class="quote-actions-bar-row" id="quote-actions-${q.id}" style="display: none; background: var(--gray-50);">
+        <td colspan="7" style="padding: 12px 16px; border-bottom: 2px solid var(--primary-400);">
+          <div style="display: flex; gap: var(--space-3); align-items: center; justify-content: space-between; flex-wrap: wrap;">
+            <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);">
+              ⚙️ Opciones para Presupuesto #${q.quote_number}:
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn btn-sm btn-outline view-quote-btn" data-id="${q.id}" title="Ver / Imprimir Cotización">👁 Ver / Imprimir</button>
+              <button class="btn btn-sm btn-manage-quote manage-items-btn" data-id="${q.id}" title="Gestionar Aceptación e Ítems">⚙️ Gestionar Ítems</button>
+              ${(q.status === 'aceptada' || q.status === 'parcial') ? `<button class="btn btn-sm btn-success convert-appointment-btn" data-id="${q.id}" title="Agendar Cita de Tratamientos">📅 Agendar Cita</button>` : ''}
+              ${!q.invoice_id ? `<button class="btn btn-sm btn-info convert-invoice-btn" data-id="${q.id}" title="Generar Factura de Ítems Aceptados">📄 Facturar Ítems</button>` : ''}
+              <button class="btn btn-sm btn-primary edit-quote-btn" data-id="${q.id}" title="Editar Presupuesto">✎ Editar</button>
+              <button class="btn btn-sm btn-danger delete-quote-btn" data-id="${q.id}" title="Eliminar Presupuesto">✕ Eliminar</button>
+            </div>
           </div>
         </td>
       </tr>
@@ -149,73 +173,404 @@ export class Quotations {
   }
 
   mount() {
-    const addBtn = this.container.querySelector('#add-quote-btn');
-    if (addBtn) {
-      addBtn.addEventListener('click', () => this.showQuoteModal());
-    }
+    this.destroy();
+    this.abortController = new AbortController();
+    const signal = this.abortController.signal;
 
-    const searchInput = this.container.querySelector('#quote-search');
-    if (searchInput) {
-      searchInput.addEventListener('input', () => {
-        this.searchQuery = searchInput.value;
+    this.container.addEventListener('input', (e) => {
+      if (e.target && e.target.id === 'quote-search') {
+        this.searchQuery = e.target.value;
         this.renderView();
-      });
-    }
+      }
+    }, { signal });
 
-    const statusFilter = this.container.querySelector('#quote-filter-status');
-    if (statusFilter) {
-      statusFilter.addEventListener('change', () => {
-        this.statusFilter = statusFilter.value;
+    this.container.addEventListener('change', (e) => {
+      if (e.target && e.target.id === 'quote-filter-status') {
+        this.statusFilter = e.target.value;
         this.renderView();
-      });
-    }
+      }
+    }, { signal });
 
     this.container.addEventListener('click', async (e) => {
-      const targetBtn = e.target.closest('button');
-      if (!targetBtn) return;
-      const id = targetBtn.getAttribute('data-id');
-
-      if (targetBtn.classList.contains('view-quote-btn')) {
-        this.printQuote(id);
+      const addBtn = e.target.closest('#add-quote-btn');
+      if (addBtn) {
+        this.showQuoteModal();
+        return;
       }
-      if (targetBtn.classList.contains('convert-appointment-btn')) {
-        const q = this.quotationsList.find(item => item.id == id);
-        if (q) {
-          state.set('prefilledAppointment', {
-            patientId: q.patient_id,
-            patientName: q.patient_name,
-            doctorId: q.doctor_id,
-            reason: `Tratamientos de Presupuesto #${q.quote_number}`
-          });
-          window.location.hash = '#/appointments';
+
+      const actionBtn = e.target.closest('.view-quote-btn, .manage-items-btn, .convert-appointment-btn, .convert-invoice-btn, .edit-quote-btn, .delete-quote-btn');
+      if (actionBtn) {
+        const id = actionBtn.getAttribute('data-id');
+        if (actionBtn.classList.contains('view-quote-btn')) {
+          this.printQuote(id);
+        }
+        if (actionBtn.classList.contains('manage-items-btn')) {
+          this.showManageQuoteModal(id);
+        }
+        if (actionBtn.classList.contains('convert-appointment-btn')) {
+          const q = this.quotationsList.find(item => item.id == id);
+          if (q) {
+            state.set('prefilledAppointment', {
+              patientId: q.patient_id,
+              patientName: q.patient_name,
+              doctorId: q.doctor_id,
+              reason: `Tratamientos de Presupuesto #${q.quote_number}`
+            });
+            window.location.hash = '#/appointments';
+          }
+        }
+        if (actionBtn.classList.contains('edit-quote-btn')) {
+          this.showQuoteModal(id);
+        }
+        if (actionBtn.classList.contains('delete-quote-btn')) {
+          this.showDeleteConfirm(id);
+        }
+        if (actionBtn.classList.contains('convert-invoice-btn')) {
+          this.showConvertInvoiceModal(id);
+        }
+        return;
+      }
+
+      // Handle row clicking to reveal/toggle action bar
+      const mainRow = e.target.closest('.quote-main-row');
+      if (mainRow) {
+        const id = mainRow.getAttribute('data-id');
+        const targetActionsRow = this.container.querySelector(`#quote-actions-${id}`);
+        if (targetActionsRow) {
+          const isOpen = targetActionsRow.style.display !== 'none';
+          
+          // Close all open action rows & remove row active states
+          this.container.querySelectorAll('.quote-actions-bar-row').forEach(row => row.style.display = 'none');
+          this.container.querySelectorAll('.quote-main-row').forEach(row => row.classList.remove('row-active'));
+
+          if (!isOpen) {
+            targetActionsRow.style.display = 'table-row';
+            mainRow.classList.add('row-active');
+          }
         }
       }
-      if (targetBtn.classList.contains('edit-quote-btn')) {
-        this.showQuoteModal(id);
+    }, { signal });
+  }
+
+  async showManageQuoteModal(quotationId) {
+    let qRaw;
+    try {
+      qRaw = await quotationService.getById(quotationId);
+    } catch (err) {
+      toast.error('Error al obtener datos del presupuesto');
+      return;
+    }
+    const q = qRaw?.data || qRaw;
+    if (!q) {
+      toast.error('Presupuesto no encontrado');
+      return;
+    }
+
+    const renderModalContent = (qData) => {
+      const ITEM_STATUS_BADGES = {
+        aceptado: 'badge-success',
+        rechazado: 'badge-danger',
+        pendiente: 'badge-warning',
+      };
+
+      const ITEM_STATUS_LABELS = {
+        aceptado: '✓ Aceptado',
+        rechazado: '✗ Rechazado',
+        pendiente: '⏳ Pendiente',
+      };
+
+      const items = qData.items || [];
+      const acceptedItems = items.filter(i => (i.status || 'pendiente') === 'aceptado');
+      const acceptedTotal = acceptedItems.reduce((acc, i) => acc + parseFloat(i.total || 0), 0);
+      const totalAmount = parseFloat(qData.total || 0);
+      const acceptancePercentage = items.length > 0 ? Math.round((acceptedItems.length / items.length) * 100) : 0;
+
+      const itemsRowsHtml = items.map((item) => {
+        const status = item.status || 'pendiente';
+        const isInvoiced = !!(item.invoice_id || (qData.invoice_id && status === 'aceptado'));
+
+        return `
+        <tr class="quote-manage-item-row" data-item-id="${item.id}">
+          <td>
+            <strong>${item.description}</strong>
+            ${item.tooth_number ? `<span style="font-size: 11px; color: var(--text-secondary); margin-left: 6px;">(Diente #${item.tooth_number})</span>` : ''}
+          </td>
+          <td style="text-align: center;">${item.quantity}</td>
+          <td style="text-align: right;">${formatCurrency(item.unit_price)}</td>
+          <td style="text-align: right;"><strong>${formatCurrency(item.total)}</strong></td>
+          <td style="text-align: center;">
+            ${isInvoiced 
+              ? `<span class="badge badge-info" style="background-color: var(--primary-100); color: var(--primary-800); font-weight: 600;" title="Tratamiento ya facturado">🔒 Facturado</span>` 
+              : `<span class="badge ${ITEM_STATUS_BADGES[status]}">${ITEM_STATUS_LABELS[status]}</span>`}
+          </td>
+          <td style="text-align: center;">
+            ${isInvoiced ? `
+              <div class="status-toggle-segmented" style="opacity: 0.75;" title="Este tratamiento ya fue facturado y está protegido">
+                <button type="button" class="status-toggle-btn active" disabled style="cursor: not-allowed; background: var(--primary-600); color: #fff;">
+                  🔒 Facturado
+                </button>
+              </div>
+            ` : `
+              <div class="status-toggle-segmented">
+                <button type="button" class="status-toggle-btn ${status === 'aceptado' ? 'active' : ''} set-item-status-btn" data-item-id="${item.id}" data-status="aceptado" title="Aceptar este tratamiento">
+                  ✓ Aceptar
+                </button>
+                <button type="button" class="status-toggle-btn ${status === 'pendiente' ? 'active' : ''} set-item-status-btn" data-item-id="${item.id}" data-status="pendiente" title="Marcar como pendiente">
+                  ⏳ Pendiente
+                </button>
+                <button type="button" class="status-toggle-btn ${status === 'rechazado' ? 'active' : ''} set-item-status-btn" data-item-id="${item.id}" data-status="rechazado" title="Rechazar este tratamiento">
+                  ✗ Rechazar
+                </button>
+              </div>
+            `}
+          </td>
+        </tr>
+      `}).join('');
+
+      const hasInvoicedItems = items.some(i => i.invoice_id || (qData.invoice_id && i.status === 'aceptado'));
+
+      return `
+        <div class="quote-manage-hero">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-4); margin-bottom: var(--space-3);">
+            <div>
+              <h3>Presupuesto #${qData.quote_number}</h3>
+              <p style="margin: 0; color: var(--text-secondary); font-size: var(--text-sm);">
+                👤 Paciente: <strong>${qData.patient_name || 'N/A'}</strong> &nbsp;|&nbsp; 👨‍⚕️ Doctor: <strong>${qData.doctor_name || 'Sin asignar'}</strong>
+              </p>
+            </div>
+            <div style="text-align: right;">
+              <span class="badge ${STATUS_BADGES[qData.status] || 'badge-secondary'}" style="font-size: 14px; padding: 6px 14px; border-radius: 9999px;">
+                ${STATUS_LABELS[qData.status] || qData.status}
+              </span>
+            </div>
+          </div>
+
+          <div style="margin-top: var(--space-3);">
+            <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px;">
+              <span>Progreso de Aceptación</span>
+              <span>${acceptedItems.length} de ${items.length} ítems (${acceptancePercentage}%)</span>
+            </div>
+            <div class="quote-progress-bar-container">
+              <div class="quote-progress-bar-fill" style="width: ${acceptancePercentage}%;"></div>
+            </div>
+          </div>
+        </div>
+
+        ${hasInvoicedItems ? `
+          <div style="background-color: var(--primary-50); border: 1px solid var(--primary-200); color: var(--primary-900); padding: 10px 14px; border-radius: var(--radius-md); font-size: 13px; margin-bottom: var(--space-4); display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 16px;">ℹ️</span>
+            <span>Los tratamientos marcados con <strong>🔒 Facturado</strong> ya fueron emitidos en una factura oficial y su estado no puede ser alterado.</span>
+          </div>
+        ` : ''}
+
+        <div style="display: flex; gap: var(--space-3); margin-bottom: var(--space-4); flex-wrap: wrap; align-items: center;">
+          <button id="manage-accept-all-btn" class="btn btn-success btn-md" style="flex: 1; min-width: 220px;">
+            ✅ Aceptar Presupuesto Completo
+          </button>
+          <button id="manage-generate-invoice-btn" class="btn btn-primary btn-md" style="flex: 1; min-width: 240px;" ${acceptedItems.length === 0 ? 'disabled' : ''}>
+            📄 Facturar Ítems Aceptados (${acceptedItems.length})
+          </button>
+        </div>
+
+        <div class="card" style="margin-bottom: var(--space-4); padding: 0; border: 1px solid var(--border-color); overflow: hidden;">
+          <div class="table-container" style="max-height: 360px; overflow-y: auto;">
+            <table style="margin: 0; border-radius: 0;">
+              <thead>
+                <tr>
+                  <th>Tratamiento / Descripción</th>
+                  <th style="text-align: center;">Cant.</th>
+                  <th style="text-align: right;">Precio Unit.</th>
+                  <th style="text-align: right;">Total</th>
+                  <th style="text-align: center;">Estado</th>
+                  <th style="text-align: center;">Acción Independiente</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${itemsRowsHtml || `<tr><td colspan="6" style="text-align: center; padding: var(--space-6); color: var(--text-secondary);">No hay ítems en este presupuesto.</td></tr>`}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div style="background: var(--gray-50); padding: var(--space-4); border-radius: var(--radius-lg); border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; gap: var(--space-4); flex-wrap: wrap;">
+          <div>
+            <span style="color: var(--text-secondary); font-size: 13px;">Monto Total Presupuesto:</span>
+            <strong style="font-size: 18px; margin-left: 8px; color: var(--text-primary);">${formatCurrency(totalAmount)}</strong>
+          </div>
+          <div>
+            <span style="color: var(--text-secondary); font-size: 13px;">Monto Aceptado Aprobado:</span>
+            <strong style="font-size: 20px; color: var(--success-600); margin-left: 8px;">${formatCurrency(acceptedTotal)}</strong>
+          </div>
+        </div>
+      `;
+    };
+
+    Modal.show({
+      title: `Gestionar y Aceptar Presupuesto #${q.quote_number}`,
+      content: renderModalContent(q),
+      confirmText: 'Cerrar',
+      size: 'xl',
+      onConfirm: async () => {
+        await this.render();
+        return true;
       }
-      if (targetBtn.classList.contains('status-quote-btn')) {
-        this.showStatusModal(id);
+    });
+
+    const overlay = document.querySelector('.modal-overlay');
+    if (!overlay) return;
+
+    // Use event delegation for dynamic re-rendering of modal buttons and content
+    overlay.addEventListener('click', async (e) => {
+      const acceptAllBtn = e.target.closest('#manage-accept-all-btn');
+      if (acceptAllBtn) {
+        try {
+          acceptAllBtn.disabled = true;
+          const res = await quotationService.acceptAllItems(quotationId);
+          const updatedQuote = res?.data || res;
+          toast.success('Presupuesto completo aceptado exitosamente');
+          const modalBody = overlay.querySelector('.modal-body');
+          if (modalBody) modalBody.innerHTML = renderModalContent(updatedQuote);
+          await this.render();
+        } catch (err) {
+          toast.error(err.message || 'Error al aceptar el presupuesto');
+        } finally {
+          if (acceptAllBtn) acceptAllBtn.disabled = false;
+        }
+        return;
       }
-      if (targetBtn.classList.contains('delete-quote-btn')) {
-        this.showDeleteConfirm(id);
+
+      const invoiceBtn = e.target.closest('#manage-generate-invoice-btn');
+      if (invoiceBtn) {
+        Modal.closeAll();
+        this.showConvertInvoiceModal(quotationId);
+        return;
       }
-      if (targetBtn.classList.contains('convert-invoice-btn')) {
-        this.showConvertInvoiceConfirm(id);
+
+      const itemBtn = e.target.closest('.set-item-status-btn');
+      if (itemBtn) {
+        const itemId = itemBtn.getAttribute('data-item-id');
+        const status = itemBtn.getAttribute('data-status');
+        try {
+          const res = await quotationService.updateItemStatus(itemId, status);
+          const updatedQuote = await quotationService.getById(quotationId);
+          const modalBody = overlay.querySelector('.modal-body');
+          if (modalBody) modalBody.innerHTML = renderModalContent(updatedQuote?.data || updatedQuote);
+          await this.render();
+        } catch (err) {
+          toast.error(err.message || 'Error al actualizar estado del ítem');
+        }
+        return;
       }
     });
   }
 
-  showConvertInvoiceConfirm(quotationId) {
-    const q = this.quotationsList.find(q => q.id == quotationId);
-    const label = q ? `# ${q.quote_number}` : 'este presupuesto';
+  async showConvertInvoiceModal(quotationId) {
+    let qRaw;
+    try {
+      qRaw = await quotationService.getById(quotationId);
+    } catch (err) {
+      toast.error('Error al obtener información del presupuesto');
+      return;
+    }
+    const q = qRaw?.data || qRaw;
 
-    Modal.confirm(
-      'Generar Factura',
-      `¿Está seguro de generar la factura para el presupuesto ${label}?`,
-      async () => {
+    if (!q.items || q.items.length === 0) {
+      toast.error('Este presupuesto no contiene ítems para facturar.');
+      return;
+    }
+
+    const unbilledItems = (q.items || []).filter(item => !item.invoice_id);
+    if (unbilledItems.length === 0) {
+      toast.info('Todos los tratamientos de este presupuesto ya han sido facturados.');
+      return;
+    }
+
+    const itemsRowsHtml = unbilledItems.map((item) => {
+      const isAccepted = item.status === 'aceptado';
+      return `
+      <tr class="quote-convert-item-row" data-id="${item.id}" data-total="${item.total}">
+        <td style="text-align: center;">
+          <input type="checkbox" class="quote-item-checkbox" value="${item.id}" ${isAccepted ? 'checked' : ''} />
+        </td>
+        <td>
+          <strong>${item.description}</strong>
+          ${item.tooth_number ? `<span style="font-size: 11px; color: var(--text-secondary); margin-left: 6px;">(Diente #${item.tooth_number})</span>` : ''}
+        </td>
+        <td style="text-align: center;">${item.quantity}</td>
+        <td style="text-align: right;">${formatCurrency(item.unit_price)}</td>
+        <td style="text-align: right;"><strong>${formatCurrency(item.total)}</strong></td>
+      </tr>
+    `}).join('');
+
+    const taxRate = parseFloat(q.tax_rate || 0);
+    const discountPct = parseFloat(q.discount_percentage || 0);
+
+    const content = `
+      <div style="margin-bottom: var(--space-4);">
+        <p style="margin-bottom: var(--space-2);"><strong>Presupuesto #${q.quote_number}</strong> — Paciente: <strong>${q.patient_name || 'N/A'}</strong></p>
+        <p style="color: var(--text-secondary); font-size: var(--text-sm); margin: 0;">Seleccione los ítems que desea aceptar y facturar:</p>
+      </div>
+
+      <div class="table-container" style="max-height: 300px; overflow-y: auto; margin-bottom: var(--space-4);">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 40px; text-align: center;">
+                <input type="checkbox" id="select-all-quote-items" checked />
+              </th>
+              <th>Descripción del Tratamiento</th>
+              <th style="text-align: center;">Cant.</th>
+              <th style="text-align: right;">P. Unitario</th>
+              <th style="text-align: right;">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsRowsHtml}
+          </tbody>
+        </table>
+      </div>
+
+      <div style="background-color: var(--gray-50); padding: var(--space-4); border-radius: var(--radius-md); border: 1px solid var(--border-color); display: flex; flex-direction: column; gap: var(--space-2);">
+        <div style="display: flex; justify-content: space-between;">
+          <span>Subtotal ítems seleccionados:</span>
+          <strong id="convert-selected-subtotal">${formatCurrency(q.subtotal)}</strong>
+        </div>
+        ${discountPct > 0 ? `
+          <div style="display: flex; justify-content: space-between; color: var(--danger-600);">
+            <span>Descuento global (${discountPct}%):</span>
+            <strong id="convert-selected-discount">-${formatCurrency(q.discount_amount)}</strong>
+          </div>
+        ` : ''}
+        ${taxRate > 0 ? `
+          <div style="display: flex; justify-content: space-between;">
+            <span>Impuesto (${taxRate}%):</span>
+            <strong id="convert-selected-tax">${formatCurrency(q.tax_amount)}</strong>
+          </div>
+        ` : ''}
+        <div style="display: flex; justify-content: space-between; border-top: 1px solid var(--border-color); padding-top: var(--space-2); margin-top: var(--space-1); font-size: var(--text-base);">
+          <strong>Total Factura:</strong>
+          <strong id="convert-selected-total" style="color: var(--primary-700); font-size: var(--text-lg);">${formatCurrency(q.total)}</strong>
+        </div>
+      </div>
+    `;
+
+    Modal.show({
+      title: `Facturar Presupuesto #${q.quote_number}`,
+      content: content,
+      confirmText: 'Generar Factura',
+      size: 'lg',
+      onConfirm: async (modalBody) => {
+        const checkboxes = modalBody.querySelectorAll('.quote-item-checkbox:checked');
+        const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+
+        if (selectedIds.length === 0) {
+          toast.error('Debe seleccionar al menos un ítem para facturar.');
+          return false;
+        }
+
         try {
-          await invoiceService.createFromQuotation(quotationId);
-          toast.success('Factura generada exitosamente');
+          await invoiceService.createFromQuotation(quotationId, selectedIds);
+          toast.success('Factura generada exitosamente con los ítems seleccionados');
           window.location.hash = '#/invoices';
           return true;
         } catch (err) {
@@ -223,7 +578,56 @@ export class Quotations {
           return false;
         }
       }
-    );
+    });
+
+    // Dynamic summary update on checkbox change
+    const overlay = document.querySelector('.modal-overlay');
+    if (!overlay) return;
+
+    const updateCalculations = () => {
+      const rows = overlay.querySelectorAll('.quote-convert-item-row');
+      let subtotal = 0;
+
+      rows.forEach(row => {
+        const cb = row.querySelector('.quote-item-checkbox');
+        if (cb && cb.checked) {
+          subtotal += parseFloat(row.dataset.total || 0);
+        }
+      });
+
+      const discountAmt = subtotal * (discountPct / 100);
+      const taxable = subtotal - discountAmt;
+      const taxAmt = taxable * (taxRate / 100);
+      const total = taxable + taxAmt;
+
+      const subtotalEl = overlay.querySelector('#convert-selected-subtotal');
+      const discountEl = overlay.querySelector('#convert-selected-discount');
+      const taxEl = overlay.querySelector('#convert-selected-tax');
+      const totalEl = overlay.querySelector('#convert-selected-total');
+
+      if (subtotalEl) subtotalEl.textContent = formatCurrency(subtotal);
+      if (discountEl) discountEl.textContent = `-${formatCurrency(discountAmt)}`;
+      if (taxEl) taxEl.textContent = formatCurrency(taxAmt);
+      if (totalEl) totalEl.textContent = formatCurrency(total);
+    };
+
+    overlay.querySelectorAll('.quote-item-checkbox').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const allCbs = overlay.querySelectorAll('.quote-item-checkbox');
+        const checkedCbs = overlay.querySelectorAll('.quote-item-checkbox:checked');
+        const selectAll = overlay.querySelector('#select-all-quote-items');
+        if (selectAll) selectAll.checked = allCbs.length === checkedCbs.length;
+        updateCalculations();
+      });
+    });
+
+    overlay.querySelector('#select-all-quote-items')?.addEventListener('change', (e) => {
+      const isChecked = e.target.checked;
+      overlay.querySelectorAll('.quote-item-checkbox').forEach(cb => {
+        cb.checked = isChecked;
+      });
+      updateCalculations();
+    });
   }
 
   async showQuoteModal(quoteId = null) {

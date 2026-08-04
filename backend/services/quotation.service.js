@@ -128,11 +128,50 @@ class QuotationService {
       throw new AppError('Cotización no encontrada.', 404);
     }
 
+    if (status === 'aceptada') {
+      await quotationRepository.acceptAllItems(id);
+      return this.getById(id);
+    }
+
     const updated = await quotationRepository.update(id, { status });
     if (!updated) {
       throw new AppError('No se pudo actualizar el estado.', 500);
     }
     return updated;
+  }
+
+  async updateItemStatus(itemId, status) {
+    const validStatuses = ['pendiente', 'aceptado', 'rechazado'];
+    if (!validStatuses.includes(status)) {
+      throw new AppError('Estado de ítem no válido.', 400);
+    }
+    const item = await quotationRepository.findItemById(itemId);
+    if (!item) {
+      throw new AppError('Ítem de cotización no encontrado.', 404);
+    }
+    if (item.invoice_id) {
+      throw new AppError('Este tratamiento ya ha sido facturado y su estado no puede ser modificado.', 400);
+    }
+    const updatedItem = await quotationRepository.updateItemStatus(itemId, status);
+    return updatedItem;
+  }
+
+  async acceptAllItems(quotationId) {
+    const existing = await quotationRepository.findById(quotationId);
+    if (!existing) {
+      throw new AppError('Cotización no encontrada.', 404);
+    }
+    await quotationRepository.acceptAllItems(quotationId);
+    return this.getById(quotationId);
+  }
+
+  async updateItemsStatusBulk(quotationId, itemsStatusList) {
+    const existing = await quotationRepository.findById(quotationId);
+    if (!existing) {
+      throw new AppError('Cotización no encontrada.', 404);
+    }
+    await quotationRepository.updateItemsStatusBulk(quotationId, itemsStatusList);
+    return this.getById(quotationId);
   }
 
   async getByPatient(patientId) {
@@ -141,6 +180,22 @@ class QuotationService {
       limit: 100,
       offset: 0,
     });
+  }
+
+  async getAcceptedItemsByPatient(patientId) {
+    return quotationRepository.getAcceptedItemsByPatient(patientId);
+  }
+
+  async updateExecutionStatus(itemId, executionStatus, userId) {
+    const validStatuses = ['pendiente', 'en_proceso', 'realizado'];
+    if (!validStatuses.includes(executionStatus)) {
+      throw new AppError('Estado de ejecución no válido. Debe ser pendiente, en_proceso o realizado.', 400);
+    }
+    const updated = await quotationRepository.updateExecutionStatus(itemId, executionStatus, userId);
+    if (!updated) {
+      throw new AppError('Ítem de cotización no encontrado.', 404);
+    }
+    return updated;
   }
 }
 

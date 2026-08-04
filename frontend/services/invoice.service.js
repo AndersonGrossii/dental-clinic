@@ -24,8 +24,8 @@ class InvoiceService {
     return await api.delete(`/invoices/${id}`);
   }
 
-  async createFromQuotation(quotationId) {
-    return await api.post(`/invoices/from-quotation/${quotationId}`);
+  async createFromQuotation(quotationId, itemIds = null) {
+    return await api.post(`/invoices/from-quotation/${quotationId}`, { itemIds });
   }
 
   async getStats() {

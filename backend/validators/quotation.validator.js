@@ -161,6 +161,6 @@ export const changeStatusRules = [
     label: 'Estado',
     required: true,
     type: 'string',
-    enum: ['borrador', 'enviada', 'aceptada', 'rechazada', 'expirada'],
+    enum: ['borrador', 'enviada', 'parcial', 'aceptada', 'rechazada', 'expirada'],
   },
 ];

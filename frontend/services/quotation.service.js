@@ -27,6 +27,26 @@ class QuotationService {
   async changeStatus(id, status) {
     return await api.patch(`/quotations/${id}/status`, { status });
   }
+
+  async acceptAllItems(id) {
+    return await api.post(`/quotations/${id}/accept-all`);
+  }
+
+  async updateItemStatus(itemId, status) {
+    return await api.patch(`/quotations/items/${itemId}/status`, { status });
+  }
+
+  async updateItemsStatusBulk(id, items) {
+    return await api.post(`/quotations/${id}/items-status`, { items });
+  }
+
+  async getAcceptedItemsByPatient(patientId) {
+    return await api.get(`/quotations/patients/${patientId}/accepted-items`);
+  }
+
+  async updateExecutionStatus(itemId, executionStatus) {
+    return await api.patch(`/quotations/items/${itemId}/execution-status`, { executionStatus });
+  }
 }
 
 const quotationService = new QuotationService();
