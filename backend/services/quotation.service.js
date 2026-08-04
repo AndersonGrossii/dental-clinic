@@ -122,14 +122,6 @@ class QuotationService {
     return true;
   }
 
-  async restore(id) {
-    const restored = await quotationRepository.restore(id);
-    if (!restored) {
-      throw new AppError('Cotización no encontrada o ya fue restaurada.', 404);
-    }
-    return restored;
-  }
-
   async changeStatus(id, status) {
     const existing = await quotationRepository.findById(id);
     if (!existing) {
