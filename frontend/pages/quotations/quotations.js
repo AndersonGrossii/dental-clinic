@@ -44,6 +44,8 @@ export class Quotations {
     this.quotationsList = [];
     this.searchQuery = '';
     this.statusFilter = '';
+    this.currentPage = 1;
+    this.itemsPerPage = 15;
     this.abortController = null;
   }
 
@@ -56,7 +58,7 @@ export class Quotations {
 
   async render() {
     try {
-      const response = await quotationService.getAll();
+      const response = await quotationService.getAll({ limit: 500 });
       this.quotationsList = Array.isArray(response) ? response : (response.rows || []);
       this.renderLayout();
       this.renderView();
@@ -111,6 +113,8 @@ export class Quotations {
             </tbody>
           </table>
         </div>
+        <div id="pagination-controls" style="padding: var(--space-4); display: flex; justify-content: center; align-items: center; gap: var(--space-2); border-top: 1px solid var(--border-color);">
+        </div>
       </div>
     `;
   }
@@ -129,7 +133,15 @@ export class Quotations {
       return matchesSearch && matchesStatus;
     });
 
-    let rows = filtered.map(q => `
+    const totalPages = Math.ceil(filtered.length / this.itemsPerPage) || 1;
+    if (this.currentPage > totalPages) {
+      this.currentPage = totalPages;
+    }
+
+    const startIndex = (this.currentPage - 1) * this.itemsPerPage;
+    const paginatedItems = filtered.slice(startIndex, startIndex + this.itemsPerPage);
+
+    let rows = paginatedItems.map(q => `
       <tr class="clickable-table-row quote-main-row" data-id="${q.id}">
         <td><strong># ${q.quote_number}</strong></td>
         <td>${q.patient_name || '—'}</td>
@@ -170,6 +182,23 @@ export class Quotations {
     }
 
     tbody.innerHTML = rows;
+
+    const paginationContainer = this.container.querySelector('#pagination-controls');
+    if (paginationContainer) {
+      let buttons = '';
+      if (totalPages > 1) {
+        buttons += `<button class="btn btn-sm btn-outline page-btn" data-page="${this.currentPage - 1}" ${this.currentPage === 1 ? 'disabled' : ''}>Anterior</button>`;
+        for (let i = 1; i <= totalPages; i++) {
+          if (i === 1 || i === totalPages || (i >= this.currentPage - 1 && i <= this.currentPage + 1)) {
+            buttons += `<button class="btn btn-sm ${i === this.currentPage ? 'btn-primary' : 'btn-outline'} page-btn" data-page="${i}">${i}</button>`;
+          } else if (i === this.currentPage - 2 || i === this.currentPage + 2) {
+            buttons += `<span style="color: var(--text-secondary); padding: 0 var(--space-1);">...</span>`;
+          }
+        }
+        buttons += `<button class="btn btn-sm btn-outline page-btn" data-page="${this.currentPage + 1}" ${this.currentPage === totalPages ? 'disabled' : ''}>Siguiente</button>`;
+      }
+      paginationContainer.innerHTML = buttons;
+    }
   }
 
   mount() {
@@ -180,6 +209,7 @@ export class Quotations {
     this.container.addEventListener('input', (e) => {
       if (e.target && e.target.id === 'quote-search') {
         this.searchQuery = e.target.value;
+        this.currentPage = 1;
         this.renderView();
       }
     }, { signal });
@@ -187,11 +217,19 @@ export class Quotations {
     this.container.addEventListener('change', (e) => {
       if (e.target && e.target.id === 'quote-filter-status') {
         this.statusFilter = e.target.value;
+        this.currentPage = 1;
         this.renderView();
       }
     }, { signal });
 
     this.container.addEventListener('click', async (e) => {
+      const pageBtn = e.target.closest('.page-btn');
+      if (pageBtn && !pageBtn.disabled) {
+        this.currentPage = parseInt(pageBtn.getAttribute('data-page'), 10);
+        this.renderView();
+        return;
+      }
+
       const addBtn = e.target.closest('#add-quote-btn');
       if (addBtn) {
         this.showQuoteModal();
