@@ -69,6 +69,16 @@ export const remove = async (req, res, next) => {
   }
 };
 
+export const restore = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const restored = await quotationService.restore(parseInt(id, 10));
+    return ApiResponse.success(res, restored, 'Cotización restaurada exitosamente');
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const changeStatus = async (req, res, next) => {
   try {
     const { id } = req.params;
