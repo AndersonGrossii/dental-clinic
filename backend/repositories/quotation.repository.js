@@ -231,20 +231,10 @@ class QuotationRepository extends BaseRepository {
   }
 
   async restore(id) {
-    const store = als.getStore();
-    const clinicId = store?.clinicId;
-
-    let sql = `UPDATE quotations SET deleted_at = NULL, updated_at = NOW() WHERE id = $1 AND deleted_at IS NOT NULL`;
-    const params = [id];
-
-    if (clinicId) {
-      sql += ` AND clinic_id = $2`;
-      params.push(clinicId);
-    }
-
-    sql += ` RETURNING *`;
-
-    const result = await query(sql, params);
+    const result = await query(
+      `UPDATE quotations SET deleted_at = NULL, updated_at = NOW() WHERE id = $1 AND deleted_at IS NOT NULL RETURNING *`,
+      [id]
+    );
     return result.rows[0] || null;
   }
 
