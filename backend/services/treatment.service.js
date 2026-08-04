@@ -198,7 +198,7 @@ class TreatmentService {
       const invoiceNumber = await invoiceRepository.generateNumber();
 
       const subtotal = price;
-      const taxRate = 16.00; // IVA 16%
+      const taxRate = data.tax_rate !== undefined && data.tax_rate !== null ? parseFloat(data.tax_rate) : 16.00;
       const discountAmount = 0.00;
       const discountPct = 0.00;
       const taxable = subtotal - discountAmount;
@@ -260,6 +260,15 @@ class TreatmentService {
    * @throws {AppError} Si no existe
    */
   async updatePatientTreatment(id, data) {
+    const existing = await treatmentRepository.findPatientTreatmentById(id);
+    if (!existing) {
+      throw new AppError('Registro de tratamiento del paciente no encontrado.', 404);
+    }
+
+    if (existing.is_from_quotation || (existing.notes && existing.notes.includes('Presupuesto #'))) {
+      throw new AppError('Los tratamientos derivados de un presupuesto deben gestionarse desde la pestaña de Tratamientos Aceptados.', 400);
+    }
+
     const updateData = {};
     const allowedFields = ['tooth_number', 'price', 'status', 'notes', 'start_date', 'end_date'];
     for (const field of allowedFields) {
@@ -273,10 +282,70 @@ class TreatmentService {
     }
 
     const updated = await treatmentRepository.updatePatientTreatment(id, updateData);
-    if (!updated) {
+
+    // Si cambió el precio o las notas y tiene una factura asociada sin pagos, actualizar los items e importes de la factura
+    if (data.price !== undefined && existing.invoice_id && parseFloat(existing.invoice_amount_paid || 0) <= 0) {
+      const newPrice = parseFloat(data.price);
+      const invoice = await invoiceRepository.findByIdWithItems(existing.invoice_id);
+      if (invoice && invoice.items && invoice.items.length > 0) {
+        // Actualizar precio en invoice_items
+        await query(
+          `UPDATE invoice_items SET unit_price = $1, subtotal = $1, total = $1 WHERE invoice_id = $2 AND treatment_id = $3`,
+          [newPrice, existing.invoice_id, existing.treatment_id]
+        );
+
+        // Recalcular subtotal y totales de la factura
+        const subtotal = newPrice;
+        const taxRate = parseFloat(invoice.tax_rate || 0);
+        const discountAmount = parseFloat(invoice.discount_amount || 0);
+        const taxable = Math.max(0, subtotal - discountAmount);
+        const taxAmount = parseFloat((taxable * (taxRate / 100)).toFixed(2));
+        const total = parseFloat((taxable + taxAmount).toFixed(2));
+
+        await invoiceRepository.update(existing.invoice_id, {
+          subtotal,
+          tax_amount: taxAmount,
+          total,
+          balance: total,
+        });
+      }
+    }
+
+    return updated;
+  }
+
+  /**
+   * Elimina un registro de tratamiento del paciente.
+   * Si tiene una factura asociada sin pagos registrados, elimina también dicha factura.
+   * @param {number} id - ID del registro patient_treatments
+   * @returns {Promise<boolean>}
+   */
+  async deletePatientTreatment(id) {
+    const existing = await treatmentRepository.findPatientTreatmentById(id);
+    if (!existing) {
       throw new AppError('Registro de tratamiento del paciente no encontrado.', 404);
     }
-    return updated;
+
+    if (existing.is_from_quotation || (existing.notes && existing.notes.includes('Presupuesto #'))) {
+      throw new AppError('Los tratamientos derivados de un presupuesto deben gestionarse desde la pestaña de Tratamientos Aceptados.', 400);
+    }
+
+    // Si tiene una factura vinculada sin pagos registrados, eliminarla automáticamente
+    if (existing.invoice_id) {
+      const invoice = await invoiceRepository.findByIdWithItems(existing.invoice_id);
+      if (invoice) {
+        const hasPayments = (invoice.payments && invoice.payments.length > 0) || parseFloat(invoice.amount_paid || 0) > 0;
+        if (!hasPayments) {
+          await invoiceRepository.softDelete(existing.invoice_id);
+        }
+      }
+    }
+
+    const deleted = await treatmentRepository.deletePatientTreatment(id);
+    if (!deleted) {
+      throw new AppError('No se pudo eliminar el tratamiento del paciente.', 500);
+    }
+    return true;
   }
 }
 

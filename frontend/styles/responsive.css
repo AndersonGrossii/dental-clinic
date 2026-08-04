@@ -518,3 +518,41 @@
   }
 
 }
+
+/* Laptops y pantallas medianas (1025px a 1440px) */
+@media (max-width: 1440px) {
+  .table-container {
+    overflow-x: auto !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    box-sizing: border-bottom-box;
+  }
+
+  th {
+    padding: 10px 12px !important;
+    font-size: 11px !important;
+  }
+
+  td {
+    padding: 10px 12px !important;
+    font-size: 12px !important;
+  }
+}
+
+@media (max-width: 1280px) {
+  th {
+    padding: 8px 10px !important;
+    font-size: 11px !important;
+  }
+
+  td {
+    padding: 8px 10px !important;
+    font-size: 12px !important;
+  }
+
+  .btn-sm {
+    padding: 3px 8px !important;
+    font-size: 11px !important;
+  }
+}
+

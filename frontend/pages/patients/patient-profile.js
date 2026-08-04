@@ -133,6 +133,18 @@ export class PatientProfile {
              <span class="badge ${t.invoice_status === 'pagada' ? 'badge-success' : 'badge-warning'}" style="font-size: 10px; margin-left: 4px;">${t.invoice_status === 'pagada' ? 'Pagada' : 'Pendiente'}</span>`
           : `<span style="color: var(--text-secondary); font-size: 12px;">Sin Factura</span>`;
 
+        const isFromQuote = t.is_from_quotation || (t.notes && t.notes.includes('Presupuesto #'));
+        const actionHtml = isFromQuote
+          ? `<span class="badge badge-secondary" style="font-size: 11px; padding: 4px 8px;" title="Derivado de presupuesto. Gestionar en Tratamientos Aceptados">Origen: Presupuesto</span>`
+          : `<div style="display: flex; gap: 4px; justify-content: flex-end;">
+               <button type="button" class="btn btn-sm btn-outline edit-patient-treatment-btn" data-id="${t.id}" title="Editar Tratamiento">✏️ Editar</button>
+               <button type="button" class="btn btn-sm btn-danger delete-patient-treatment-btn" data-id="${t.id}" title="Eliminar Tratamiento">🗑️ Eliminar</button>
+             </div>`;
+
+        const notesCell = t.notes && t.notes.trim()
+          ? `<button type="button" class="btn btn-sm btn-outline view-treatment-notes-btn" data-id="${t.id}" style="font-size: 11px; padding: 2px 8px;">📝 Ver Notas</button>`
+          : `<span style="color: var(--text-tertiary); font-size: 12px; italic;">Sin notas</span>`;
+
         return `
           <tr>
             <td>${t.created_at ? formatDate(t.created_at) : 'N/A'}</td>
@@ -141,7 +153,10 @@ export class PatientProfile {
             <td><strong>${formatCurrency(t.price)}</strong></td>
             <td><span class="badge ${t.status === 'completado' ? 'badge-success' : 'badge-warning'}">${(t.status || 'completado').toUpperCase()}</span></td>
             <td>${invBadge}</td>
-            <td style="color: var(--text-secondary); font-size: 13px;">${t.notes || ''}</td>
+            <td>${notesCell}</td>
+            <td style="text-align: right;">
+              ${actionHtml}
+            </td>
           </tr>
         `;
       }).join('');
@@ -149,7 +164,7 @@ export class PatientProfile {
       if (this.clinicalTreatments.length === 0) {
         treatmentRows = `
           <tr>
-            <td colspan="7" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
+            <td colspan="8" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
               No se han registrado tratamientos en el expediente de este paciente.
             </td>
           </tr>
@@ -177,6 +192,7 @@ export class PatientProfile {
                 <th>Estado</th>
                 <th>Factura Asociada</th>
                 <th>Notas / Origen</th>
+                <th style="text-align: right;">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -664,6 +680,32 @@ export class PatientProfile {
       addHistoryBtn.addEventListener('click', () => this.showAddTreatmentModal(), { signal });
     }
 
+    // Editar tratamiento del historial
+    this.container.querySelectorAll('.edit-patient-treatment-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = Number(btn.dataset.id);
+        const treatment = (this.clinicalTreatments || []).find(t => t.id === id);
+        if (treatment) this.showEditTreatmentModal(treatment);
+      }, { signal });
+    });
+
+    // Eliminar tratamiento del historial
+    this.container.querySelectorAll('.delete-patient-treatment-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = Number(btn.dataset.id);
+        this.confirmDeleteTreatment(id);
+      }, { signal });
+    });
+
+    // Ver notas de tratamiento en modal
+    this.container.querySelectorAll('.view-treatment-notes-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = Number(btn.dataset.id);
+        const treatment = (this.clinicalTreatments || []).find(t => t.id === id);
+        if (treatment) this.showTreatmentNotesModal(treatment);
+      }, { signal });
+    });
+
     // Agregar nota clínica
     const addNoteBtn = this.container.querySelector('#profile-add-note-btn');
     if (addNoteBtn) {
@@ -944,27 +986,58 @@ export class PatientProfile {
       return;
     }
 
-    const options = treatments
-      .filter(t => t.is_active)
-      .map(t => `<option value="${t.id}">${t.name} (${t.code})</option>`)
+    const activeTreatments = treatments.filter(t => t.is_active);
+
+    const options = activeTreatments
+      .map(t => `<option value="${t.id}" data-price="${t.default_price}">${t.name} (${t.code}) - ${formatCurrency(t.default_price)}</option>`)
       .join('');
 
     const content = `
       <form id="add-treatment-history-form">
         <div class="form-group">
-          <label class="form-label">Tratamiento</label>
+          <label class="form-label">Tratamiento <span style="color: var(--danger-500);">*</span></label>
           <select name="treatment_id" id="treatment-select" class="form-select" required>
             <option value="">Seleccione un tratamiento...</option>
             ${options}
           </select>
         </div>
-        <div class="form-group" style="margin-top: var(--space-3);">
-          <label class="form-label">Diente / Pieza (Opcional)</label>
-          <input type="number" name="tooth_number" class="form-input" placeholder="Ej: 18" />
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Precio Base</label>
+            <input type="number" id="base-price" class="form-input" readonly value="0.00" step="0.01" style="background-color: var(--gray-100, #f3f4f6); font-weight: 500;" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Diente / Pieza (Opcional)</label>
+            <input type="number" name="tooth_number" class="form-input" placeholder="Ej: 18" min="1" max="32" />
+          </div>
         </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3); align-items: end;">
+          <div class="form-group">
+            <label class="form-label">Tipo Descuento</label>
+            <select id="discount-type" class="form-select">
+              <option value="percentage">% Porcentaje</option>
+              <option value="fixed">$ Monto Fijo</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Descuento</label>
+            <input type="number" id="discount-value" class="form-input" value="0" min="0" step="0.01" placeholder="0" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Impuesto (%)</label>
+            <input type="number" name="tax_rate" id="tax-rate" class="form-input" value="16" min="0" step="0.5" placeholder="16" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Precio Final</label>
+            <input type="number" name="price" id="final-price" class="form-input" value="0.00" step="0.01" required min="0" style="font-weight: 600; color: var(--primary-700, #4f46e5);" />
+          </div>
+        </div>
+
         <div class="form-group" style="margin-top: var(--space-3);">
           <label class="form-label">Notas Clínicas</label>
-          <textarea name="notes" class="form-textarea" rows="3"></textarea>
+          <textarea name="notes" class="form-textarea" rows="3" placeholder="Notas sobre el tratamiento realizado..."></textarea>
         </div>
       </form>`;
 
@@ -979,6 +1052,8 @@ export class PatientProfile {
         data.patient_id = Number(this.patientId);
         data.status = 'completado';
         data.treatment_id = Number(data.treatment_id);
+        data.price = parseFloat(data.price || 0);
+        data.tax_rate = parseFloat(data.tax_rate !== undefined ? data.tax_rate : 16);
         if (data.tooth_number) data.tooth_number = Number(data.tooth_number);
 
         try {
@@ -992,6 +1067,187 @@ export class PatientProfile {
           return false;
         }
       }
+    });
+
+    // Wire up dynamic price loading and discount/tax calculation
+    const modalForm = document.querySelector('#add-treatment-history-form');
+    if (modalForm) {
+      const treatmentSelect = modalForm.querySelector('#treatment-select');
+      const basePriceInput = modalForm.querySelector('#base-price');
+      const discountTypeSelect = modalForm.querySelector('#discount-type');
+      const discountValueInput = modalForm.querySelector('#discount-value');
+      const taxRateInput = modalForm.querySelector('#tax-rate');
+      const finalPriceInput = modalForm.querySelector('#final-price');
+
+      const recalculate = (origin = 'discount') => {
+        const basePrice = parseFloat(basePriceInput.value) || 0;
+        const discVal = parseFloat(discountValueInput.value) || 0;
+        const discType = discountTypeSelect.value;
+        const taxRate = parseFloat(taxRateInput.value) || 0;
+
+        if (origin === 'discount' || origin === 'tax') {
+          let discountAmount = 0;
+          if (discType === 'percentage') {
+            discountAmount = basePrice * (discVal / 100);
+          } else {
+            discountAmount = discVal;
+          }
+          const discountedSubtotal = Math.max(0, basePrice - discountAmount);
+          const taxAmount = discountedSubtotal * (taxRate / 100);
+          const finalPrice = discountedSubtotal + taxAmount;
+          finalPriceInput.value = finalPrice.toFixed(2);
+        } else if (origin === 'final') {
+          const finalPrice = parseFloat(finalPriceInput.value) || 0;
+          // Calculate net subtotal before tax
+          const netSubtotal = taxRate > 0 ? finalPrice / (1 + taxRate / 100) : finalPrice;
+          const discountAmount = Math.max(0, basePrice - netSubtotal);
+          if (discType === 'percentage') {
+            const pct = basePrice > 0 ? (discountAmount / basePrice) * 100 : 0;
+            discountValueInput.value = pct.toFixed(1);
+          } else {
+            discountValueInput.value = discountAmount.toFixed(2);
+          }
+        }
+      };
+
+      treatmentSelect.addEventListener('change', () => {
+        const selectedOption = treatmentSelect.options[treatmentSelect.selectedIndex];
+        const rawPrice = selectedOption ? parseFloat(selectedOption.dataset.price || 0) : 0;
+        basePriceInput.value = rawPrice.toFixed(2);
+        recalculate('discount');
+      });
+
+      discountTypeSelect.addEventListener('change', () => recalculate('discount'));
+      discountValueInput.addEventListener('input', () => recalculate('discount'));
+      taxRateInput.addEventListener('input', () => recalculate('tax'));
+      finalPriceInput.addEventListener('input', () => recalculate('final'));
+    }
+  }
+
+  showEditTreatmentModal(treatment) {
+    const content = `
+      <form id="edit-treatment-history-form">
+        <div class="form-group">
+          <label class="form-label">Tratamiento</label>
+          <input type="text" class="form-input" value="${treatment.treatment_name || ''}" readonly style="background-color: var(--gray-100, #f3f4f6); font-weight: 500;" />
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Precio ($)</label>
+            <input type="number" name="price" class="form-input" value="${parseFloat(treatment.price || 0).toFixed(2)}" step="0.01" min="0" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Diente / Pieza (Opcional)</label>
+            <input type="number" name="tooth_number" class="form-input" value="${treatment.tooth_number || ''}" placeholder="Ej: 18" min="1" max="32" />
+          </div>
+        </div>
+        <div class="form-group" style="margin-top: var(--space-3);">
+          <label class="form-label">Estado</label>
+          <select name="status" class="form-select">
+            <option value="completado" ${treatment.status === 'completado' ? 'selected' : ''}>Completado</option>
+            <option value="en_progreso" ${treatment.status === 'en_progreso' ? 'selected' : ''}>En Progreso</option>
+            <option value="pendiente" ${treatment.status === 'pendiente' ? 'selected' : ''}>Pendiente</option>
+            <option value="cancelado" ${treatment.status === 'cancelado' ? 'selected' : ''}>Cancelado</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-top: var(--space-3);">
+          <label class="form-label">Notas Clínicas</label>
+          <textarea name="notes" class="form-textarea" rows="3">${treatment.notes || ''}</textarea>
+        </div>
+      </form>`;
+
+    Modal.show({
+      title: 'Editar Tratamiento del Historial',
+      content,
+      confirmText: 'Guardar Cambios',
+      onConfirm: async (modalBody) => {
+        const form = modalBody.querySelector('#edit-treatment-history-form');
+        const formData = new FormData(form);
+        const data = Object.fromEntries(formData.entries());
+        data.price = parseFloat(data.price || 0);
+        if (data.tooth_number) data.tooth_number = Number(data.tooth_number);
+        else data.tooth_number = null;
+
+        try {
+          await treatmentService.updatePatientTreatment(treatment.id, data);
+          toast.success('Tratamiento del historial actualizado con éxito');
+          await this.render();
+          this.mount();
+          return true;
+        } catch (err) {
+          toast.error(err.message || 'Error al actualizar tratamiento');
+          return false;
+        }
+      }
+    });
+  }
+
+  confirmDeleteTreatment(treatmentId) {
+    Modal.show({
+      title: 'Eliminar Tratamiento del Historial',
+      content: `
+        <div style="padding: var(--space-2);">
+          <p style="margin: 0 0 var(--space-3) 0; color: var(--text-primary);">
+            ¿Está seguro de que desea eliminar este tratamiento del historial del paciente?
+          </p>
+          <div class="alert alert-warning" style="margin: 0; font-size: 13px;">
+            ⚠️ <strong>Atención:</strong> Si este tratamiento tiene una factura asociada sin pagos registrados, la factura también será eliminada automáticamente.
+          </div>
+        </div>
+      `,
+      confirmText: 'Sí, Eliminar',
+      cancelText: 'Cancelar',
+      onConfirm: async () => {
+        try {
+          await treatmentService.deletePatientTreatment(treatmentId);
+          toast.success('Tratamiento y factura vinculada eliminados con éxito');
+          await this.render();
+          this.mount();
+          return true;
+        } catch (err) {
+          toast.error(err.message || 'Error al eliminar tratamiento');
+          return false;
+        }
+      }
+    });
+  }
+
+  showTreatmentNotesModal(treatment) {
+    const content = `
+      <div style="display: flex; flex-direction: column; gap: var(--space-4);">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); background-color: var(--gray-50, #f8fafc); padding: var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--border-color, #e2e8f0);">
+          <div>
+            <span style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 2px;">Tratamiento</span>
+            <strong style="color: var(--primary-700); font-size: 14px;">${treatment.treatment_name || 'N/A'}</strong>
+          </div>
+          <div>
+            <span style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 2px;">Pieza / Diente</span>
+            <strong style="font-size: 14px;">${treatment.tooth_number ? 'Pieza #' + treatment.tooth_number : 'General'}</strong>
+          </div>
+          <div>
+            <span style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 2px;">Fecha de Registro</span>
+            <strong>${treatment.created_at ? formatDate(treatment.created_at) : 'N/A'}</strong>
+          </div>
+          <div>
+            <span style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 2px;">Precio</span>
+            <strong style="color: var(--success-600);">${formatCurrency(treatment.price)}</strong>
+          </div>
+        </div>
+
+        <div>
+          <label style="font-weight: 600; font-size: 13px; margin-bottom: 6px; display: block; color: var(--text-primary);">
+            Detalle de Notas Clínicas / Origen
+          </label>
+          <div style="white-space: pre-wrap; background-color: var(--gray-50, #f8fafc); padding: var(--space-4); border-radius: var(--radius-md); border: 1px solid var(--border-color, #e2e8f0); font-size: 14px; color: var(--text-primary); min-height: 80px; line-height: 1.5;">${treatment.notes ? treatment.notes : '<span style="color: var(--text-tertiary); font-style: italic;">Sin notas adicionales registradas.</span>'}</div>
+        </div>
+      </div>
+    `;
+
+    Modal.show({
+      title: '📋 Notas e Información del Tratamiento',
+      content,
+      cancelText: 'Cerrar',
+      confirmText: null
     });
   }
 

@@ -121,3 +121,13 @@ export const updatePatientTreatment = async (req, res, next) => {
     next(error);
   }
 };
+
+export const deletePatientTreatment = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    await treatmentService.deletePatientTreatment(id);
+    return ApiResponse.success(res, null, 'Tratamiento eliminado del historial del paciente');
+  } catch (error) {
+    next(error);
+  }
+};

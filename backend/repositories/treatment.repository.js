@@ -173,13 +173,18 @@ class TreatmentRepository extends BaseRepository {
          tc.name AS category_name,
          tc.color AS category_color,
          CONCAT(u.first_name, ' ', u.last_name) AS doctor_name,
-         d.specialty AS doctor_specialty
+         d.specialty AS doctor_specialty,
+         qi.id AS quotation_item_id,
+         q.quote_number,
+         (qi.id IS NOT NULL OR pt.notes ILIKE '%Presupuesto%') AS is_from_quotation
        FROM patient_treatments pt
        INNER JOIN treatments t ON pt.treatment_id = t.id
        LEFT JOIN treatment_categories tc ON t.category_id = tc.id
        LEFT JOIN doctors d ON pt.doctor_id = d.id
        LEFT JOIN users u ON d.user_id = u.id
        LEFT JOIN invoices inv ON pt.invoice_id = inv.id
+       LEFT JOIN quotation_items qi ON qi.patient_treatment_id = pt.id
+       LEFT JOIN quotations q ON qi.quotation_id = q.id
        WHERE ${conditions.join(' AND ')}
        ORDER BY pt.created_at DESC`,
       params
@@ -232,6 +237,49 @@ class TreatmentRepository extends BaseRepository {
     const result = await query(
       `UPDATE patient_treatments
        SET ${setClause}, updated_at = NOW()
+       WHERE ${conditions.join(' AND ')}
+       RETURNING *`,
+      params
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Busca un tratamiento de paciente por su ID.
+   * @param {number} id - ID del registro patient_treatments
+   * @returns {Promise<object|null>}
+   */
+  async findPatientTreatmentById(id) {
+    const conditions = ['pt.id = $1', 'pt.deleted_at IS NULL'];
+    const params = [id];
+    scopeClinic(conditions, params, 'pt');
+
+    const result = await query(
+      `SELECT pt.*, inv.status AS invoice_status, inv.amount_paid AS invoice_amount_paid,
+              qi.id AS quotation_item_id,
+              (qi.id IS NOT NULL OR pt.notes ILIKE '%Presupuesto%') AS is_from_quotation
+       FROM patient_treatments pt
+       LEFT JOIN invoices inv ON pt.invoice_id = inv.id
+       LEFT JOIN quotation_items qi ON qi.patient_treatment_id = pt.id
+       WHERE ${conditions.join(' AND ')}`,
+      params
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Elimina suavemente un tratamiento de paciente.
+   * @param {number} id - ID del registro patient_treatments
+   * @returns {Promise<object|null>}
+   */
+  async deletePatientTreatment(id) {
+    const conditions = ['id = $1', 'deleted_at IS NULL'];
+    const params = [id];
+    scopeClinic(conditions, params);
+
+    const result = await query(
+      `UPDATE patient_treatments
+       SET deleted_at = NOW(), updated_at = NOW()
        WHERE ${conditions.join(' AND ')}
        RETURNING *`,
       params

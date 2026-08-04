@@ -43,6 +43,10 @@ class TreatmentService {
   async updatePatientTreatment(id, data) {
     return await api.put(`/treatments/patient/${id}`, data);
   }
+
+  async deletePatientTreatment(id) {
+    return await api.delete(`/treatments/patient/${id}`);
+  }
 }
 
 const treatmentService = new TreatmentService();

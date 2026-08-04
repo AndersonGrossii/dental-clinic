@@ -167,6 +167,7 @@ export class Quotations {
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
               <button class="btn btn-sm btn-outline view-quote-btn" data-id="${q.id}" title="Ver / Imprimir Cotización">👁 Ver / Imprimir</button>
               <button class="btn btn-sm btn-manage-quote manage-items-btn" data-id="${q.id}" title="Gestionar Aceptación e Ítems">⚙️ Gestionar Ítems</button>
+              <button class="btn btn-sm btn-warning change-status-btn" data-id="${q.id}" title="Cambiar Estado del Presupuesto">🏷️ Cambiar Estado</button>
               ${(q.status === 'aceptada' || q.status === 'parcial') ? `<button class="btn btn-sm btn-success convert-appointment-btn" data-id="${q.id}" title="Agendar Cita de Tratamientos">📅 Agendar Cita</button>` : ''}
               ${!q.invoice_id ? `<button class="btn btn-sm btn-info convert-invoice-btn" data-id="${q.id}" title="Generar Factura de Ítems Aceptados">📄 Facturar Ítems</button>` : ''}
               <button class="btn btn-sm btn-primary edit-quote-btn" data-id="${q.id}" title="Editar Presupuesto">✎ Editar</button>
@@ -236,7 +237,7 @@ export class Quotations {
         return;
       }
 
-      const actionBtn = e.target.closest('.view-quote-btn, .manage-items-btn, .convert-appointment-btn, .convert-invoice-btn, .edit-quote-btn, .delete-quote-btn');
+      const actionBtn = e.target.closest('.view-quote-btn, .manage-items-btn, .change-status-btn, .convert-appointment-btn, .convert-invoice-btn, .edit-quote-btn, .delete-quote-btn');
       if (actionBtn) {
         const id = actionBtn.getAttribute('data-id');
         if (actionBtn.classList.contains('view-quote-btn')) {
@@ -244,6 +245,9 @@ export class Quotations {
         }
         if (actionBtn.classList.contains('manage-items-btn')) {
           this.showManageQuoteModal(id);
+        }
+        if (actionBtn.classList.contains('change-status-btn')) {
+          this.showStatusModal(id);
         }
         if (actionBtn.classList.contains('convert-appointment-btn')) {
           const q = this.quotationsList.find(item => item.id == id);
@@ -376,10 +380,13 @@ export class Quotations {
                 👤 Paciente: <strong>${qData.patient_name || 'N/A'}</strong> &nbsp;|&nbsp; 👨‍⚕️ Doctor: <strong>${qData.doctor_name || 'Sin asignar'}</strong>
               </p>
             </div>
-            <div style="text-align: right;">
+            <div style="text-align: right; display: flex; align-items: center; gap: 8px;">
               <span class="badge ${STATUS_BADGES[qData.status] || 'badge-secondary'}" style="font-size: 14px; padding: 6px 14px; border-radius: 9999px;">
                 ${STATUS_LABELS[qData.status] || qData.status}
               </span>
+              <button type="button" class="btn btn-sm btn-outline change-status-modal-btn" data-id="${qData.id}" title="Cambiar Estado del Presupuesto">
+                🏷️ Cambiar Estado
+              </button>
             </div>
           </div>
 
@@ -402,11 +409,14 @@ export class Quotations {
         ` : ''}
 
         <div style="display: flex; gap: var(--space-3); margin-bottom: var(--space-4); flex-wrap: wrap; align-items: center;">
-          <button id="manage-accept-all-btn" class="btn btn-success btn-md" style="flex: 1; min-width: 220px;">
+          <button id="manage-accept-all-btn" class="btn btn-success btn-md" style="flex: 1; min-width: 200px;">
             ✅ Aceptar Presupuesto Completo
           </button>
           <button id="manage-generate-invoice-btn" class="btn btn-primary btn-md" style="flex: 1; min-width: 240px;" ${acceptedItems.length === 0 ? 'disabled' : ''}>
             📄 Facturar Ítems Aceptados (${acceptedItems.length})
+          </button>
+          <button id="manage-change-status-btn" class="btn btn-outline btn-md" data-id="${qData.id}" style="flex: 1; min-width: 180px;">
+            🏷️ Cambiar Estado
           </button>
         </div>
 
@@ -481,6 +491,12 @@ export class Quotations {
       if (invoiceBtn) {
         Modal.closeAll();
         this.showConvertInvoiceModal(quotationId);
+        return;
+      }
+
+      const changeStatusBtn = e.target.closest('#manage-change-status-btn, .change-status-modal-btn');
+      if (changeStatusBtn) {
+        this.showStatusModal(quotationId);
         return;
       }
 
@@ -1040,16 +1056,27 @@ export class Quotations {
     );
   }
 
-  showStatusModal(quoteId) {
-    const q = this.quotationsList.find(q => q.id == quoteId);
-    const opts = STATUS_OPTIONS.filter(o => o.value !== q.status);
+  async showStatusModal(quoteId) {
+    let q = this.quotationsList.find(item => item.id == quoteId);
+    if (!q) {
+      try {
+        const res = await quotationService.getById(quoteId);
+        q = res?.data || res;
+      } catch (err) {
+        toast.error('Error al obtener presupuesto');
+        return;
+      }
+    }
+    const currentStatus = q ? q.status : 'borrador';
+    const quoteNum = q ? q.quote_number : quoteId;
+    const opts = STATUS_OPTIONS.filter(o => o.value !== currentStatus);
 
     Modal.show({
-      title: `Cambiar Estado — # ${q.quote_number}`,
+      title: `Cambiar Estado — Presupuesto #${quoteNum}`,
       content: `
-        <p style="margin-bottom: var(--space-3);">Estado actual: <strong>${STATUS_LABELS[q.status]}</strong></p>
+        <p style="margin-bottom: var(--space-3);">Estado actual: <strong class="badge ${STATUS_BADGES[currentStatus] || 'badge-secondary'}">${STATUS_LABELS[currentStatus] || currentStatus}</strong></p>
         <div class="form-group">
-          <label class="form-label">Nuevo estado</label>
+          <label class="form-label">Seleccionar Nuevo Estado</label>
           <select id="new-status-select" class="form-select">
             ${opts.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
           </select>
@@ -1063,12 +1090,19 @@ export class Quotations {
           toast.success(`Estado cambiado a "${STATUS_LABELS[status]}"`);
           await this.render();
           this.mount();
+
+          // If detail modal overlay is open, refresh it live
+          const overlay = document.querySelector('.modal-overlay:has(.quote-manage-hero)');
+          if (overlay) {
+            Modal.closeAll();
+            this.showManageQuoteModal(quoteId);
+          }
           return true;
         } catch (err) {
           toast.error(err.message || 'Error al cambiar estado');
           return false;
         }
-      },
+      }
     });
   }
 
