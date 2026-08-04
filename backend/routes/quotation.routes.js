@@ -23,6 +23,7 @@ router.get('/:id', allRoles, controller.getById);
 router.post('/', staffOnly, validate(createQuotationRules), auditMiddleware('CREAR_COTIZACION', 'quotations'), controller.create);
 router.put('/:id', staffOnly, validate(updateQuotationRules), auditMiddleware('ACTUALIZAR_COTIZACION', 'quotations'), controller.update);
 router.patch('/:id/status', staffOnly, validate(changeStatusRules), auditMiddleware('CAMBIAR_ESTADO_COTIZACION', 'quotations'), controller.changeStatus);
+router.patch('/:id/restore', staffOnly, auditMiddleware('RESTAURAR_COTIZACION', 'quotations'), controller.restore);
 router.post('/:id/accept-all', staffOnly, auditMiddleware('ACEPTAR_COTIZACION_COMPLETA', 'quotations'), controller.acceptAll);
 router.post('/:id/items-status', staffOnly, auditMiddleware('ACTUALIZAR_ITEMS_COTIZACION', 'quotations'), controller.updateItemsStatusBulk);
 router.get('/patients/:patientId/accepted-items', allRoles, controller.getAcceptedItemsByPatient);
