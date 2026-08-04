@@ -230,14 +230,6 @@ class QuotationRepository extends BaseRepository {
     });
   }
 
-  async restore(id) {
-    const result = await query(
-      `UPDATE quotations SET deleted_at = NULL, updated_at = NOW() WHERE id = $1 AND deleted_at IS NOT NULL RETURNING *`,
-      [id]
-    );
-    return result.rows[0] || null;
-  }
-
   async findItemById(itemId) {
     const result = await query(
       `SELECT * FROM quotation_items WHERE id = $1`,
