@@ -100,7 +100,54 @@ class InvoiceService {
       invoiceData.created_at = invoiceFields.invoice_date;
     }
 
-    return invoiceRepository.createWithItems(invoiceData, processedItems);
+    const createdInvoice = await invoiceRepository.createWithItems(invoiceData, processedItems);
+
+    // Auto-create an Accepted Treatment (quotation + quotation_items) for items with a treatment_id
+    const treatmentItems = (createdInvoice.items || []).filter(item => item.treatment_id);
+    if (treatmentItems.length > 0) {
+      const quoteNumber = await quotationRepository.generateNumber();
+
+      const quotationData = {
+        quote_number: quoteNumber,
+        patient_id: invoiceData.patient_id,
+        doctor_id: invoiceData.doctor_id || null,
+        quotation_date: new Date().toISOString().split('T')[0],
+        subtotal: invoiceData.subtotal,
+        tax_rate: invoiceData.tax_rate,
+        tax_amount: invoiceData.tax_amount,
+        discount_percentage: invoiceData.discount_percentage || 0,
+        discount_amount: invoiceData.discount_amount || 0,
+        total: invoiceData.total,
+        status: 'aceptada',
+        notes: `Generada automáticamente desde factura ${invoiceData.invoice_number}`,
+        created_by: userId,
+      };
+
+      const quotationItems = treatmentItems.map(item => ({
+        treatment_id: item.treatment_id,
+        description: item.description,
+        quantity: parseInt(item.quantity, 10) || 1,
+        unit_price: parseFloat(item.unit_price),
+        discount: 0,
+        total: parseFloat(item.total || item.unit_price),
+        status: 'aceptado',
+      }));
+
+      const createdQuotation = await quotationRepository.createWithItems(quotationData, quotationItems);
+
+      // Link quotation_items to the invoice and set execution_status to 'pendiente'
+      if (createdQuotation && createdQuotation.items) {
+        for (const qItem of createdQuotation.items) {
+          await quotationRepository.markItemsInvoiced([qItem.id], createdInvoice.id);
+        }
+      }
+
+      // Link the invoice back to the quotation
+      await invoiceRepository.update(createdInvoice.id, { quotation_id: createdQuotation.id });
+      createdInvoice.quotation_id = createdQuotation.id;
+    }
+
+    return createdInvoice;
   }
 
   /**

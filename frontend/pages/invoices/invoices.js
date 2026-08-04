@@ -246,6 +246,7 @@ export class Invoices {
             <div class="quote-item-row">
               <div class="treatment-autocomplete-wrapper">
                 <input type="text" name="item_desc_0" class="form-input quote-item-desc" placeholder="Buscar tratamiento..." autocomplete="off" required />
+                <input type="hidden" name="item_treatment_id_0" class="item-treatment-id" value="" />
                 <ul class="treatment-autocomplete-list"></ul>
               </div>
               <input type="number" name="item_qty_0" class="form-input" placeholder="Cant." value="1" min="1" required />
@@ -295,11 +296,14 @@ export class Invoices {
         // Collect dynamic item rows
         while (raw[`item_desc_${itemIndex}`] !== undefined) {
           if (raw[`item_desc_${itemIndex}`].trim()) {
-            items.push({
+            const item = {
               description: raw[`item_desc_${itemIndex}`].trim(),
               quantity: parseInt(raw[`item_qty_${itemIndex}`], 10) || 1,
               unit_price: parseFloat(raw[`item_price_${itemIndex}`]) || 0,
-            });
+            };
+            const tid = raw[`item_treatment_id_${itemIndex}`];
+            if (tid) item.treatment_id = parseInt(tid, 10);
+            items.push(item);
           }
           itemIndex++;
         }
@@ -500,6 +504,8 @@ export class Invoices {
               input.value = selected.name;
               const priceInput = row.querySelector('input[name^="item_price_"]');
               if (priceInput) priceInput.value = parseFloat(selected.default_price || 0).toFixed(2);
+              const treatmentIdInput = row.querySelector('.item-treatment-id');
+              if (treatmentIdInput) treatmentIdInput.value = selected.id;
               dropdown.style.display = 'none';
               recalculate();
             });
@@ -545,6 +551,7 @@ export class Invoices {
             // Re-index all item fields
             rowsContainer.querySelectorAll('.quote-item-row').forEach((row, i) => {
               row.querySelector('.quote-item-desc').name = `item_desc_${i}`;
+              row.querySelector('.item-treatment-id').name = `item_treatment_id_${i}`;
               row.querySelector('input[placeholder="Cant."]').name = `item_qty_${i}`;
               row.querySelector('input[placeholder="Precio $"]').name = `item_price_${i}`;
             });
@@ -566,6 +573,7 @@ export class Invoices {
           div.innerHTML = `
             <div class="treatment-autocomplete-wrapper">
               <input type="text" name="item_desc_${idx}" class="form-input quote-item-desc" placeholder="Buscar tratamiento..." autocomplete="off" required />
+              <input type="hidden" name="item_treatment_id_${idx}" class="item-treatment-id" value="" />
               <ul class="treatment-autocomplete-list"></ul>
             </div>
             <input type="number" name="item_qty_${idx}" class="form-input" placeholder="Cant." value="1" min="1" required />
