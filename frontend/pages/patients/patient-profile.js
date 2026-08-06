@@ -356,14 +356,36 @@ export class PatientProfile {
       };
 
       let quotationRows = (this.quotations || []).map(q => `
-        <tr>
+        <tr class="clickable-table-row profile-quotation-main-row" data-id="${q.id}">
           <td><strong># ${q.quote_number}</strong></td>
           <td>Dr/a. ${q.doctor_name || 'Sin asignar'}</td>
           <td><strong>${formatCurrency(q.total)}</strong></td>
-          <td><span class="badge ${STATUS_BADGES[q.status] || 'badge-secondary'}">${STATUS_LABELS[q.status] || q.status}</span></td>
-          <td>${q.created_at ? formatDate(q.created_at) : 'N/A'}</td>
           <td>
-            <button class="btn btn-sm btn-outline view-quotation-btn" data-id="${q.id}">Ver Detalle</button>
+            <span class="badge ${STATUS_BADGES[q.status] || 'badge-secondary'}">${STATUS_LABELS[q.status] || q.status}</span>
+            ${q.invoice_id ? `<span class="badge" style="background-color: var(--primary-100); color: var(--primary-800); font-size: 10px; margin-left: 4px; padding: 2px 4px;">Facturado</span>` : ''}
+          </td>
+          <td>${q.created_at ? formatDate(q.created_at) : 'N/A'}</td>
+          <td style="text-align: right;">
+            <button type="button" class="btn btn-sm btn-outline toggle-profile-quotation-actions-btn" data-id="${q.id}">
+              Acciones ▾
+            </button>
+          </td>
+        </tr>
+        <tr class="profile-quotation-actions-bar-row" id="profile-quotation-actions-${q.id}" style="display: none; background: var(--gray-50);">
+          <td colspan="6" style="padding: 12px 16px; border-bottom: 2px solid var(--primary-400);">
+            <div style="display: flex; gap: var(--space-3); align-items: center; justify-content: space-between; flex-wrap: wrap;">
+              <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);">
+                ⚙️ Opciones para Presupuesto #${q.quote_number}:
+              </div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="btn btn-sm btn-outline print-profile-quotation-btn" data-id="${q.id}" title="Ver / Imprimir Cotización">👁 Ver / Imprimir</button>
+                <button class="btn btn-sm btn-manage-quote manage-profile-quotation-btn" data-id="${q.id}" title="Gestionar Aceptación e Ítems">⚙️ Gestionar Ítems</button>
+                <button class="btn btn-sm btn-warning status-profile-quotation-btn" data-id="${q.id}" title="Cambiar Estado del Presupuesto">🏷️ Cambiar Estado</button>
+                ${!q.invoice_id ? `<button class="btn btn-sm btn-info invoice-profile-quotation-btn" data-id="${q.id}" title="Generar Factura de Ítems Aceptados">📄 Facturar Ítems</button>` : ''}
+                <button class="btn btn-sm btn-primary edit-profile-quotation-btn" data-id="${q.id}" title="Editar Presupuesto">✎ Editar</button>
+                <button class="btn btn-sm btn-danger delete-profile-quotation-btn" data-id="${q.id}" title="Eliminar Presupuesto">✕ Eliminar</button>
+              </div>
+            </div>
           </td>
         </tr>
       `).join('');
@@ -889,7 +911,7 @@ export class PatientProfile {
       }, { signal });
     });
 
-    // Quotation buttons
+    // Quotation buttons in patient profile
     const addProfileQuoteBtn = this.container.querySelector('#add-profile-quote-btn');
     if (addProfileQuoteBtn) {
       addProfileQuoteBtn.addEventListener('click', async () => {
@@ -902,10 +924,72 @@ export class PatientProfile {
       }, { signal });
     }
 
-    this.container.querySelectorAll('.view-quotation-btn').forEach(btn => {
+    // Quotation table row toggle in patient profile
+    this.container.querySelectorAll('.profile-quotation-main-row').forEach(row => {
+      row.addEventListener('click', (e) => {
+        // Ignore clicks on action buttons inside row options bar
+        if (e.target.closest('.print-profile-quotation-btn, .manage-profile-quotation-btn, .status-profile-quotation-btn, .invoice-profile-quotation-btn, .edit-profile-quotation-btn, .delete-profile-quotation-btn')) {
+          return;
+        }
+
+        const id = row.getAttribute('data-id');
+        const targetActionsRow = this.container.querySelector(`#profile-quotation-actions-${id}`);
+        if (targetActionsRow) {
+          const isOpen = targetActionsRow.style.display !== 'none';
+          this.container.querySelectorAll('.profile-quotation-actions-bar-row').forEach(r => r.style.display = 'none');
+          this.container.querySelectorAll('.profile-quotation-main-row').forEach(r => r.classList.remove('row-active'));
+          if (!isOpen) {
+            targetActionsRow.style.display = 'table-row';
+            row.classList.add('row-active');
+          }
+        }
+      }, { signal });
+    });
+
+    const refreshProfile = async () => {
+      await this.render();
+      this.mount();
+    };
+
+    this.container.querySelectorAll('.print-profile-quotation-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const { Quotations } = await import('../quotations/quotations.js');
         new Quotations(this.container).printQuote(btn.dataset.id);
+      }, { signal });
+    });
+
+    this.container.querySelectorAll('.manage-profile-quotation-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const { Quotations } = await import('../quotations/quotations.js');
+        new Quotations(this.container).showManageQuoteModal(btn.dataset.id, refreshProfile);
+      }, { signal });
+    });
+
+    this.container.querySelectorAll('.status-profile-quotation-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const { Quotations } = await import('../quotations/quotations.js');
+        new Quotations(this.container).showStatusModal(btn.dataset.id, refreshProfile);
+      }, { signal });
+    });
+
+    this.container.querySelectorAll('.invoice-profile-quotation-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const { Quotations } = await import('../quotations/quotations.js');
+        new Quotations(this.container).showConvertInvoiceModal(btn.dataset.id, refreshProfile);
+      }, { signal });
+    });
+
+    this.container.querySelectorAll('.edit-profile-quotation-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const { Quotations } = await import('../quotations/quotations.js');
+        new Quotations(this.container).showQuoteModal(btn.dataset.id, this.patientId, refreshProfile);
+      }, { signal });
+    });
+
+    this.container.querySelectorAll('.delete-profile-quotation-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const { Quotations } = await import('../quotations/quotations.js');
+        new Quotations(this.container).showDeleteConfirm(btn.dataset.id, refreshProfile);
       }, { signal });
     });
 

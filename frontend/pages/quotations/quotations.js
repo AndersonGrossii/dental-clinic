@@ -454,14 +454,11 @@ export class Quotations {
     };
 
     Modal.show({
-      title: `Gestionar y Aceptar Presupuesto #${q.quote_number}`,
+      title: `Gestión Integral — Presupuesto #${q.quote_number || quotationId}`,
       content: renderModalContent(q),
-      confirmText: 'Cerrar',
       size: 'xl',
-      onConfirm: async () => {
-        await this.render();
-        return true;
-      }
+      showConfirm: false,
+      cancelText: 'Cerrar'
     });
 
     const overlay = document.querySelector('.modal-overlay');
@@ -478,7 +475,7 @@ export class Quotations {
           toast.success('Presupuesto completo aceptado exitosamente');
           const modalBody = overlay.querySelector('.modal-body');
           if (modalBody) modalBody.innerHTML = renderModalContent(updatedQuote);
-          await this.render();
+          if (onSuccess) await onSuccess(); else await this.render();
         } catch (err) {
           toast.error(err.message || 'Error al aceptar el presupuesto');
         } finally {
@@ -490,13 +487,13 @@ export class Quotations {
       const invoiceBtn = e.target.closest('#manage-generate-invoice-btn');
       if (invoiceBtn) {
         Modal.closeAll();
-        this.showConvertInvoiceModal(quotationId);
+        this.showConvertInvoiceModal(quotationId, onSuccess);
         return;
       }
 
       const changeStatusBtn = e.target.closest('#manage-change-status-btn, .change-status-modal-btn');
       if (changeStatusBtn) {
-        this.showStatusModal(quotationId);
+        this.showStatusModal(quotationId, onSuccess);
         return;
       }
 
@@ -509,7 +506,7 @@ export class Quotations {
           const updatedQuote = await quotationService.getById(quotationId);
           const modalBody = overlay.querySelector('.modal-body');
           if (modalBody) modalBody.innerHTML = renderModalContent(updatedQuote?.data || updatedQuote);
-          await this.render();
+          if (onSuccess) await onSuccess(); else await this.render();
         } catch (err) {
           toast.error(err.message || 'Error al actualizar estado del ítem');
         }
@@ -518,7 +515,7 @@ export class Quotations {
     });
   }
 
-  async showConvertInvoiceModal(quotationId) {
+  async showConvertInvoiceModal(quotationId, onSuccess = null) {
     let qRaw;
     try {
       qRaw = await quotationService.getById(quotationId);
@@ -625,7 +622,11 @@ export class Quotations {
         try {
           await invoiceService.createFromQuotation(quotationId, selectedIds);
           toast.success('Factura generada exitosamente con los ítems seleccionados');
-          window.location.hash = '#/invoices';
+          if (onSuccess) {
+            await onSuccess();
+          } else {
+            window.location.hash = '#/invoices';
+          }
           return true;
         } catch (err) {
           toast.error(err.message || 'Error al generar la factura');
@@ -1039,8 +1040,8 @@ export class Quotations {
     }, 50);
   }
 
-  showDeleteConfirm(quoteId) {
-    const q = this.quotationsList.find(q => q.id == quoteId);
+  showDeleteConfirm(quoteId, onSuccess = null) {
+    const q = (this.quotationsList || []).find(q => q.id == quoteId);
     const label = q ? `# ${q.quote_number}` : 'este presupuesto';
 
     Modal.confirm(
@@ -1050,8 +1051,12 @@ export class Quotations {
         try {
           await quotationService.remove(quoteId);
           toast.success('Presupuesto eliminado exitosamente');
-          await this.render();
-          this.mount();
+          if (onSuccess) {
+            await onSuccess();
+          } else {
+            await this.render();
+            this.mount();
+          }
           return true;
         } catch (err) {
           toast.error(err.message || 'Error al eliminar presupuesto');
@@ -1061,8 +1066,8 @@ export class Quotations {
     );
   }
 
-  async showStatusModal(quoteId) {
-    let q = this.quotationsList.find(item => item.id == quoteId);
+  async showStatusModal(quoteId, onSuccess = null) {
+    let q = (this.quotationsList || []).find(item => item.id == quoteId);
     if (!q) {
       try {
         const res = await quotationService.getById(quoteId);
@@ -1093,14 +1098,18 @@ export class Quotations {
         try {
           await quotationService.changeStatus(quoteId, status);
           toast.success(`Estado cambiado a "${STATUS_LABELS[status]}"`);
-          await this.render();
-          this.mount();
+          if (onSuccess) {
+            await onSuccess();
+          } else {
+            await this.render();
+            this.mount();
+          }
 
           // If detail modal overlay is open, refresh it live
           const overlay = document.querySelector('.modal-overlay:has(.quote-manage-hero)');
           if (overlay) {
             Modal.closeAll();
-            this.showManageQuoteModal(quoteId);
+            this.showManageQuoteModal(quoteId, onSuccess);
           }
           return true;
         } catch (err) {
