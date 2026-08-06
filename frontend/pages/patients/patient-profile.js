@@ -11,8 +11,6 @@ import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
 import state from '../../scripts/state.js';
 import { formatDate, formatCurrency } from '../../utils/helpers.js';
-import { Quotations } from '../quotations/quotations.js';
-import { Invoices } from '../invoices/invoices.js';
 
 export class PatientProfile {
   constructor(container, params) {
@@ -203,14 +201,20 @@ export class PatientProfile {
       `;
     } else if (this.activeTab === 'appointments') {
       let appointmentRows = (this.appointments || []).map(a => `
-        <tr class="profile-appointment-row" data-date="${a.appointment_date}" data-id="${a.id}" style="cursor: pointer;" title="Haga clic para ver esta cita en la agenda">
+        <tr class="profile-appointment-row" data-date="${a.appointment_date}" data-id="${a.id}">
           <td><strong>${a.appointment_date ? formatDate(a.appointment_date) : 'N/A'}</strong></td>
           <td>${a.start_time ? a.start_time.substring(0, 5) : ''} - ${a.end_time ? a.end_time.substring(0, 5) : ''}</td>
           <td>Dr/a. ${a.doctor_name || ''}</td>
-          <td>${a.reason || ''}</td>
-          <td><span class="badge" style="background-color: ${a.status_color || '#cbd5e1'}; color: white;">${a.status_label || ''}</span></td>
           <td>
-            <button class="btn btn-sm btn-outline go-agenda-btn" data-date="${a.appointment_date}">📅 Ver en Agenda</button>
+            <div>${a.reason || '—'}</div>
+            ${a.cancellation_reason ? `<div style="font-size: 11px; color: var(--danger-600); margin-top: 4px; font-weight: 500;">⚠️ Motivo cancelación: ${a.cancellation_reason}</div>` : ''}
+          </td>
+          <td><span class="badge" style="background-color: ${a.status_color || '#cbd5e1'}; color: white;">${a.status_label || a.status_name || ''}</span></td>
+          <td>
+            <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+              <button class="btn btn-sm btn-warning change-profile-appt-status-btn" data-id="${a.id}">🏷️ Cambiar Estado</button>
+              <button class="btn btn-sm btn-outline go-agenda-btn" data-date="${a.appointment_date}">📅 Ver en Agenda</button>
+            </div>
           </td>
         </tr>
       `).join('');
@@ -264,7 +268,7 @@ export class PatientProfile {
       };
 
       let invoiceRows = (this.invoices || []).map(inv => `
-        <tr>
+        <tr class="clickable-table-row profile-invoice-main-row" data-id="${inv.id}">
           <td><strong># ${inv.invoice_number}</strong></td>
           <td>${inv.doctor_name ? `Dr/a. ${inv.doctor_name}` : 'N/A'}</td>
           <td><strong>${formatCurrency(inv.total)}</strong></td>
@@ -272,10 +276,25 @@ export class PatientProfile {
           <td style="color: var(--danger-600);"><strong>${formatCurrency(inv.balance)}</strong></td>
           <td><span class="badge ${STATUS_BADGES[inv.status] || 'badge-secondary'}">${STATUS_LABELS[inv.status] || inv.status}</span></td>
           <td>${inv.created_at ? formatDate(inv.created_at) : 'N/A'}</td>
-          <td>
-            <div style="display: flex; gap: var(--space-1);">
-              <button class="btn btn-sm btn-outline print-profile-invoice-btn" data-id="${inv.id}">Imprimir</button>
-              ${parseFloat(inv.balance || 0) > 0 ? `<button class="btn btn-sm btn-primary pay-profile-invoice-btn" data-id="${inv.id}">Pagar</button>` : ''}
+          <td style="text-align: right;">
+            <button type="button" class="btn btn-sm btn-outline toggle-profile-invoice-actions-btn" data-id="${inv.id}">
+              Acciones ▾
+            </button>
+          </td>
+        </tr>
+        <tr class="profile-invoice-actions-bar-row" id="profile-invoice-actions-${inv.id}" style="display: none; background: var(--gray-50);">
+          <td colspan="8" style="padding: 12px 16px; border-bottom: 2px solid var(--primary-400);">
+            <div style="display: flex; gap: var(--space-3); align-items: center; justify-content: space-between; flex-wrap: wrap;">
+              <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);">
+                🧾 Opciones para Factura #${inv.invoice_number}:
+              </div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="btn btn-sm btn-outline print-profile-invoice-btn" data-id="${inv.id}">🖨️ Ver / Imprimir Factura</button>
+                <button class="btn btn-sm btn-primary edit-profile-invoice-btn" data-id="${inv.id}">✏️ Editar Factura</button>
+                <button class="btn btn-sm btn-warning status-profile-invoice-btn" data-id="${inv.id}">🏷️ Cambiar Estado</button>
+                ${parseFloat(inv.balance || 0) > 0 ? `<button class="btn btn-sm btn-success pay-profile-invoice-btn" data-id="${inv.id}">💳 Registrar Pago</button>` : ''}
+                ${inv.status === 'pendiente' && parseFloat(inv.balance || 0) === parseFloat(inv.total || 0) ? `<button class="btn btn-sm btn-danger delete-profile-invoice-btn" data-id="${inv.id}">✕ Eliminar Factura</button>` : ''}
+              </div>
             </div>
           </td>
         </tr>
@@ -292,9 +311,12 @@ export class PatientProfile {
       }
 
       tabContent = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4); flex-wrap: wrap; gap: var(--space-2);">
           <h3>Historial de Facturas</h3>
-          <a href="#/invoices" class="btn btn-sm btn-primary">+ Nueva Factura</a>
+          <div style="display: flex; gap: var(--space-2);">
+            <button id="add-profile-invoice-btn" class="btn btn-sm btn-primary">+ Nueva Factura</button>
+            <button id="add-profile-invoice-quote-btn" class="btn btn-sm btn-secondary">Facturar desde Presupuesto</button>
+          </div>
         </div>
         <div class="table-container">
           <table>
@@ -307,7 +329,7 @@ export class PatientProfile {
                 <th>Saldo Restante</th>
                 <th>Estado</th>
                 <th>Fecha Emisión</th>
-                <th>Acciones</th>
+                <th style="text-align: right;">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -744,9 +766,23 @@ export class PatientProfile {
       addPrescBtn.addEventListener('click', () => this.showAddPrescriptionModal(), { signal });
     }
 
-    // Appointment history row click -> navigate to agenda on that specific day
-    this.container.querySelectorAll('.profile-appointment-row, .go-agenda-btn').forEach(el => {
-      el.addEventListener('click', () => {
+    // Appointment status change & agenda navigation
+    this.container.querySelectorAll('.change-profile-appt-status-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        const { Appointments } = await import('../appointments/appointments.js');
+        const apptsPage = new Appointments(this.container);
+        apptsPage.showChangeStatusModal(id, async () => {
+          await this.render();
+          this.mount();
+        });
+      }, { signal });
+    });
+
+    this.container.querySelectorAll('.go-agenda-btn').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
         const apptDate = el.dataset.date || el.closest('tr')?.dataset.date;
         if (apptDate) {
           state.set('targetAppointmentDate', apptDate);
@@ -755,22 +791,108 @@ export class PatientProfile {
       }, { signal });
     });
 
-    // Invoice buttons in patient profile
+    // Invoice header buttons in patient profile
+    const addProfileInvBtn = this.container.querySelector('#add-profile-invoice-btn');
+    if (addProfileInvBtn) {
+      addProfileInvBtn.addEventListener('click', async () => {
+        const { Invoices } = await import('../invoices/invoices.js');
+        const invoicesPage = new Invoices(this.container);
+        invoicesPage.showAddInvoiceModal(this.patientId, async () => {
+          await this.render();
+          this.mount();
+        });
+      }, { signal });
+    }
+
+    const addProfileQuoteInvBtn = this.container.querySelector('#add-profile-invoice-quote-btn');
+    if (addProfileQuoteInvBtn) {
+      addProfileQuoteInvBtn.addEventListener('click', async () => {
+        const { Invoices } = await import('../invoices/invoices.js');
+        const invoicesPage = new Invoices(this.container);
+        invoicesPage.showInvoiceFromQuoteModal(this.patientId, async () => {
+          await this.render();
+          this.mount();
+        });
+      }, { signal });
+    }
+
+    // Invoice table row toggle in patient profile
+    this.container.querySelectorAll('.profile-invoice-main-row').forEach(row => {
+      row.addEventListener('click', (e) => {
+        // Ignore clicks on action buttons inside row options bar
+        if (e.target.closest('.print-profile-invoice-btn, .edit-profile-invoice-btn, .status-profile-invoice-btn, .pay-profile-invoice-btn, .delete-profile-invoice-btn')) {
+          return;
+        }
+
+        const id = row.getAttribute('data-id');
+        const targetActionsRow = this.container.querySelector(`#profile-invoice-actions-${id}`);
+        if (targetActionsRow) {
+          const isOpen = targetActionsRow.style.display !== 'none';
+          this.container.querySelectorAll('.profile-invoice-actions-bar-row').forEach(r => r.style.display = 'none');
+          this.container.querySelectorAll('.profile-invoice-main-row').forEach(r => r.classList.remove('row-active'));
+          if (!isOpen) {
+            targetActionsRow.style.display = 'table-row';
+            row.classList.add('row-active');
+          }
+        }
+      }, { signal });
+    });
+
     this.container.querySelectorAll('.print-profile-invoice-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
+        const { Invoices } = await import('../invoices/invoices.js');
         new Invoices(this.container).printInvoice(btn.dataset.id);
       }, { signal });
     });
 
+    this.container.querySelectorAll('.edit-profile-invoice-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const { Invoices } = await import('../invoices/invoices.js');
+        const invoicesPage = new Invoices(this.container);
+        invoicesPage.showEditInvoiceModal(btn.dataset.id, async () => {
+          await this.render();
+          this.mount();
+        });
+      }, { signal });
+    });
+
+    this.container.querySelectorAll('.status-profile-invoice-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const { Invoices } = await import('../invoices/invoices.js');
+        const invoicesPage = new Invoices(this.container);
+        invoicesPage.showChangeInvoiceStatusModal(btn.dataset.id, async () => {
+          await this.render();
+          this.mount();
+        });
+      }, { signal });
+    });
+
     this.container.querySelectorAll('.pay-profile-invoice-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        new Invoices(this.container).showRegisterPaymentModal(btn.dataset.id);
+      btn.addEventListener('click', async () => {
+        const { Invoices } = await import('../invoices/invoices.js');
+        const invoicesPage = new Invoices(this.container);
+        invoicesPage.showRegisterPaymentModal(btn.dataset.id, async () => {
+          await this.render();
+          this.mount();
+        });
+      }, { signal });
+    });
+
+    this.container.querySelectorAll('.delete-profile-invoice-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const { Invoices } = await import('../invoices/invoices.js');
+        const invoicesPage = new Invoices(this.container);
+        invoicesPage.confirmDeleteInvoice(btn.dataset.id, async () => {
+          await this.render();
+          this.mount();
+        });
       }, { signal });
     });
 
     // Quotation buttons
     this.container.querySelectorAll('.view-quotation-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
+        const { Quotations } = await import('../quotations/quotations.js');
         new Quotations(this.container).printQuote(btn.dataset.id);
       }, { signal });
     });

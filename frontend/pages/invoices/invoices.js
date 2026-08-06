@@ -63,6 +63,8 @@ export class Invoices {
               </div>
               <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                 <button class="btn btn-sm btn-outline print-invoice-btn" data-id="${inv.id}">🖨️ Ver / Imprimir Factura</button>
+                <button class="btn btn-sm btn-primary edit-invoice-btn" data-id="${inv.id}">✏️ Editar Factura</button>
+                <button class="btn btn-sm btn-warning change-invoice-status-btn" data-id="${inv.id}">🏷️ Cambiar Estado</button>
                 ${parseFloat(inv.balance || 0) > 0 ? `<button class="btn btn-sm btn-success pay-invoice-btn" data-id="${inv.id}">💳 Registrar Pago</button>` : ''}
                 ${inv.status === 'pendiente' && parseFloat(inv.balance || 0) === parseFloat(inv.total || 0) ? `<button class="btn btn-sm btn-danger delete-invoice-btn" data-id="${inv.id}">✕ Eliminar Factura</button>` : ''}
               </div>
@@ -115,7 +117,6 @@ export class Invoices {
   mount() {
     this.destroy();
     this.abortController = new AbortController();
-    const signal = this.abortController.signal;
 
     this.container.addEventListener('click', (e) => {
       const addInvoiceBtn = e.target.closest('#add-invoice-btn');
@@ -130,11 +131,17 @@ export class Invoices {
         return;
       }
 
-      const actionBtn = e.target.closest('.print-invoice-btn, .pay-invoice-btn, .delete-invoice-btn');
+      const actionBtn = e.target.closest('.print-invoice-btn, .edit-invoice-btn, .change-invoice-status-btn, .pay-invoice-btn, .delete-invoice-btn');
       if (actionBtn) {
         const id = actionBtn.getAttribute('data-id');
         if (actionBtn.classList.contains('print-invoice-btn')) {
           this.printInvoice(id);
+        }
+        if (actionBtn.classList.contains('edit-invoice-btn')) {
+          this.showEditInvoiceModal(id);
+        }
+        if (actionBtn.classList.contains('change-invoice-status-btn')) {
+          this.showChangeInvoiceStatusModal(id);
         }
         if (actionBtn.classList.contains('pay-invoice-btn')) {
           this.showRegisterPaymentModal(id);
@@ -145,31 +152,27 @@ export class Invoices {
         return;
       }
 
-      // Handle row clicking to reveal/toggle action bar
       const mainRow = e.target.closest('.invoice-main-row');
       if (mainRow) {
         const id = mainRow.getAttribute('data-id');
         const targetActionsRow = this.container.querySelector(`#invoice-actions-${id}`);
         if (targetActionsRow) {
           const isOpen = targetActionsRow.style.display !== 'none';
-          
-          // Close all open action rows & remove row active states
           this.container.querySelectorAll('.invoice-actions-bar-row').forEach(row => row.style.display = 'none');
           this.container.querySelectorAll('.invoice-main-row').forEach(row => row.classList.remove('row-active'));
-
           if (!isOpen) {
             targetActionsRow.style.display = 'table-row';
             mainRow.classList.add('row-active');
           }
         }
       }
-    }, { signal });
+    }, { signal: this.abortController.signal });
   }
 
   /**
    * Modal para crear una factura manual directamente.
    */
-  async showAddInvoiceModal() {
+  async showAddInvoiceModal(preSelectedPatientId = null, onSuccess = null) {
     let patients = [];
     let doctors = [];
     let treatments = [];
@@ -188,7 +191,7 @@ export class Invoices {
     const treatmentList = Array.isArray(treatments) ? treatments : [];
 
     const patientOptions = patientList.map(p =>
-      `<option value="${p.id}">[${p.custom_id || 'N/A'}] ${p.first_name} ${p.last_name}</option>`
+      `<option value="${p.id}" ${preSelectedPatientId && Number(preSelectedPatientId) === Number(p.id) ? 'selected' : ''}>[${p.custom_id || 'N/A'}] ${p.first_name} ${p.last_name}</option>`
     ).join('');
 
     const doctorOptions = doctorList.map(d =>
@@ -327,8 +330,12 @@ export class Invoices {
         try {
           await invoiceService.create(payload);
           toast.success('Factura manual creada exitosamente');
-          await this.render();
-          this.mount();
+          if (onSuccess) {
+            await onSuccess();
+          } else {
+            await this.render();
+            this.mount();
+          }
           return true;
         } catch (err) {
           const fieldErrors = err.details;
@@ -589,10 +596,12 @@ export class Invoices {
     }, 50);
   }
 
-  async showInvoiceFromQuoteModal() {
+  async showInvoiceFromQuoteModal(preSelectedPatientId = null, onSuccess = null) {
     let quotations = [];
     try {
-      const quotesRes = await quotationService.getAll({ status: 'aceptada', limit: 200 });
+      const filterParams = { status: 'aceptada', limit: 200 };
+      if (preSelectedPatientId) filterParams.patient_id = preSelectedPatientId;
+      const quotesRes = await quotationService.getAll(filterParams);
       quotations = Array.isArray(quotesRes) ? quotesRes : (quotesRes.rows || []);
       // Filter out already invoiced ones
       quotations = quotations.filter(q => !q.invoice_id);
@@ -649,8 +658,12 @@ export class Invoices {
         try {
           await invoiceService.createFromQuotation(quoteId);
           toast.success('Factura creada exitosamente a partir de la cotización');
-          await this.render();
-          this.mount();
+          if (onSuccess) {
+            await onSuccess();
+          } else {
+            await this.render();
+            this.mount();
+          }
           return true;
         } catch (err) {
           toast.error(err.message || 'Error al generar la factura');
@@ -660,7 +673,7 @@ export class Invoices {
     });
   }
 
-  async showRegisterPaymentModal(invoiceId) {
+  async showRegisterPaymentModal(invoiceId, onSuccess = null) {
     // Cargar métodos de pago
     let methods = [];
     try {
@@ -718,8 +731,12 @@ export class Invoices {
         try {
           await paymentService.create(data);
           toast.success('Pago registrado exitosamente');
-          await this.render();
-          this.mount();
+          if (onSuccess) {
+            await onSuccess();
+          } else {
+            await this.render();
+            this.mount();
+          }
           return true;
         } catch (err) {
           toast.error(err.message || 'Error al guardar el pago');
@@ -729,7 +746,7 @@ export class Invoices {
     });
   }
 
-  async confirmDeleteInvoice(id) {
+  async confirmDeleteInvoice(id, onSuccess = null) {
     Modal.show({
       title: 'Eliminar Factura',
       content: `
@@ -745,8 +762,12 @@ export class Invoices {
         try {
           await invoiceService.remove(id);
           toast.success('Factura eliminada exitosamente');
-          await this.render();
-          this.mount();
+          if (onSuccess) {
+            await onSuccess();
+          } else {
+            await this.render();
+            this.mount();
+          }
           return true;
         } catch (err) {
           toast.error(err.message || 'Error al eliminar la factura');
@@ -870,6 +891,442 @@ export class Invoices {
       if (logo) logo.addEventListener('error', () => { logo.style.display = 'none'; });
     } catch {
       toast.error('Error al generar vista de impresión de factura');
+    }
+  }
+
+  async showChangeInvoiceStatusModal(invoiceId, onSuccess = null) {
+    let invoice;
+    try {
+      invoice = await invoiceService.getById(invoiceId);
+    } catch {
+      toast.error('Error al obtener datos de la factura');
+      return;
+    }
+
+    const currentStatus = invoice.status || 'pendiente';
+    const statusOptions = [
+      { value: 'pendiente', label: 'Pendiente / Abierta' },
+      { value: 'parcial', label: 'Parcialmente Pagada' },
+      { value: 'pagada', label: 'Pagada / Cerrada' },
+      { value: 'cancelada', label: 'Cancelada / Anulada' },
+    ];
+
+    const optionsHtml = statusOptions.map(opt => 
+      `<option value="${opt.value}" ${opt.value === currentStatus ? 'selected' : ''}>${opt.label}</option>`
+    ).join('');
+
+    const content = `
+      <form id="change-status-form">
+        <div style="background-color: var(--gray-50); padding: var(--space-3); border-radius: var(--radius-md); margin-bottom: var(--space-3); border: 1px solid var(--border-color);">
+          <p style="margin: 0 0 4px 0;">Factura: <strong># ${invoice.invoice_number}</strong> | Paciente: <strong>${invoice.patient_name || 'N/A'}</strong></p>
+          <p style="margin: 0;">Estado actual: <strong class="badge ${getInvoiceStatusInfo(currentStatus).class}">${getInvoiceStatusInfo(currentStatus).label}</strong></p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Seleccionar Nuevo Estado <span style="color: var(--danger-500);">*</span></label>
+          <select name="status" class="form-select" required>
+            ${optionsHtml}
+          </select>
+        </div>
+        <div class="alert alert-info" style="margin-top: var(--space-3); font-size: 13px;">
+          💡 Al cambiar el estado de la factura, los saldos del paciente, tratamientos vinculados y presupuestos se actualizarán automáticamente.
+        </div>
+      </form>
+    `;
+
+    Modal.show({
+      title: `Cambiar Estado — Factura #${invoice.invoice_number}`,
+      content,
+      confirmText: 'Guardar Estado',
+      onConfirm: async (modalBody) => {
+        const form = modalBody.querySelector('#change-status-form');
+        const formData = new FormData(form);
+        const newStatus = formData.get('status');
+
+        try {
+          await invoiceService.update(invoiceId, { status: newStatus });
+          toast.success(`Estado de factura cambiado a "${getInvoiceStatusInfo(newStatus).label}"`);
+          if (onSuccess) {
+            await onSuccess();
+          } else {
+            await this.render();
+            this.mount();
+          }
+          return true;
+        } catch (err) {
+          toast.error(err.message || 'Error al cambiar estado de la factura');
+          return false;
+        }
+      }
+    });
+  }
+
+  async showEditInvoiceModal(invoiceId, onSuccess = null) {
+    let invoice, doctors = [], treatments = [];
+    try {
+      [invoice, doctors, treatments] = await Promise.all([
+        invoiceService.getById(invoiceId),
+        doctorService.getAll(),
+        treatmentService.getAll({ limit: 500, is_active: true }),
+      ]);
+    } catch {
+      toast.error('Error al obtener datos para edición de factura');
+      return;
+    }
+
+    const doctorList = Array.isArray(doctors) ? doctors : [];
+    const treatmentList = Array.isArray(treatments) ? treatments : [];
+
+    const doctorOptions = doctorList.map(d =>
+      `<option value="${d.id}" ${d.id === invoice.doctor_id ? 'selected' : ''}>${d.first_name} ${d.last_name} (${d.specialty || ''})</option>`
+    ).join('');
+
+    const invoiceDateVal = invoice.created_at ? invoice.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10);
+    const dueDateVal = invoice.due_date ? invoice.due_date.slice(0, 10) : '';
+
+    let itemsRows = (invoice.items || []).map((item, idx) => `
+      <div class="quote-item-row" data-index="${idx}" style="display: flex; gap: var(--space-2); align-items: flex-start; margin-bottom: var(--space-2);">
+        <div class="treatment-autocomplete-wrapper" style="flex: 2; position: relative;">
+          <input type="text" name="item_desc_${idx}" class="form-input quote-item-desc" placeholder="Buscar o escribir tratamiento..." value="${item.description || ''}" autocomplete="off" required />
+          <input type="hidden" name="item_treatment_id_${idx}" class="item-treatment-id" value="${item.treatment_id || ''}" />
+          <ul class="treatment-autocomplete-list" style="display: none; position: absolute; background: white; border: 1px solid var(--border-color); border-radius: var(--radius-md); box-shadow: var(--shadow-md); max-height: 200px; overflow-y: auto; z-index: 100; width: 100%;"></ul>
+        </div>
+        <div style="width: 80px;">
+          <input type="number" name="item_tooth_${idx}" class="form-input" placeholder="Diente" value="${item.tooth_number || ''}" min="1" max="32" />
+        </div>
+        <div style="width: 70px;">
+          <input type="number" name="item_qty_${idx}" class="form-input item-qty" value="${item.quantity || 1}" min="1" placeholder="Cant." required />
+        </div>
+        <div style="width: 110px;">
+          <input type="number" name="item_price_${idx}" class="form-input item-price" value="${item.unit_price || 0}" step="0.01" min="0" placeholder="Precio $" required />
+        </div>
+        <div style="width: 30px; padding-top: 4px;">
+          <button type="button" class="btn btn-sm btn-outline remove-item-btn" style="color: var(--danger-600); border-color: var(--danger-200); padding: 4px 8px;" title="Eliminar ítem">✕</button>
+        </div>
+      </div>
+    `).join('');
+
+    if (!itemsRows) {
+      itemsRows = `
+        <div class="quote-item-row" data-index="0" style="display: flex; gap: var(--space-2); align-items: flex-start; margin-bottom: var(--space-2);">
+          <div class="treatment-autocomplete-wrapper" style="flex: 2; position: relative;">
+            <input type="text" name="item_desc_0" class="form-input quote-item-desc" placeholder="Buscar tratamiento..." autocomplete="off" required />
+            <input type="hidden" name="item_treatment_id_0" class="item-treatment-id" value="" />
+            <ul class="treatment-autocomplete-list" style="display: none; position: absolute; background: white; border: 1px solid var(--border-color); border-radius: var(--radius-md); box-shadow: var(--shadow-md); max-height: 200px; overflow-y: auto; z-index: 100; width: 100%;"></ul>
+          </div>
+          <div style="width: 80px;">
+            <input type="number" name="item_tooth_0" class="form-input" placeholder="Diente" min="1" max="32" />
+          </div>
+          <div style="width: 70px;">
+            <input type="number" name="item_qty_0" class="form-input item-qty" value="1" min="1" placeholder="Cant." required />
+          </div>
+          <div style="width: 110px;">
+            <input type="number" name="item_price_0" class="form-input item-price" value="0.00" step="0.01" min="0" placeholder="Precio $" required />
+          </div>
+          <div style="width: 30px; padding-top: 4px;">
+            <button type="button" class="btn btn-sm btn-outline remove-item-btn" style="color: var(--danger-600); border-color: var(--danger-200); padding: 4px 8px;" title="Eliminar ítem">✕</button>
+          </div>
+        </div>
+      `;
+    }
+
+    const content = `
+      <form id="edit-invoice-form">
+        <div style="background-color: var(--gray-50); padding: var(--space-3); border-radius: var(--radius-md); margin-bottom: var(--space-3); border: 1px solid var(--border-color);">
+          <strong>Factura #${invoice.invoice_number}</strong> — Paciente: <strong>${invoice.patient_name || 'N/A'}</strong>
+        </div>
+        <div class="form-row-responsive">
+          <div class="form-group">
+            <label class="form-label">Doctor Responsable</label>
+            <select name="doctor_id" class="form-select">
+              <option value="">Seleccione un doctor...</option>
+              ${doctorOptions}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Estado de Factura</label>
+            <select name="status" class="form-select">
+              <option value="pendiente" ${invoice.status === 'pendiente' ? 'selected' : ''}>Pendiente / Abierta</option>
+              <option value="parcial" ${invoice.status === 'parcial' ? 'selected' : ''}>Parcialmente Pagada</option>
+              <option value="pagada" ${invoice.status === 'pagada' ? 'selected' : ''}>Pagada / Cerrada</option>
+              <option value="cancelada" ${invoice.status === 'cancelada' ? 'selected' : ''}>Cancelada / Anulada</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row-responsive" style="margin-top: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Fecha de Emisión</label>
+            <input type="date" name="invoice_date" class="form-input" value="${invoiceDateVal}" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Fecha de Vencimiento</label>
+            <input type="date" name="due_date" class="form-input" value="${dueDateVal}" />
+          </div>
+        </div>
+
+        <div style="margin-top: var(--space-4);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2);">
+            <label class="form-label" style="margin: 0; font-weight: 600;">Conceptos / Tratamientos <span style="color: var(--danger-500);">*</span></label>
+            <button type="button" id="add-item-btn" class="btn btn-sm btn-outline">+ Agregar Ítem</button>
+          </div>
+          <div id="invoice-items-container">
+            ${itemsRows}
+          </div>
+        </div>
+
+        <div class="form-row-responsive" style="margin-top: var(--space-4);">
+          <div class="form-group" style="flex: 2;">
+            <label class="form-label">Notas / Observaciones</label>
+            <textarea name="notes" class="form-textarea" rows="3">${invoice.notes || ''}</textarea>
+          </div>
+          <div class="form-group" style="flex: 1; background: var(--gray-50); padding: var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+            <div class="form-group" style="margin-bottom: var(--space-2);">
+              <label class="form-label" style="font-size: var(--text-xs);">Impuesto IVA (%)</label>
+              <input type="number" name="tax_rate" class="form-input" value="${invoice.tax_rate || 0}" step="0.1" min="0" />
+            </div>
+            <div class="form-group" style="margin-bottom: var(--space-2);">
+              <label class="form-label" style="font-size: var(--text-xs);">Descuento ($)</label>
+              <input type="number" name="discount" class="form-input" value="${invoice.discount_amount || 0}" step="0.01" min="0" />
+            </div>
+            <div style="border-top: 1px solid var(--border-color); padding-top: var(--space-2); margin-top: var(--space-2); display: flex; flex-direction: column; gap: 4px;">
+              <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                <span>Subtotal:</span>
+                <strong id="calc-subtotal">${formatCurrency(invoice.subtotal || 0)}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                <span>Impuesto:</span>
+                <strong id="calc-tax">${formatCurrency(invoice.tax_amount || 0)}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size: 13px; color: var(--danger-600);">
+                <span>Descuento:</span>
+                <strong id="calc-discount">-${formatCurrency(invoice.discount_amount || 0)}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size: 15px; font-weight: 700; border-top: 1px solid var(--border-color); padding-top: 4px;">
+                <span>Total Factura:</span>
+                <strong id="calc-total" style="color: var(--primary-700);">${formatCurrency(invoice.total || 0)}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--success-600); margin-top: 2px;">
+                <span>Pagado:</span>
+                <strong>${formatCurrency(invoice.amount_paid || 0)}</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; color: var(--danger-600);">
+                <span>Saldo Restante:</span>
+                <strong id="calc-balance">${formatCurrency(invoice.balance || 0)}</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+      </form>
+    `;
+
+    Modal.show({
+      title: `Editar Factura #${invoice.invoice_number}`,
+      content,
+      confirmText: 'Guardar Cambios',
+      size: 'lg',
+      onConfirm: async (modalBody) => {
+        const form = modalBody.querySelector('#edit-invoice-form');
+        const formData = new FormData(form);
+        const raw = Object.fromEntries(formData.entries());
+
+        const items = [];
+        let itemIndex = 0;
+        while (raw[`item_desc_${itemIndex}`] !== undefined) {
+          if (raw[`item_desc_${itemIndex}`].trim()) {
+            const item = {
+              description: raw[`item_desc_${itemIndex}`].trim(),
+              quantity: parseInt(raw[`item_qty_${itemIndex}`], 10) || 1,
+              unit_price: parseFloat(raw[`item_price_${itemIndex}`]) || 0,
+            };
+            const tid = raw[`item_treatment_id_${itemIndex}`];
+            if (tid) item.treatment_id = parseInt(tid, 10);
+            const tooth = raw[`item_tooth_${itemIndex}`];
+            if (tooth) item.tooth_number = parseInt(tooth, 10);
+            items.push(item);
+          }
+          itemIndex++;
+        }
+
+        if (items.length === 0) {
+          toast.error('Debe incluir al menos un concepto en la factura');
+          return false;
+        }
+
+        const payload = {
+          doctor_id: raw.doctor_id ? parseInt(raw.doctor_id, 10) : undefined,
+          status: raw.status,
+          invoice_date: raw.invoice_date || undefined,
+          due_date: raw.due_date || undefined,
+          tax_rate: parseFloat(raw.tax_rate) || 0,
+          discount: parseFloat(raw.discount) || 0,
+          notes: raw.notes || undefined,
+          items,
+        };
+
+        try {
+          await invoiceService.update(invoiceId, payload);
+          toast.success('Factura actualizada y cambios sincronizados en todo el sistema');
+          if (onSuccess) {
+            await onSuccess();
+          } else {
+            await this.render();
+            this.mount();
+          }
+          return true;
+        } catch (err) {
+          toast.error(err.message || 'Error al actualizar la factura');
+          return false;
+        }
+      }
+    });
+
+    // Wire up autocomplete and dynamic calculation events inside modalBody
+    setTimeout(() => {
+      this.attachInvoiceModalEvents(treatmentList, parseFloat(invoice.amount_paid || 0));
+    }, 50);
+  }
+
+  attachInvoiceModalEvents(treatmentList, amountPaid = 0) {
+    const modalBody = document.querySelector('.modal-body');
+    if (!modalBody) return;
+
+    const recalculate = () => {
+      let subtotal = 0;
+      const rows = modalBody.querySelectorAll('.quote-item-row');
+      rows.forEach((row) => {
+        const qtyInput = row.querySelector('input[name^="item_qty_"]');
+        const priceInput = row.querySelector('input[name^="item_price_"]');
+        const qty = parseInt(qtyInput?.value || 0, 10);
+        const price = parseFloat(priceInput?.value || 0);
+        subtotal += qty * price;
+      });
+
+      const taxRate = parseFloat(modalBody.querySelector('input[name="tax_rate"]')?.value || 0);
+      const discount = parseFloat(modalBody.querySelector('input[name="discount"]')?.value || 0);
+      const taxable = Math.max(0, subtotal - discount);
+      const taxAmount = (taxable * taxRate) / 100;
+      const total = parseFloat((taxable + taxAmount).toFixed(2));
+      const balance = Math.max(0, parseFloat((total - amountPaid).toFixed(2)));
+
+      if (modalBody.querySelector('#calc-subtotal')) modalBody.querySelector('#calc-subtotal').textContent = formatCurrency(subtotal);
+      if (modalBody.querySelector('#calc-tax')) modalBody.querySelector('#calc-tax').textContent = formatCurrency(taxAmount);
+      if (modalBody.querySelector('#calc-discount')) modalBody.querySelector('#calc-discount').textContent = `-${formatCurrency(discount)}`;
+      if (modalBody.querySelector('#calc-total')) modalBody.querySelector('#calc-total').textContent = formatCurrency(total);
+      if (modalBody.querySelector('#calc-balance')) modalBody.querySelector('#calc-balance').textContent = formatCurrency(balance);
+    };
+
+    modalBody.addEventListener('input', (e) => {
+      if (e.target.name === 'tax_rate' || e.target.name === 'discount' || e.target.name.startsWith('item_qty_') || e.target.name.startsWith('item_price_')) {
+        recalculate();
+      }
+    });
+
+    const initAutocomplete = (input) => {
+      const wrapper = input.closest('.treatment-autocomplete-wrapper');
+      if (!wrapper || input._acInitialized) return;
+      input._acInitialized = true;
+      const dropdown = wrapper.querySelector('.treatment-autocomplete-list');
+      const row = input.closest('.quote-item-row');
+      let activeIdx = -1;
+
+      const showResults = () => {
+        const term = input.value.toLowerCase().trim();
+        if (!term) { dropdown.style.display = 'none'; return; }
+
+        const matches = treatmentList.filter(t =>
+          t.name.toLowerCase().includes(term) ||
+          (t.code && t.code.toLowerCase().includes(term))
+        ).slice(0, 10);
+
+        if (matches.length === 0) {
+          dropdown.innerHTML = '<li class="no-results" style="padding: 8px 12px; color: var(--text-secondary);">Sin resultados</li>';
+          dropdown.style.display = 'block';
+          activeIdx = -1;
+          return;
+        }
+
+        dropdown.innerHTML = matches.map((t, idx) => `
+          <li class="autocomplete-item" data-idx="${idx}" style="padding: 8px 12px; cursor: pointer; border-bottom: 1px solid var(--border-color-light); display: flex; justify-content: space-between;">
+            <span class="treatment-name"><strong>${t.name}</strong></span>
+            <span class="treatment-price">${formatCurrency(t.default_price || 0)}</span>
+          </li>
+        `).join('');
+        dropdown.style.display = 'block';
+        activeIdx = -1;
+
+        dropdown.querySelectorAll('.autocomplete-item').forEach((li, idx) => {
+          li.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            const selected = matches[idx];
+            input.value = selected.name;
+            const priceInput = row.querySelector('input[name^="item_price_"]');
+            if (priceInput) priceInput.value = parseFloat(selected.default_price || 0).toFixed(2);
+            const treatmentIdInput = row.querySelector('.item-treatment-id');
+            if (treatmentIdInput) treatmentIdInput.value = selected.id;
+            dropdown.style.display = 'none';
+            recalculate();
+          });
+        });
+      };
+
+      input.addEventListener('input', showResults);
+      input.addEventListener('focus', () => { if (input.value.trim()) showResults(); });
+      input.addEventListener('blur', () => { setTimeout(() => { dropdown.style.display = 'none'; }, 150); });
+    };
+
+    modalBody.querySelectorAll('.quote-item-desc').forEach(initAutocomplete);
+
+    modalBody.addEventListener('click', (e) => {
+      if (e.target.classList.contains('remove-item-btn')) {
+        const rowsContainer = modalBody.querySelector('#invoice-items-container');
+        if (rowsContainer.children.length > 1) {
+          e.target.closest('.quote-item-row').remove();
+          rowsContainer.querySelectorAll('.quote-item-row').forEach((row, i) => {
+            if (row.querySelector('.quote-item-desc')) row.querySelector('.quote-item-desc').name = `item_desc_${i}`;
+            if (row.querySelector('.item-treatment-id')) row.querySelector('.item-treatment-id').name = `item_treatment_id_${i}`;
+            if (row.querySelector('input[name^="item_tooth_"]')) row.querySelector('input[name^="item_tooth_"]').name = `item_tooth_${i}`;
+            if (row.querySelector('.item-qty')) row.querySelector('.item-qty').name = `item_qty_${i}`;
+            if (row.querySelector('.item-price')) row.querySelector('.item-price').name = `item_price_${i}`;
+          });
+          recalculate();
+        } else {
+          toast.error('Debe haber al menos un concepto en la factura');
+        }
+      }
+    });
+
+    const addItemBtn = modalBody.querySelector('#add-item-btn');
+    if (addItemBtn) {
+      addItemBtn.addEventListener('click', () => {
+        const container = modalBody.querySelector('#invoice-items-container');
+        const idx = container.children.length;
+        const div = document.createElement('div');
+        div.className = 'quote-item-row';
+        div.style.cssText = 'display: flex; gap: var(--space-2); align-items: flex-start; margin-bottom: var(--space-2);';
+        div.setAttribute('data-index', idx);
+        div.innerHTML = `
+          <div class="treatment-autocomplete-wrapper" style="flex: 2; position: relative;">
+            <input type="text" name="item_desc_${idx}" class="form-input quote-item-desc" placeholder="Buscar tratamiento..." autocomplete="off" required />
+            <input type="hidden" name="item_treatment_id_${idx}" class="item-treatment-id" value="" />
+            <ul class="treatment-autocomplete-list" style="display: none; position: absolute; background: white; border: 1px solid var(--border-color); border-radius: var(--radius-md); box-shadow: var(--shadow-md); max-height: 200px; overflow-y: auto; z-index: 100; width: 100%;"></ul>
+          </div>
+          <div style="width: 80px;">
+            <input type="number" name="item_tooth_${idx}" class="form-input" placeholder="Diente" min="1" max="32" />
+          </div>
+          <div style="width: 70px;">
+            <input type="number" name="item_qty_${idx}" class="form-input item-qty" placeholder="Cant." value="1" min="1" required />
+          </div>
+          <div style="width: 110px;">
+            <input type="number" step="0.01" name="item_price_${idx}" class="form-input item-price" placeholder="Precio $" value="0.00" min="0" required />
+          </div>
+          <div style="width: 30px; padding-top: 4px;">
+            <button type="button" class="btn btn-sm btn-outline remove-item-btn" style="color: var(--danger-600); border-color: var(--danger-200); padding: 4px 8px;" title="Eliminar ítem">✕</button>
+          </div>
+        `;
+        container.appendChild(div);
+        initAutocomplete(div.querySelector('.quote-item-desc'));
+        recalculate();
+      });
     }
   }
 }

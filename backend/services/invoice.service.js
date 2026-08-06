@@ -151,12 +151,11 @@ class InvoiceService {
   }
 
   /**
-   * Actualiza una factura existente.
-   * Solo permite actualización de campos no calculados si no tiene pagos.
+   * Actualiza una factura existente y sincroniza sus cambios en cascada
+   * (Historial Odontológico, Presupuestos Aceptados, Saldo del paciente).
    * @param {string|number} id - ID de la factura
    * @param {object} data - Datos a actualizar
    * @returns {Promise<object>} Factura actualizada
-   * @throws {AppError} Si la factura no existe o está pagada
    */
   async update(id, data) {
     const existing = await invoiceRepository.findByIdWithItems(id);
@@ -164,21 +163,186 @@ class InvoiceService {
       throw new AppError('Factura no encontrada.', 404);
     }
 
-    if (existing.status === 'pagada') {
-      throw new AppError('No se puede editar una factura completamente pagada.', 400);
+    const updateFields = {};
+    if (data.patient_id !== undefined) updateFields.patient_id = data.patient_id;
+    if (data.doctor_id !== undefined) updateFields.doctor_id = data.doctor_id || null;
+    if (data.due_date !== undefined) updateFields.due_date = data.due_date;
+    if (data.created_at !== undefined || data.invoice_date !== undefined) {
+      updateFields.created_at = data.created_at || data.invoice_date;
+    }
+    if (data.notes !== undefined) updateFields.notes = data.notes;
+    if (data.status !== undefined) updateFields.status = data.status;
+    if (data.tax_rate !== undefined) updateFields.tax_rate = parseFloat(data.tax_rate);
+    if (data.discount !== undefined || data.discount_amount !== undefined) {
+      updateFields.discount_amount = parseFloat(data.discount !== undefined ? data.discount : data.discount_amount);
+    }
+    if (data.discount_percentage !== undefined) {
+      updateFields.discount_percentage = parseFloat(data.discount_percentage);
     }
 
-    const updateData = {};
-    if (data.patient_id !== undefined) updateData.patient_id = data.patient_id;
-    if (data.doctor_id !== undefined) updateData.doctor_id = data.doctor_id;
-    if (data.due_date !== undefined) updateData.due_date = data.due_date;
-    if (data.notes !== undefined) updateData.notes = data.notes;
+    // Si se envían items, reemplazar e igualar totales
+    if (Array.isArray(data.items) && data.items.length > 0) {
+      const processedItems = data.items.map((item) => {
+        const qty = parseInt(item.quantity || 1, 10);
+        const unitPrice = parseFloat(item.unit_price || 0);
+        return {
+          treatment_id: item.treatment_id || null,
+          description: item.description || 'Tratamiento Odontológico',
+          quantity: qty,
+          unit_price: unitPrice,
+          subtotal: parseFloat((qty * unitPrice).toFixed(2)),
+          tooth_number: item.tooth_number || null,
+        };
+      });
 
-    const updated = await invoiceRepository.update(id, updateData);
-    if (!updated) {
-      throw new AppError('No se pudo actualizar la factura.', 500);
+      await invoiceRepository.replaceInvoiceItems(id, processedItems);
+
+      const subtotal = parseFloat(processedItems.reduce((acc, item) => acc + item.subtotal, 0).toFixed(2));
+      updateFields.subtotal = subtotal;
+
+      const taxRate = updateFields.tax_rate !== undefined ? updateFields.tax_rate : parseFloat(existing.tax_rate || 0);
+      const discount = updateFields.discount_amount !== undefined ? updateFields.discount_amount : parseFloat(existing.discount_amount || 0);
+      const taxable = Math.max(0, subtotal - discount);
+      const taxAmount = parseFloat((taxable * (taxRate / 100)).toFixed(2));
+      const total = parseFloat((taxable + taxAmount).toFixed(2));
+
+      updateFields.tax_amount = taxAmount;
+      updateFields.total = total;
     }
-    return updated;
+
+    if (Object.keys(updateFields).length > 0) {
+      await invoiceRepository.update(id, updateFields);
+    }
+
+    // Sincronizar en cascada todas las tablas afectadas
+    await this.syncInvoiceCascades(id);
+
+    return invoiceRepository.findByIdWithItems(id);
+  }
+
+  /**
+   * Sincroniza los datos de la factura con todas las partes afectadas del sistema:
+   * 1. Recalcula pagos, saldo restante y estado.
+   * 2. Actualiza / inserta / elimina registros de patient_treatments (Historial Odontológico).
+   * 3. Sincroniza importes y cantidades en quotation_items y quotations (Presupuestos).
+   * @param {string|number} invoiceId - ID de la factura
+   */
+  async syncInvoiceCascades(invoiceId) {
+    const invoice = await invoiceRepository.findByIdWithItems(invoiceId);
+    if (!invoice) return;
+
+    // 1. Recalcular pagos y saldo
+    const paymentsSum = (invoice.payments || []).reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+    const amountPaid = parseFloat(paymentsSum.toFixed(2));
+    const total = parseFloat(invoice.total || 0);
+    const balance = Math.max(0, parseFloat((total - amountPaid).toFixed(2)));
+
+    let status = invoice.status;
+    if (status !== 'cancelada') {
+      if (amountPaid <= 0) status = 'pendiente';
+      else if (amountPaid >= total && total > 0) status = 'pagada';
+      else status = 'parcial';
+    }
+
+    await invoiceRepository.update(invoiceId, {
+      amount_paid: amountPaid,
+      balance,
+      status,
+    });
+
+    // 2. Sincronizar Historial Odontológico (patient_treatments)
+    const patientId = invoice.patient_id;
+    const doctorId = invoice.doctor_id;
+    const items = invoice.items || [];
+
+    const existingPtRes = await query(
+      `SELECT * FROM patient_treatments WHERE invoice_id = $1 AND deleted_at IS NULL`,
+      [invoiceId]
+    );
+    const existingPtList = existingPtRes.rows;
+    const matchedPtIds = new Set();
+
+    for (const item of items) {
+      let matchPt = null;
+      if (item.treatment_id) {
+        matchPt = existingPtList.find(pt => !matchedPtIds.has(pt.id) && Number(pt.treatment_id) === Number(item.treatment_id));
+      }
+      if (!matchPt && item.description) {
+        matchPt = existingPtList.find(pt => !matchedPtIds.has(pt.id) && (pt.notes || '').includes(item.description));
+      }
+
+      const itemPrice = parseFloat(item.unit_price || 0);
+
+      if (matchPt) {
+        matchedPtIds.add(matchPt.id);
+        await query(
+          `UPDATE patient_treatments 
+           SET price = $1, tooth_number = $2, doctor_id = $3, updated_at = NOW() 
+           WHERE id = $4`,
+          [itemPrice, item.tooth_number || null, doctorId || matchPt.doctor_id, matchPt.id]
+        );
+      } else if (item.treatment_id) {
+        const newPt = await query(
+          `INSERT INTO patient_treatments (patient_id, treatment_id, doctor_id, tooth_number, price, status, invoice_id, notes, clinic_id)
+           VALUES ($1, $2, $3, $4, $5, 'completado', $6, $7, $8)
+           RETURNING id`,
+          [patientId, item.treatment_id, doctorId || null, item.tooth_number || null, itemPrice, invoiceId, `Factura #${invoice.invoice_number}`, invoice.clinic_id || null]
+        );
+        if (newPt.rows[0]) matchedPtIds.add(newPt.rows[0].id);
+      }
+    }
+
+    // Soft-delete todos los tratamientos vinculados a esta factura que ya NO están en los items actualizados
+    for (const pt of existingPtList) {
+      if (!matchedPtIds.has(pt.id)) {
+        await query(
+          `UPDATE patient_treatments SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1`,
+          [pt.id]
+        );
+      }
+    }
+
+    // 3. Sincronizar Presupuestos Aceptados (quotations & quotation_items)
+    if (invoice.quotation_id) {
+      const qRes = await quotationRepository.findByIdWithItems(invoice.quotation_id);
+      if (qRes && qRes.items) {
+        let qSubtotal = 0;
+        for (const qItem of qRes.items) {
+          const invItem = items.find(i => Number(i.treatment_id) === Number(qItem.treatment_id) || i.description === qItem.description);
+          if (invItem) {
+            const newPrice = parseFloat(invItem.unit_price || 0);
+            const newQty = parseInt(invItem.quantity || 1, 10);
+            const newTotal = parseFloat((newPrice * newQty).toFixed(2));
+            await query(
+              `UPDATE quotation_items SET unit_price = $1, quantity = $2, total = $3, invoice_id = $4 WHERE id = $5`,
+              [newPrice, newQty, newTotal, invoiceId, qItem.id]
+            );
+            qSubtotal += newTotal;
+          } else {
+            // Si el ítem fue eliminado de la factura, desvincularlo de la factura en la cotización
+            await query(
+              `UPDATE quotation_items SET invoice_id = NULL WHERE id = $1`,
+              [qItem.id]
+            );
+            qSubtotal += parseFloat(qItem.total || 0);
+          }
+        }
+
+        const qTaxRate = parseFloat(qRes.tax_rate || 0);
+        const qDiscPct = parseFloat(qRes.discount_percentage || 0);
+        const qDiscAmount = parseFloat((qSubtotal * (qDiscPct / 100)).toFixed(2));
+        const qTaxable = Math.max(0, qSubtotal - qDiscAmount);
+        const qTaxAmount = parseFloat((qTaxable * (qTaxRate / 100)).toFixed(2));
+        const qTotal = parseFloat((qTaxable + qTaxAmount).toFixed(2));
+
+        await quotationRepository.update(qRes.id, {
+          subtotal: qSubtotal,
+          discount_amount: qDiscAmount,
+          tax_amount: qTaxAmount,
+          total: qTotal,
+        });
+      }
+    }
   }
 
   /**
@@ -201,6 +365,19 @@ class InvoiceService {
     if (!deleted) {
       throw new AppError('No se pudo eliminar la factura.', 500);
     }
+
+    // Soft delete tratamientos creados desde esta factura
+    await query(
+      `UPDATE patient_treatments SET deleted_at = NOW(), updated_at = NOW() WHERE invoice_id = $1`,
+      [id]
+    );
+
+    // Desvincular ítems de cotización
+    await query(
+      `UPDATE quotation_items SET invoice_id = NULL WHERE invoice_id = $1`,
+      [id]
+    );
+
     return true;
   }
 

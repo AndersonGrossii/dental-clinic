@@ -225,6 +225,31 @@ class InvoiceRepository extends BaseRepository {
   }
 
   /**
+   * Reemplaza todos los items de una factura existente.
+   * @param {string|number} invoiceId - ID de la factura
+   * @param {Array} items - Nuevos items
+   * @returns {Promise<Array>} Items insertados
+   */
+  async replaceInvoiceItems(invoiceId, items) {
+    const clinicId = this.getClinicId();
+    await query('DELETE FROM invoice_items WHERE invoice_id = $1', [invoiceId]);
+
+    const insertedItems = [];
+    for (const item of items) {
+      const itemResult = await query(
+        `INSERT INTO invoice_items (invoice_id, treatment_id, description, quantity, unit_price, total, tooth_number${clinicId ? ', clinic_id' : ''})
+         VALUES ($1, $2, $3, $4, $5, $6, $7${clinicId ? ', $8' : ''})
+         RETURNING *`,
+        clinicId
+          ? [invoiceId, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.subtotal || (item.quantity * item.unit_price), item.tooth_number || null, clinicId]
+          : [invoiceId, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.subtotal || (item.quantity * item.unit_price), item.tooth_number || null]
+      );
+      insertedItems.push(itemResult.rows[0]);
+    }
+    return insertedItems;
+  }
+
+  /**
    * Recalcula el monto pagado de una factura a partir de la suma de pagos.
    * Actualiza el estado según corresponda: pendiente, parcial o pagada.
    * @param {string|number} invoiceId - ID de la factura

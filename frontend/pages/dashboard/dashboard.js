@@ -340,16 +340,16 @@ export class Dashboard {
 
     const layoutContainer = this.container.querySelector('#db-cal-layout-container');
     if (layoutContainer) {
-      layoutContainer.addEventListener('click', (e) => {
+      layoutContainer.addEventListener('click', async (e) => {
         const eventEl = e.target.closest('.db-wg-event');
-        if (eventEl) {
-          const patientId = eventEl.dataset.patientId;
-          const userRole = state.get('user')?.role_name;
-          if ((userRole === 'doctor' || userRole === 'higienista') && patientId) {
-            window.location.hash = `#/patients/${patientId}`;
-          } else {
-            window.location.hash = '#/appointments';
-          }
+        if (eventEl && eventEl.dataset.id) {
+          const id = eventEl.dataset.id;
+          const { Appointments } = await import('../appointments/appointments.js');
+          const apptsPage = new Appointments(this.container);
+          apptsPage.showChangeStatusModal(id, async () => {
+            await this.render();
+            this.mount();
+          });
         }
       });
     }

@@ -323,7 +323,7 @@ class PatientRepository extends BaseRepository {
 
     const dataResult = await query(
       `SELECT a.id, a.appointment_date, a.start_time, a.end_time,
-              a.reason, a.notes, a.is_first_visit, a.created_at,
+              a.reason, a.notes, a.cancellation_reason, a.is_first_visit, a.created_at,
               ast.name AS status_name, ast.label AS status_label, ast.color AS status_color,
               u.first_name AS doctor_name, u.last_name AS doctor_lastname,
               doc.specialty

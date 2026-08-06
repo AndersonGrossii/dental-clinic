@@ -304,6 +304,21 @@ export class Cabinets {
         this.mount();
       });
     }
+
+    // Click en evento de cita para cambiar estado o ver detalle
+    this.container.querySelectorAll('.db-wg-event, .cal-dg-event').forEach(el => {
+      el.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = el.dataset.id;
+        if (id) {
+          const { Appointments } = await import('../appointments/appointments.js');
+          const apptsPage = new Appointments(this.container);
+          apptsPage.showChangeStatusModal(id, async () => {
+            await this.render();
+          });
+        }
+      });
+    });
   }
 
   // Helpers

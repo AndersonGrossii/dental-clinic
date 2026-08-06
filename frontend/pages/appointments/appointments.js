@@ -47,13 +47,7 @@ export class Appointments {
       }
       const eventEl = e.target.closest('.calendar-event, .cal-week-event, .cal-day-event, .db-wg-event, .cal-dg-event');
       if (eventEl?.dataset.id) {
-        const patientId = eventEl.dataset.patientId;
-        const userRole = state.get('user')?.role_name;
-        if ((userRole === 'doctor' || userRole === 'higienista') && patientId) {
-          window.location.hash = `#/patients/${patientId}`;
-        } else {
-          this.showChangeStatusModal(eventEl.dataset.id);
-        }
+        this.showChangeStatusModal(eventEl.dataset.id);
         return;
       }
 
@@ -1513,12 +1507,27 @@ export class Appointments {
     return html;
   }
 
-  showChangeStatusModal(appointmentId) {
-    const appt = this.appointmentsList.find(a => String(a.id) === String(appointmentId));
+  async showChangeStatusModal(appointmentId, onSuccess = null) {
+    let appt = (this.appointmentsList || []).find(a => String(a.id) === String(appointmentId));
+    if (!appt) {
+      try {
+        appt = await appointmentService.getById(appointmentId);
+      } catch (e) {
+        toast.error('No se encontró la cita.');
+        return;
+      }
+    }
     if (!appt) {
       toast.error('No se encontró la cita.');
       return;
     }
+
+    if (!this.doctorsList || this.doctorsList.length === 0) {
+      try {
+        this.doctorsList = await doctorService.getAll();
+      } catch (e) {}
+    }
+
     const currentStatus = appt.status_name || '';
     const targetDate = appt.appointment_date ? String(appt.appointment_date).substring(0, 10) : '';
     const startTime = appt.start_time ? String(appt.start_time).substring(0, 5) : '';
@@ -1531,6 +1540,7 @@ export class Appointments {
       { value: 'completada',  label: 'Completada',   color: '#15803d', icon: '🎉', desc: 'Consulta finalizada exitosamente' },
       { value: 'cancelada',   label: 'Cancelada',    color: '#dc2626', icon: '❌', desc: 'Cita cancelada (requiere motivo)' },
       { value: 'no_asistio',  label: 'No Asistió',   color: '#d97706', icon: '⚠️', desc: 'El paciente no se presentó' },
+      { value: 'reprogramada', label: 'Reprogramada', color: '#8b5cf6', icon: '🔄', desc: 'La cita fue movida de fecha u horario' },
     ];
 
     const statusCards = statuses.map(s => `
@@ -1569,9 +1579,12 @@ export class Appointments {
         .current-status-badge { display:inline-flex; align-items:center; gap:6px; font-size:0.75rem; font-weight:600; color:var(--color-text-secondary); background:var(--color-bg-secondary); border:1px solid var(--color-border-light); padding:4px 10px; border-radius:999px; margin-bottom:16px; }
       </style>
       <form id="change-status-form">
-        <div style="margin-bottom: var(--space-3); border-bottom: 1px solid var(--color-border-light); padding-bottom: var(--space-3);">
-          <div style="font-size: var(--text-lg); font-weight: 700; color: var(--color-text);">Paciente: ${appt.patient_name || '—'}</div>
-          ${appt.treatment_name ? `<div style="font-size: var(--text-sm); color: var(--color-text-secondary); margin-top: 2px;">Tratamiento: ${appt.treatment_name}</div>` : ''}
+        <div style="margin-bottom: var(--space-3); border-bottom: 1px solid var(--color-border-light); padding-bottom: var(--space-3); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+          <div>
+            <div style="font-size: var(--text-lg); font-weight: 700; color: var(--color-text);">Paciente: ${appt.patient_name || '—'}</div>
+            ${appt.treatment_name ? `<div style="font-size: var(--text-sm); color: var(--color-text-secondary); margin-top: 2px;">Tratamiento: ${appt.treatment_name}</div>` : ''}
+          </div>
+          ${appt.patient_id ? `<a href="#/patients/${appt.patient_id}" class="btn btn-sm btn-outline" style="text-decoration:none;">👤 Perfil Paciente</a>` : ''}
         </div>
         <div class="manage-appt-grid">
           <!-- Columna Izquierda: Reprogramar -->
@@ -1621,7 +1634,7 @@ export class Appointments {
           <!-- Columna Derecha: Cambiar Estado -->
           <div>
             <div class="manage-section-title">Actualizar Estado</div>
-            <div class="current-status-badge">Estado actual: <span style="color:${appt.status_color};">${appt.status_label || currentStatus}</span></div>
+            <div class="current-status-badge">Estado actual: <span style="color:${appt.status_color || '#3b82f6'};">${appt.status_label || currentStatus}</span></div>
             <div style="display: flex; flex-direction: column; gap: 0;">${statusCards}</div>
             <div id="cancellation-reason-group" style="display: none;">
               <label class="form-label" style="color: #dc2626; font-weight: 600;">⚠️ Motivo de Cancelación <span style="color: #dc2626;">*</span></label>
@@ -1643,9 +1656,8 @@ export class Appointments {
         if (!selected) { toast.error('Seleccione un estado'); return false; }
         const status = selected.value;
         const cancellationReason = form.querySelector('[name="cancellation_reason"]')?.value?.trim();
-        if (status === 'cancelada' && !cancellationReason) { toast.error('El motivo de cancelación es requerido'); return false; }
 
-        const doctorId = Number(form.querySelector('[name="doctor_id"]').value);
+        const doctorId = Number(form.querySelector('[name="doctor_id"]')?.value || appt.doctor_id);
         const appointmentDate = form.querySelector('[name="appointment_date"]').value;
         const startTimeInput = form.querySelector('[name="start_time"]').value;
         const endTimeInput = form.querySelector('[name="end_time"]').value;
@@ -1690,7 +1702,11 @@ export class Appointments {
             await appointmentService.updateStatus(appointmentId, status, cancellationReason || null);
           }
           toast.success('Cita actualizada exitosamente');
-          this.render({}, true);
+          if (onSuccess) {
+            await onSuccess();
+          } else {
+            this.render({}, true);
+          }
           return true;
         } catch (err) {
           toast.error(err.message || 'Error al actualizar la cita');

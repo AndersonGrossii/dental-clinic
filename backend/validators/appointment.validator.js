@@ -159,7 +159,7 @@ export const updateStatusRules = [
     label: 'Estado',
     required: true,
     type: 'string',
-    enum: ['programada', 'confirmada', 'en_consulta', 'completada', 'cancelada', 'no_asistio'],
+    enum: ['programada', 'confirmada', 'en_consulta', 'completada', 'cancelada', 'no_asistio', 'reprogramada'],
   },
   {
     field: 'cancellation_reason',
@@ -167,11 +167,5 @@ export const updateStatusRules = [
     required: false,
     type: 'string',
     maxLength: 500,
-    custom: (value, data) => {
-      if (data.status_name === 'cancelada' && (!value || value.trim() === '')) {
-        return 'El motivo de cancelación es obligatorio al cancelar una cita.';
-      }
-      return null;
-    },
   },
 ];

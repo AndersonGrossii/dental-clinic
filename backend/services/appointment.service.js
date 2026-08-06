@@ -255,26 +255,6 @@ class AppointmentService {
       throw new AppError('Cita no encontrada.', 404);
     }
 
-    // Definir transiciones de estado válidas
-    const validTransitions = {
-      programada: ['confirmada', 'cancelada', 'no_asistio'],
-      confirmada: ['en_consulta', 'cancelada', 'no_asistio'],
-      en_consulta: ['completada', 'cancelada'],
-      completada: [],
-      cancelada: ['programada', 'confirmada', 'en_consulta', 'completada', 'no_asistio'],
-      no_asistio: ['programada'],
-    };
-
-    const currentStatus = existing.status_name;
-    const allowed = validTransitions[currentStatus] || [];
-
-    if (!allowed.includes(statusName)) {
-      throw new AppError(
-        `No se puede cambiar el estado de "${currentStatus}" a "${statusName}". Transiciones permitidas: ${allowed.join(', ') || 'ninguna'}.`,
-        400
-      );
-    }
-
     // Obtener el ID del nuevo estado
     const statusResult = await query(
       'SELECT id FROM appointment_status WHERE name = $1',
@@ -286,9 +266,9 @@ class AppointmentService {
 
     const updateData = { status_id: statusResult.rows[0].id };
 
-    if (statusName === 'cancelada' && reason) {
-      updateData.cancellation_reason = reason;
-    } else if (currentStatus === 'cancelada' && statusName !== 'cancelada') {
+    if (statusName === 'cancelada') {
+      updateData.cancellation_reason = reason || null;
+    } else {
       updateData.cancellation_reason = null;
     }
 
