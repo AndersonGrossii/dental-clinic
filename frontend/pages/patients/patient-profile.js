@@ -381,7 +381,7 @@ export class PatientProfile {
       tabContent = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
           <h3>Presupuestos / Cotizaciones</h3>
-          <a href="#/quotations" class="btn btn-sm btn-primary">+ Nuevo Presupuesto</a>
+          <button id="add-profile-quote-btn" class="btn btn-sm btn-primary">+ Nuevo Presupuesto</button>
         </div>
         <div class="table-container">
           <table>
@@ -890,6 +890,18 @@ export class PatientProfile {
     });
 
     // Quotation buttons
+    const addProfileQuoteBtn = this.container.querySelector('#add-profile-quote-btn');
+    if (addProfileQuoteBtn) {
+      addProfileQuoteBtn.addEventListener('click', async () => {
+        const { Quotations } = await import('../quotations/quotations.js');
+        const quotationsPage = new Quotations(this.container);
+        quotationsPage.showQuoteModal(null, this.patientId, async () => {
+          await this.render();
+          this.mount();
+        });
+      }, { signal });
+    }
+
     this.container.querySelectorAll('.view-quotation-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const { Quotations } = await import('../quotations/quotations.js');

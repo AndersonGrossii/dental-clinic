@@ -684,7 +684,7 @@ export class Quotations {
     });
   }
 
-  async showQuoteModal(quoteId = null) {
+  async showQuoteModal(quoteId = null, preselectedPatientId = null, onSuccess = null) {
     const isEdit = !!quoteId;
     let q = { items: [{ description: '', quantity: 1, unit_price: 0, discount: 0 }] };
 
@@ -715,8 +715,9 @@ export class Quotations {
     const doctorList = Array.isArray(doctors) ? doctors : [];
     const treatmentList = Array.isArray(treatments) ? treatments : [];
 
+    const selectedPatientId = q.patient_id || preselectedPatientId;
     const patientOptions = patientList.map(p =>
-      `<option value="${p.id}" ${p.id == q.patient_id ? 'selected' : ''}>[${p.custom_id || 'N/A'}] ${p.first_name} ${p.last_name}</option>`
+      `<option value="${p.id}" ${p.id == selectedPatientId ? 'selected' : ''}>[${p.custom_id || 'N/A'}] ${p.first_name} ${p.last_name}</option>`
     ).join('');
     const doctorOptions = doctorList.map(d =>
       `<option value="${d.id}" ${d.id == q.doctor_id ? 'selected' : ''}>${d.first_name} ${d.last_name} (${d.specialty || ''})</option>`
@@ -834,8 +835,12 @@ export class Quotations {
             await quotationService.create(payload);
             toast.success('Presupuesto generado exitosamente');
           }
-          await this.render();
-          this.mount();
+          if (onSuccess) {
+            await onSuccess();
+          } else {
+            await this.render();
+            this.mount();
+          }
           return true;
         } catch (err) {
           const fieldErrors = err.details;
