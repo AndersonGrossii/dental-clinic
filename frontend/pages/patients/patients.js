@@ -140,8 +140,11 @@ export class Patients {
         ${this.isDoctor ? '' : `<td><span style="color: ${balanceColor}; font-weight: 600;">${balanceLabel}</span></td>`}
         <td><span class="badge ${pat.is_active ? 'badge-success' : 'badge-danger'}">${pat.is_active ? 'Activo' : 'Inactivo'}</span></td>
         <td>
-          <a href="#/patients/${pat.id}" class="btn btn-sm btn-outline">Perfil</a>
-          <button class="btn btn-sm btn-secondary edit-patient-btn" data-id="${pat.id}">Editar</button>
+          <div style="display: flex; gap: 4px;">
+            <a href="#/patients/${pat.id}" class="btn btn-sm btn-outline">Perfil</a>
+            <button class="btn btn-sm btn-secondary edit-patient-btn" data-id="${pat.id}">Editar</button>
+            <button class="btn btn-sm btn-danger delete-patient-btn" data-id="${pat.id}" data-name="${pat.first_name} ${pat.last_name}" title="Eliminar Paciente">🗑️</button>
+          </div>
         </td>
       </tr>
     `;
@@ -226,19 +229,42 @@ export class Patients {
       addBtn.addEventListener('click', () => this.showPatientModal());
     }
 
-    // Botones de editar (usando delegación de eventos)
-    this.handleEditClick = (e) => {
-      if (e.target.classList.contains('edit-patient-btn')) {
-        const id = e.target.getAttribute('data-id');
+    // Event delegation for edit and delete patient buttons
+    this.handleTableActions = (e) => {
+      const editBtn = e.target.closest('.edit-patient-btn');
+      if (editBtn) {
+        const id = editBtn.getAttribute('data-id');
         this.showPatientModal(id);
+        return;
+      }
+
+      const deleteBtn = e.target.closest('.delete-patient-btn');
+      if (deleteBtn) {
+        const id = deleteBtn.getAttribute('data-id');
+        const name = deleteBtn.getAttribute('data-name');
+        Modal.confirm(
+          'Eliminar Paciente',
+          `¿Está seguro de eliminar al paciente "${name}"? Esta acción es reversible (eliminación lógica).`,
+          async () => {
+            try {
+              await patientService.remove(id);
+              toast.success('Paciente eliminado exitosamente.');
+              await this.loadPatients();
+              return true;
+            } catch (err) {
+              toast.error(err.message || 'Error al eliminar el paciente.');
+              return false;
+            }
+          }
+        );
       }
     };
-    this.container.addEventListener('click', this.handleEditClick);
+    this.container.addEventListener('click', this.handleTableActions);
   }
 
   destroy() {
-    if (this.handleEditClick) {
-      this.container.removeEventListener('click', this.handleEditClick);
+    if (this.handleTableActions) {
+      this.container.removeEventListener('click', this.handleTableActions);
     }
     clearTimeout(this.searchTimeout);
   }

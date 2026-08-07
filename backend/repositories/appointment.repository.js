@@ -50,6 +50,8 @@ class AppointmentRepository extends BaseRepository {
     if (filters.status_id) {
       conditions.push(`a.status_id = $${paramIndex++}`);
       params.push(filters.status_id);
+    } else if (!filters.patient_id && filters.exclude_cancelled !== false) {
+      conditions.push("s.name != 'cancelada'");
     }
 
     if (filters.date_from) {
@@ -94,6 +96,7 @@ class AppointmentRepository extends BaseRepository {
        INNER JOIN patients p ON a.patient_id = p.id
        INNER JOIN doctors d ON a.doctor_id = d.id
        INNER JOIN users u ON d.user_id = u.id
+       INNER JOIN appointment_status s ON a.status_id = s.id
        ${whereClause}`,
       params
     );
@@ -119,6 +122,7 @@ class AppointmentRepository extends BaseRepository {
          a.updated_at,
          p.first_name AS patient_first_name,
          p.last_name AS patient_last_name,
+         p.custom_id AS custom_id,
          CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
          p.phone AS patient_phone,
          u.first_name AS doctor_first_name,
@@ -209,7 +213,7 @@ class AppointmentRepository extends BaseRepository {
    * @returns {Promise<Array>}
    */
   async findByDoctorAndDate(doctorId, date) {
-    const conditions = ['a.doctor_id = $1', 'a.appointment_date = $2', 'a.deleted_at IS NULL'];
+    const conditions = ['a.doctor_id = $1', 'a.appointment_date = $2', 'a.deleted_at IS NULL', "s.name != 'cancelada'"];
     const params = [doctorId, date];
     scopeClinic(conditions, params, 'a');
 
@@ -252,6 +256,7 @@ class AppointmentRepository extends BaseRepository {
   async findByDateRange(startDate, endDate, doctorId = null) {
     const conditions = [
       'a.deleted_at IS NULL',
+      "s.name != 'cancelada'",
       'u.is_active = TRUE',
       `NOT EXISTS (
         SELECT 1 
@@ -288,6 +293,7 @@ class AppointmentRepository extends BaseRepository {
          a.reason,
          a.gabinete,
          a.is_first_visit,
+         p.custom_id AS custom_id,
          CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
          CONCAT(u.first_name, ' ', u.last_name) AS doctor_name,
          d.color AS doctor_color,

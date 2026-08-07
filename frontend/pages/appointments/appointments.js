@@ -116,7 +116,7 @@ export class Appointments {
       if (this.filters.search) params.search = this.filters.search;
 
       const apptsResponse = await appointmentService.getAll(params);
-      this.appointmentsList = apptsResponse || [];
+      this.appointmentsList = (apptsResponse || []).filter(a => a.status_name !== 'cancelada');
 
       if (onlyRefreshAppointments) {
         return;
@@ -811,9 +811,14 @@ export class Appointments {
       const getDocId = (a) => a.doctor_id || a.doctor?.id || null;
       const getDocName = (a) => a.doctor_name || a.doctor?.fullName || a.doctorName || 'Sin doctor';
       const getDocSpec = (a) => a.doctor_specialty || a.doctor?.specialty || '';
-      const getPatient = (a) => a.patient_name || a.patient?.fullName || 'Sin paciente';
+      const getPatientName = (a) => a.patient_name || a.patient?.fullName || 'Sin paciente';
       const getTreatment = (a) => a.treatment || a.treatment_name || a.reason || '';
-      const getStatus = (a) => a.status_label || a.status_name || '';
+      const getID = (a) => a.custom_id || a.customId || a.patient_custom_id || a.patient?.customId || a.patient?.custom_id || (a.patient_id || a.patientId ? `PAC-${String(a.patient_id || a.patientId).padStart(5, '0')}` : '');
+      const getPatientWithId = (a) => {
+        const idStr = getID(a);
+        const nameStr = getPatientName(a);
+        return idStr ? `[${idStr}] ${nameStr}` : nameStr;
+      };
 
       // Group appointments by doctor id
       const groupsByDocId = {};
@@ -886,11 +891,7 @@ export class Appointments {
       // Styles
       const cellStyle = 'border: 1px solid #ddd; padding: 6px 10px; font-size: 12px;';
       const thStyle = `${cellStyle} background: #f0f0f0; font-weight: 600; text-align: left;`;
-      const statusColors = {
-        scheduled: '#2563eb', confirmed: '#059669', completed: '#6b7280',
-        cancelled: '#dc2626', no_show: '#d97706', in_progress: '#7c3aed'
-      };
-
+      
       // Build one page section per doctor
       const doctorPages = doctorsToShow.map((doc, idx) => {
         const docApptCount = doc.appointments.length;
@@ -906,9 +907,8 @@ export class Appointments {
           const statusColor = match ? match.status_color || '#333' : '#333';
           rows += `<tr>
             <td style="${cellStyle}font-weight:600;color:#555;width:60px;">${slot}</td>
-            <td style="${cellStyle}${match ? '' : 'color:#ccc;'}">${match ? getPatient(match) : '—'}</td>
+            <td style="${cellStyle}${match ? '' : 'color:#ccc;'}">${match ? getPatientWithId(match) : '—'}</td>
             <td style="${cellStyle}${match ? '' : 'color:#ccc;'}">${match ? getTreatment(match) : ''}</td>
-            <td style="${cellStyle}"><span style="color:${statusColor};font-weight:500;">${match ? getStatus(match) : ''}</span></td>
           </tr>`;
         });
 
@@ -934,7 +934,6 @@ export class Appointments {
                   <th style="${thStyle}width:60px;">Hora</th>
                   <th style="${thStyle}">Paciente</th>
                   <th style="${thStyle}">Tratamiento</th>
-                  <th style="${thStyle}width:110px;">Estado</th>
                 </tr>
               </thead>
               <tbody>${rows}</tbody>
@@ -1016,9 +1015,15 @@ export class Appointments {
       const getDocId = (a) => a.doctor_id || a.doctor?.id || null;
       const getDocName = (a) => a.doctor_name || a.doctor?.fullName || a.doctorName || 'Sin doctor';
       const getDocSpec = (a) => a.doctor_specialty || a.doctor?.specialty || '';
-      const getPatient = (a) => a.patient_name || a.patient?.fullName || 'Sin paciente';
+      const getPatientName = (a) => a.patient_name || a.patient?.fullName || 'Sin paciente';
       const getTreatment = (a) => a.treatment || a.treatment_name || a.reason || '';
       const getStatus = (a) => a.status_label || a.status_name || '';
+      const getID = (a) => a.custom_id || a.customId || a.patient_custom_id || a.patient?.customId || a.patient?.custom_id || (a.patient_id || a.patientId ? `PAC-${String(a.patient_id || a.patientId).padStart(5, '0')}` : '');
+      const getPatientWithId = (a) => {
+        const idStr = getID(a);
+        const nameStr = getPatientName(a);
+        return idStr ? `[${idStr}] ${nameStr}` : nameStr;
+      };
 
       // Group appointments by doctor id then by date
       const groupsByDocId = {};
@@ -1163,7 +1168,7 @@ export class Appointments {
             if (match) {
               const statusColor = match.status_color || '#333';
               rows += `<td style="${cellStyle}">
-                <div style="font-weight:600;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">${getPatient(match)}</div>
+                <div style="font-weight:600;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">${getPatientWithId(match)}</div>
                 <div style="font-size:9px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">${getTreatment(match)}</div>
                 <div style="font-size:9px;color:${statusColor};font-weight:500;">${getStatus(match)}</div>
               </td>`;

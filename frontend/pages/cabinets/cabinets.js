@@ -39,8 +39,8 @@ export class Cabinets {
       sortOrder: 'ASC'
     };
 
-    // Obtener todas las citas de la semana
-    this.appointmentsList = await appointmentService.getAll(params) || [];
+    const rawList = await appointmentService.getAll(params) || [];
+    this.appointmentsList = rawList.filter(a => a.status_name !== 'cancelada');
   }
 
   renderView() {

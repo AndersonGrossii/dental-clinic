@@ -62,7 +62,7 @@ router.put('/:id', staffOnly, validate(updatePatientRules), auditMiddleware('ACT
  * @desc    Eliminar un paciente (soft delete)
  * @access  Propietario, Recepcionista
  */
-router.delete('/:id', staffOnly, auditMiddleware('ELIMINAR_PACIENTE', 'patients'), patientController.remove);
+router.delete('/:id', allRoles, auditMiddleware('ELIMINAR_PACIENTE', 'patients'), patientController.remove);
 
 /**
  * @route   GET /api/v1/patients/:id/history

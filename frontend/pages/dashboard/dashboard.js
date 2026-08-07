@@ -70,7 +70,7 @@ export class Dashboard {
         params.doctor_id = user.doctor_id;
       }
       const list = await appointmentService.getAll(params);
-      this.appointmentsList = Array.isArray(list) ? list : [];
+      this.appointmentsList = (Array.isArray(list) ? list : []).filter(a => a.status_name !== 'cancelada');
     } catch (err) {
       toast.error('Error al cargar citas de la semana');
       this.appointmentsList = [];
@@ -82,7 +82,7 @@ export class Dashboard {
       const dashboardData = await reportService.getDashboard();
       const stats = dashboardData.stats || {};
       this.role = dashboardData.role || '';
-      this.todayAppointments = dashboardData.todayAppointments || [];
+      this.todayAppointments = (dashboardData.todayAppointments || []).filter(a => a.status_name !== 'cancelada' && a.status !== 'cancelada');
 
       await this.loadAppointmentsForWeek();
 

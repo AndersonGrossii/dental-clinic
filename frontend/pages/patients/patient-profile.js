@@ -679,9 +679,10 @@ export class PatientProfile {
             </div>
           </div>
         </div>
-        <div style="display: flex; gap: var(--space-2);">
+        <div style="display: flex; gap: var(--space-2); flex-wrap: wrap;">
           <button id="schedule-appointment-btn" class="btn btn-primary">📅 Agendar Cita</button>
           <button id="edit-patient-profile-btn" class="btn btn-secondary">Editar Datos</button>
+          <button id="delete-patient-profile-btn" class="btn btn-danger" title="Eliminar este paciente">🗑️ Eliminar</button>
           <a href="#/patients" class="btn btn-outline">⬅ Volver al Directorio</a>
         </div>
       </div>
@@ -760,6 +761,29 @@ export class PatientProfile {
     const editBtn = this.container.querySelector('#edit-patient-profile-btn');
     if (editBtn) {
       editBtn.addEventListener('click', () => this.showPatientModal(), { signal });
+    }
+
+    // Eliminar paciente desde el perfil
+    const deleteBtn = this.container.querySelector('#delete-patient-profile-btn');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', () => {
+        const patName = `${this.patient?.first_name || ''} ${this.patient?.last_name || ''}`;
+        Modal.confirm(
+          'Eliminar Paciente',
+          `¿Está seguro de eliminar al paciente "${patName}"? Esta acción es reversible (eliminación lógica).`,
+          async () => {
+            try {
+              await patientService.remove(this.patientId);
+              toast.success('Paciente eliminado exitosamente.');
+              window.location.hash = '#/patients';
+              return true;
+            } catch (err) {
+              toast.error(err.message || 'Error al eliminar el paciente.');
+              return false;
+            }
+          }
+        );
+      }, { signal });
     }
 
     // Agendar cita
