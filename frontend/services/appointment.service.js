@@ -31,6 +31,10 @@ class AppointmentService {
     return await api.delete(`/appointments/${id}`);
   }
 
+  async convertPatient(id, patientId) {
+    return await api.post(`/appointments/${id}/convert-patient`, { patient_id: patientId });
+  }
+
   async getCalendar(startDate, endDate, doctorId = null) {
     const params = { start_date: startDate, end_date: endDate };
     if (doctorId) params.doctor_id = doctorId;

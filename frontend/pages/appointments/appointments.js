@@ -812,12 +812,14 @@ export class Appointments {
       const getDocName = (a) => a.doctor_name || a.doctor?.fullName || a.doctorName || 'Sin doctor';
       const getDocSpec = (a) => a.doctor_specialty || a.doctor?.specialty || '';
       const getPatientName = (a) => a.patient_name || a.patient?.fullName || 'Sin paciente';
+      const getPatientPhone = (a) => a.patient_phone || a.patient?.phone || '';
       const getTreatment = (a) => a.treatment || a.treatment_name || a.reason || '';
       const getID = (a) => a.custom_id || a.customId || a.patient_custom_id || a.patient?.customId || a.patient?.custom_id || (a.patient_id || a.patientId ? `PAC-${String(a.patient_id || a.patientId).padStart(5, '0')}` : '');
       const getPatientWithId = (a) => {
         const idStr = getID(a);
-        const nameStr = getPatientName(a);
-        return idStr ? `[${idStr}] ${nameStr}` : nameStr;
+        const nameStr = getPatientName(a)
+        const phoneStr = getPatientPhone(a);
+        return idStr ? `[${idStr}] ${nameStr} - ${phoneStr}` : `${nameStr} - ${phoneStr}`;
       };
 
       // Group appointments by doctor id
@@ -1018,11 +1020,13 @@ export class Appointments {
       const getPatientName = (a) => a.patient_name || a.patient?.fullName || 'Sin paciente';
       const getTreatment = (a) => a.treatment || a.treatment_name || a.reason || '';
       const getStatus = (a) => a.status_label || a.status_name || '';
+      const getPhone = (a) => a.patient_phone || a.patient?.phone || '';
       const getID = (a) => a.custom_id || a.customId || a.patient_custom_id || a.patient?.customId || a.patient?.custom_id || (a.patient_id || a.patientId ? `PAC-${String(a.patient_id || a.patientId).padStart(5, '0')}` : '');
       const getPatientWithId = (a) => {
         const idStr = getID(a);
         const nameStr = getPatientName(a);
-        return idStr ? `[${idStr}] ${nameStr}` : nameStr;
+        const phoneStr = getPhone(a);
+        return idStr ? `[${idStr}] ${nameStr} - ${phoneStr}` : `${nameStr} - ${phoneStr}`;
       };
 
       // Group appointments by doctor id then by date
@@ -1127,13 +1131,13 @@ export class Appointments {
       const allIds = new Set(list.map(a => a.id));
       const totalAppts = allIds.size;
 
-      // Styles
-      const cellStyle = 'border: 1px solid #ddd; padding: 4px 6px; font-size: 10px; vertical-align: top;';
+      // // Styles
+      const cellStyle = 'border: 1px solid #ddd; padding: 4px 6px; font-size: 10px; vertical-align: top; height: 20px';
       const thStyle = `${cellStyle} background: #f0f0f0; font-weight: 600; text-align: center; font-size: 11px;`;
-      const statusColors = {
-        scheduled: '#2563eb', confirmed: '#059669', completed: '#6b7280',
-        cancelled: '#dc2626', no_show: '#d97706', in_progress: '#7c3aed'
-      };
+      // const statusColors = {
+      //   scheduled: '#2563eb', confirmed: '#059669', completed: '#6b7280',
+      //   cancelled: '#dc2626', no_show: '#d97706', in_progress: '#7c3aed'
+      // };
 
       // Build one page per doctor
       const doctorPages = doctorsToShow.map((doc, idx) => {
@@ -1170,7 +1174,6 @@ export class Appointments {
               rows += `<td style="${cellStyle}">
                 <div style="font-weight:600;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">${getPatientWithId(match)}</div>
                 <div style="font-size:9px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">${getTreatment(match)}</div>
-                <div style="font-size:9px;color:${statusColor};font-weight:500;">${getStatus(match)}</div>
               </td>`;
             } else {
               rows += `<td style="${cellStyle}color:#ddd;text-align:center;">—</td>`;
@@ -1249,44 +1252,49 @@ export class Appointments {
 
     const content = `
       <form id="add-appointment-form">
-        <div class="form-group">
-          <label class="form-label">Buscar Paciente</label>
-          <div style="display: flex; gap: var(--space-2);">
-            <input type="text" id="appointment-patient-search" class="form-input" placeholder="Nombre, DNI, teléfono o correo" />
-            <button type="button" id="appointment-patient-search-btn" class="btn btn-secondary">Buscar</button>
-          </div>
-          <input type="hidden" name="patient_id" />
-          <div id="appointment-selected-patient" style="margin-top: var(--space-2); color: var(--color-text-secondary);">
-            Ningún paciente seleccionado.
-          </div>
-          <div id="appointment-patient-results" style="margin-top: var(--space-2);"></div>
+        <div style="display: flex; gap: 8px; margin-bottom: var(--space-4); background: var(--color-bg-secondary); padding: 4px; border-radius: var(--radius-md); border: 1px solid var(--color-border-light);">
+          <button type="button" id="tab-mode-registered" class="btn btn-sm btn-primary" style="flex:1;">👤 Paciente Registrado</button>
+          <button type="button" id="tab-mode-guest" class="btn btn-sm btn-outline" style="flex:1;">✨ Primera Visita / Invitado</button>
         </div>
-        <div class="form-group" style="margin-top: var(--space-3); border-top: 1px solid var(--color-border); padding-top: var(--space-3);">
-          <button type="button" id="toggle-new-patient-btn" class="btn btn-outline">+ Agregar Paciente Nuevo</button>
-          <div id="new-patient-fields" style="display: none; margin-top: var(--space-3);">
-            <div class="form-row-responsive">
-              <div class="form-group" style="margin: 0;">
-                <label class="form-label">Nombre</label>
-                <input type="text" id="new-patient-first-name" class="form-input" />
-              </div>
-              <div class="form-group" style="margin: 0;">
-                <label class="form-label">Apellido</label>
-                <input type="text" id="new-patient-last-name" class="form-input" />
-              </div>
+
+        <!-- Mode Registered Patient -->
+        <div id="mode-registered-container">
+          <div class="form-group">
+            <label class="form-label">Buscar Paciente Registrado</label>
+            <div style="display: flex; gap: var(--space-2);">
+              <input type="text" id="appointment-patient-search" class="form-input" placeholder="Nombre, DNI, teléfono o correo" />
+              <button type="button" id="appointment-patient-search-btn" class="btn btn-secondary">Buscar</button>
             </div>
-            <div class="form-row-responsive" style="margin-top: var(--space-3);">
-              <div class="form-group" style="margin: 0;">
-                <label class="form-label">Teléfono</label>
-                <input type="text" id="new-patient-phone" class="form-input" />
-              </div>
-              <div class="form-group" style="margin: 0;">
-                <label class="form-label">Correo</label>
-                <input type="email" id="new-patient-email" class="form-input" />
-              </div>
+            <input type="hidden" name="patient_id" />
+            <div id="appointment-selected-patient" style="margin-top: var(--space-2); color: var(--color-text-secondary);">
+              Ningún paciente seleccionado.
             </div>
-            <button type="button" id="create-patient-for-appointment-btn" class="btn btn-secondary" style="margin-top: var(--space-3);">Crear y Seleccionar Paciente</button>
+            <div id="appointment-patient-results" style="margin-top: var(--space-2);"></div>
           </div>
         </div>
+
+        <!-- Mode Guest / First Visit -->
+        <div id="mode-guest-container" style="display: none; padding: 14px; background: rgba(6,182,212,0.06); border: 1px solid rgba(6,182,212,0.3); border-radius: var(--radius-md);">
+          <div style="font-size: 0.825rem; font-weight: 600; color: #0891b2; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+            <span>✨ Primera Visita / Registro Rápido</span>
+            <span style="font-size: 0.725rem; color: var(--color-text-secondary); font-weight: 400;">(Sin crear expediente completo)</span>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Nombre y Apellido <span style="color:var(--danger-500);">*</span></label>
+            <input type="text" name="guest_name" class="form-input" placeholder="Ej: María López" />
+          </div>
+          <div class="form-row-responsive" style="margin-top: var(--space-3);">
+            <div class="form-group" style="margin: 0;">
+              <label class="form-label">Teléfono de Contacto</label>
+              <input type="text" name="guest_phone" class="form-input" placeholder="Ej: 600 123 456" />
+            </div>
+            <div class="form-group" style="margin: 0;">
+              <label class="form-label">Correo Electrónico</label>
+              <input type="email" name="guest_email" class="form-input" placeholder="Ej: maria@ejemplo.com" />
+            </div>
+          </div>
+        </div>
+
         ${this.isDoctor ? `
           <input type="hidden" name="doctor_id" value="${state.get('user')?.doctor_id}" />
         ` : `
@@ -1335,9 +1343,21 @@ export class Appointments {
         const form = modalBody.querySelector('#add-appointment-form');
         const formData = new FormData(form);
         const data = Object.fromEntries(formData.entries());
-        data.patient_id = Number(data.patient_id);
+
+        const isGuestMode = modalBody.querySelector('#mode-guest-container')?.style.display !== 'none';
+        if (isGuestMode) {
+          const guestName = form.querySelector('[name="guest_name"]')?.value?.trim();
+          if (!guestName) { toast.error('Escriba el nombre del paciente temporal'); return false; }
+          delete data.patient_id;
+          data.guest_name = guestName;
+          data.guest_phone = form.querySelector('[name="guest_phone"]')?.value?.trim() || null;
+          data.guest_email = form.querySelector('[name="guest_email"]')?.value?.trim() || null;
+        } else {
+          data.patient_id = Number(data.patient_id);
+          if (!data.patient_id) { toast.error('Seleccione o busque un paciente registrado'); return false; }
+        }
+
         data.doctor_id = Number(data.doctor_id);
-        if (!data.patient_id) { toast.error('Seleccione o cree un paciente'); return false; }
         if (!data.doctor_id) { toast.error('Seleccione un doctor'); return false; }
         const selDate = new Date(data.appointment_date + 'T12:00:00');
         const selDow = selDate.getDay();
@@ -1359,6 +1379,26 @@ export class Appointments {
 
     const overlay = document.querySelector('.modal-overlay');
     if (!overlay) return;
+
+    const tabReg = overlay.querySelector('#tab-mode-registered');
+    const tabGuest = overlay.querySelector('#tab-mode-guest');
+    const modeRegCont = overlay.querySelector('#mode-registered-container');
+    const modeGuestCont = overlay.querySelector('#mode-guest-container');
+
+    if (tabReg && tabGuest && modeRegCont && modeGuestCont) {
+      tabReg.addEventListener('click', () => {
+        tabReg.className = 'btn btn-sm btn-primary';
+        tabGuest.className = 'btn btn-sm btn-outline';
+        modeRegCont.style.display = 'block';
+        modeGuestCont.style.display = 'none';
+      });
+      tabGuest.addEventListener('click', () => {
+        tabGuest.className = 'btn btn-sm btn-primary';
+        tabReg.className = 'btn btn-sm btn-outline';
+        modeRegCont.style.display = 'none';
+        modeGuestCont.style.display = 'block';
+      });
+    }
 
     if (options.patientId && options.patientName) {
       const pIdInput = overlay.querySelector('[name="patient_id"]');
@@ -1541,9 +1581,10 @@ export class Appointments {
     const statuses = [
       { value: 'programada',  label: 'Programada',   color: '#0891b2', icon: '📅', desc: 'Cita agendada y pendiente' },
       { value: 'confirmada',  label: 'Confirmada',   color: '#16a34a', icon: '✅', desc: 'El paciente confirmó asistencia' },
+      { value: 'sala',        label: 'En Sala',      color: '#06b6d4', icon: '🛋️', desc: 'El paciente está en la clínica esperando atención' },
       { value: 'en_consulta', label: 'En Consulta',  color: '#7c3aed', icon: '🩺', desc: 'El paciente está en atención' },
       { value: 'completada',  label: 'Completada',   color: '#15803d', icon: '🎉', desc: 'Consulta finalizada exitosamente' },
-      { value: 'cancelada',   label: 'Cancelada',    color: '#dc2626', icon: '❌', desc: 'Cita cancelada (requiere motivo)' },
+      { value: 'cancelada',   label: 'Cancelada',    color: '#dc2626', icon: '❌', desc: 'Cita cancelada' },
       { value: 'no_asistio',  label: 'No Asistió',   color: '#d97706', icon: '⚠️', desc: 'El paciente no se presentó' },
       { value: 'reprogramada', label: 'Reprogramada', color: '#8b5cf6', icon: '🔄', desc: 'La cita fue movida de fecha u horario' },
     ];
@@ -1586,10 +1627,21 @@ export class Appointments {
       <form id="change-status-form">
         <div style="margin-bottom: var(--space-3); border-bottom: 1px solid var(--color-border-light); padding-bottom: var(--space-3); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
           <div>
-            <div style="font-size: var(--text-lg); font-weight: 700; color: var(--color-text);">Paciente: ${appt.patient_name || '—'}</div>
+            <div style="font-size: var(--text-lg); font-weight: 700; color: var(--color-text); display: flex; align-items: center; gap: 8px;">
+              <span>Paciente: ${appt.patient_name || '—'}</span>
+              ${!appt.patient_id ? `<span class="badge badge-info" style="font-size: 0.725rem; font-weight: 600; padding: 2px 8px;">✨ Primera Visita</span>` : ''}
+            </div>
             ${appt.treatment_name ? `<div style="font-size: var(--text-sm); color: var(--color-text-secondary); margin-top: 2px;">Tratamiento: ${appt.treatment_name}</div>` : ''}
+            ${!appt.patient_id && (appt.guest_phone || appt.guest_email) ? `<div style="font-size: var(--text-xs); color: var(--color-text-tertiary); margin-top: 2px;">${appt.guest_phone ? `📞 ${appt.guest_phone}` : ''} ${appt.guest_email ? `| ✉️ ${appt.guest_email}` : ''}</div>` : ''}
           </div>
-          ${appt.patient_id ? `<a href="#/patients/${appt.patient_id}" class="btn btn-sm btn-outline" style="text-decoration:none;">👤 Perfil Paciente</a>` : ''}
+          <div style="display: flex; gap: 8px; align-items: center;">
+            ${appt.patient_id ? `
+              <a href="#/patients/${appt.patient_id}" class="btn btn-sm btn-outline" style="text-decoration:none;">👤 Perfil Paciente</a>
+            ` : `
+              <button type="button" id="convert-guest-to-patient-btn" class="btn btn-sm btn-primary" style="display:inline-flex; align-items:center; gap:4px; font-weight:600;">➕ Crear Expediente</button>
+            `}
+            <button type="button" id="delete-appointment-in-modal-btn" class="btn btn-sm btn-danger" style="display:inline-flex; align-items:center; gap:4px; font-weight:600;">🗑️ Eliminar Cita</button>
+          </div>
         </div>
         <div class="manage-appt-grid">
           <!-- Columna Izquierda: Reprogramar -->
@@ -1739,5 +1791,95 @@ export class Appointments {
       });
     });
     updateSelected();
+
+    const deleteBtn = overlay.querySelector('#delete-appointment-in-modal-btn');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        Modal.confirm(
+          'Eliminar Cita Médica',
+          '¿Está seguro de eliminar esta cita médica de la agenda?',
+          async () => {
+            try {
+              await appointmentService.remove(appointmentId);
+              toast.success('Cita eliminada exitosamente');
+              Modal.closeAll();
+              if (onSuccess) {
+                await onSuccess();
+              } else {
+                this.render({}, true);
+              }
+              return true;
+            } catch (err) {
+              toast.error(err.message || 'Error al eliminar la cita');
+              return false;
+            }
+          }
+        );
+      });
+    }
+    const convertBtn = overlay.querySelector('#convert-guest-to-patient-btn');
+    if (convertBtn) {
+      convertBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const names = (appt.guest_name || appt.patient_name || '').trim().split(' ');
+        const firstName = names[0] || '';
+        const lastName = names.slice(1).join(' ') || '';
+
+        Modal.show({
+          title: 'Crear Expediente Completo de Paciente',
+          content: `
+            <form id="convert-patient-form" class="patient-form-grid">
+              <div class="form-group">
+                <label class="form-label">Nombres <span style="color:var(--danger-500);">*</span></label>
+                <input type="text" name="first_name" class="form-input" value="${firstName}" required />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Apellidos <span style="color:var(--danger-500);">*</span></label>
+                <input type="text" name="last_name" class="form-input" value="${lastName}" required />
+              </div>
+              <div class="form-group">
+                <label class="form-label">DNI / NIF</label>
+                <input type="text" name="dni" class="form-input" placeholder="Ej: 12345678Z" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Teléfono Móvil</label>
+                <input type="text" name="phone" class="form-input" value="${appt.guest_phone || appt.patient_phone || ''}" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Correo Electrónico</label>
+                <input type="email" name="email" class="form-input" value="${appt.guest_email || ''}" />
+              </div>
+            </form>
+          `,
+          confirmText: 'Crear Expediente y Vincular',
+          size: 'md',
+          onConfirm: async (convertBody) => {
+            const form = convertBody.querySelector('#convert-patient-form');
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+            if (!data.first_name || !data.last_name) {
+              toast.error('Nombre y Apellido son obligatorios');
+              return false;
+            }
+            try {
+              const newPatient = await patientService.create(data);
+              await appointmentService.convertPatient(appointmentId, newPatient.id);
+              toast.success('Expediente creado y cita vinculada exitosamente');
+              Modal.closeAll();
+              if (onSuccess) {
+                await onSuccess();
+              } else {
+                this.render({}, true);
+              }
+              return true;
+            } catch (err) {
+              toast.error(err.message || 'Error al crear el expediente');
+              return false;
+            }
+          }
+        });
+      });
+    }
   }
 }

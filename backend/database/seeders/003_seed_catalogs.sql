@@ -6,11 +6,12 @@
 INSERT INTO appointment_status (name, label, color, sort_order) VALUES
   ('programada', 'Programada', '#3b82f6', 1),
   ('confirmada', 'Confirmada', '#10b981', 2),
-  ('en_consulta', 'En Consulta', '#f59e0b', 3),
-  ('completada', 'Completada', '#22c55e', 4),
-  ('cancelada', 'Cancelada', '#ef4444', 5),
-  ('no_asistio', 'No Asistió', '#6b7280', 6),
-  ('reprogramada', 'Reprogramada', '#8b5cf6', 7)
+  ('sala', 'En Sala', '#06b6d4', 3),
+  ('en_consulta', 'En Consulta', '#f59e0b', 4),
+  ('completada', 'Completada', '#22c55e', 5),
+  ('cancelada', 'Cancelada', '#ef4444', 6),
+  ('no_asistio', 'No Asistió', '#6b7280', 7),
+  ('reprogramada', 'Reprogramada', '#8b5cf6', 8)
 ON CONFLICT (name) DO NOTHING;
 
 -- Métodos de pago

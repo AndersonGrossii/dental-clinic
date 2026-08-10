@@ -9,6 +9,7 @@ export function getAppointmentStatusClass(statusName) {
   switch (statusName) {
     case 'programada': return 'badge-info';
     case 'confirmada': return 'badge-success';
+    case 'sala': return 'badge-info';
     case 'en_consulta': return 'badge-warning';
     case 'completada': return 'badge-success';
     case 'cancelada': return 'badge-danger';

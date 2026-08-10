@@ -8,6 +8,13 @@
  */
 export const createPatientRules = [
   {
+    field: 'custom_id',
+    label: 'Código de Paciente',
+    required: false,
+    type: 'string',
+    maxLength: 50,
+  },
+  {
     field: 'first_name',
     label: 'Nombre',
     required: true,

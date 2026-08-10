@@ -121,7 +121,7 @@ class PatientService {
     const nextCustomId = await this.generateNextCustomId();
 
     const patientData = {
-      custom_id: nextCustomId,
+      custom_id: data.custom_id || nextCustomId,
       first_name: data.first_name,
       last_name: data.last_name,
       dni: data.dni || null,
@@ -188,6 +188,7 @@ class PatientService {
 
     const updateData = {};
 
+    if (data.custom_id !== undefined) updateData.custom_id = data.custom_id;
     if (data.first_name !== undefined) updateData.first_name = data.first_name;
     if (data.last_name !== undefined) updateData.last_name = data.last_name;
     if (data.dni !== undefined) updateData.dni = data.dni;

@@ -10,8 +10,29 @@ export const createAppointmentRules = [
   {
     field: 'patient_id',
     label: 'Paciente',
-    required: true,
+    required: false,
     type: 'number',
+  },
+  {
+    field: 'guest_name',
+    label: 'Nombre de Paciente Temporal',
+    required: false,
+    type: 'string',
+    maxLength: 150,
+  },
+  {
+    field: 'guest_phone',
+    label: 'Teléfono de Paciente Temporal',
+    required: false,
+    type: 'string',
+    maxLength: 30,
+  },
+  {
+    field: 'guest_email',
+    label: 'Email de Paciente Temporal',
+    required: false,
+    type: 'string',
+    maxLength: 100,
   },
   {
     field: 'doctor_id',
@@ -159,7 +180,7 @@ export const updateStatusRules = [
     label: 'Estado',
     required: true,
     type: 'string',
-    enum: ['programada', 'confirmada', 'en_consulta', 'completada', 'cancelada', 'no_asistio', 'reprogramada'],
+    enum: ['programada', 'confirmada', 'sala', 'en_consulta', 'completada', 'cancelada', 'no_asistio', 'reprogramada'],
   },
   {
     field: 'cancellation_reason',

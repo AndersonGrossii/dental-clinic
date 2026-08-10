@@ -128,6 +128,23 @@ export const remove = async (req, res, next) => {
 };
 
 /**
+ * Convierte una cita de invitado/primera visita en perfil de paciente.
+ */
+export const convertPatient = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { patient_id } = req.body;
+    if (!patient_id) {
+      return ApiResponse.error(res, 'ID del paciente es obligatorio.', 400);
+    }
+    const appointment = await appointmentService.convertGuestToPatient(id, patient_id);
+    return ApiResponse.success(res, appointment, 'Cita vinculada al expediente de paciente exitosamente');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Obtiene citas formateadas para vista de calendario.
  */
 export const getCalendar = async (req, res, next) => {

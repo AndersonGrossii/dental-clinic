@@ -12,7 +12,10 @@ CREATE TABLE IF NOT EXISTS appointment_status (
 
 CREATE TABLE IF NOT EXISTS appointments (
   id SERIAL PRIMARY KEY,
-  patient_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  patient_id INTEGER REFERENCES patients(id) ON DELETE CASCADE,
+  guest_name VARCHAR(150),
+  guest_phone VARCHAR(30),
+  guest_email VARCHAR(100),
   doctor_id INTEGER NOT NULL REFERENCES doctors(id) ON DELETE RESTRICT,
   status_id INTEGER NOT NULL REFERENCES appointment_status(id) DEFAULT 1,
   treatment_id INTEGER REFERENCES treatments(id),

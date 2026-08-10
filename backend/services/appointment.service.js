@@ -7,6 +7,7 @@ import { query, als } from '../database/pool.js';
 import { AppError } from '../utils/errors.js';
 import { toAppointmentDTO, toCalendarEventDTO } from '../dtos/appointment.dto.js';
 import { formatDateSQL } from '../utils/date.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Servicio que encapsula la lógica de negocio para la gestión de citas.
@@ -52,13 +53,18 @@ class AppointmentService {
    * @throws {AppError} Si hay conflicto de horario
    */
   async create(data, userId) {
-    // Verificar que el paciente existe
-    const patientResult = await query(
-      `SELECT id, first_name, last_name FROM patients WHERE id = $1 AND deleted_at IS NULL${this.getClinicCondition()}`,
-      [data.patient_id]
-    );
-    if (patientResult.rows.length === 0) {
-      throw new AppError('El paciente seleccionado no existe.', 404);
+    // Verificar que el paciente existe si se proporcionó un patient_id
+    let patientResult = null;
+    if (data.patient_id) {
+      patientResult = await query(
+        `SELECT id, first_name, last_name FROM patients WHERE id = $1 AND deleted_at IS NULL${this.getClinicCondition()}`,
+        [data.patient_id]
+      );
+      if (patientResult.rows.length === 0) {
+        throw new AppError('El paciente seleccionado no existe.', 404);
+      }
+    } else if (!data.guest_name) {
+      throw new AppError('Debe seleccionar un paciente o proporcionar un nombre para la primera visita.', 400);
     }
 
     // Verificar que el doctor existe
@@ -108,15 +114,21 @@ class AppointmentService {
     const statusId = statusResult.rows[0]?.id || 1;
 
     // Verificar si es primera visita del paciente
-    const previousVisits = await query(
-      `SELECT COUNT(*) AS total FROM appointments WHERE patient_id = $1 AND deleted_at IS NULL${this.getClinicCondition()}`,
-      [data.patient_id]
-    );
-    const isFirstVisit = parseInt(previousVisits.rows[0].total, 10) === 0;
+    let isFirstVisit = true;
+    if (data.patient_id) {
+      const previousVisits = await query(
+        `SELECT COUNT(*) AS total FROM appointments WHERE patient_id = $1 AND deleted_at IS NULL${this.getClinicCondition()}`,
+        [data.patient_id]
+      );
+      isFirstVisit = parseInt(previousVisits.rows[0].total, 10) === 0;
+    }
 
     // Crear la cita
     const appointmentData = {
-      patient_id: data.patient_id,
+      patient_id: data.patient_id || null,
+      guest_name: data.patient_id ? null : (data.guest_name || null),
+      guest_phone: data.patient_id ? null : (data.guest_phone || null),
+      guest_email: data.patient_id ? null : (data.guest_email || null),
       doctor_id: data.doctor_id,
       status_id: statusId,
       treatment_id: data.treatment_id || null,
@@ -132,19 +144,21 @@ class AppointmentService {
 
     const created = await appointmentRepository.create(appointmentData);
 
-    // Sincronizar notas si se proporcionaron
-    if (data.notes && data.notes.trim() !== '') {
+    // Sincronizar notas si se proporcionaron y existe paciente
+    if (data.notes && data.notes.trim() !== '' && data.patient_id) {
       await this.syncNotes(created.id, data.notes, data.patient_id, userId);
     }
 
     // Crear notificación para el doctor
     const doctor = doctorResult.rows[0];
-    const patient = patientResult.rows[0];
+    const patientName = data.patient_id && patientResult?.rows?.[0]
+      ? `${patientResult.rows[0].first_name} ${patientResult.rows[0].last_name}`
+      : (data.guest_name || 'Primera Visita');
     try {
       await notificationService.create({
         user_id: doctor.user_id,
         title: 'Nueva cita programada',
-        message: `Se ha programado una cita con ${patient.first_name} ${patient.last_name} para el ${data.appointment_date} a las ${data.start_time}.`,
+        message: `Se ha programado una cita con ${patientName} para el ${data.appointment_date} a las ${data.start_time}.`,
         type: 'info',
         reference_type: 'appointment',
         reference_id: created.id,
@@ -418,14 +432,34 @@ class AppointmentService {
    * Obtiene estadísticas del dashboard de citas.
    * @returns {Promise<object>}
    */
-  async getStats(doctorId = null) {
-    const stats = await appointmentRepository.getStats(doctorId);
-    return {
-      todayTotal: parseInt(stats.today_total, 10),
-      todayCompleted: parseInt(stats.today_completed, 10),
-      upcoming: parseInt(stats.upcoming, 10),
-      todayCancelled: parseInt(stats.today_cancelled, 10),
-    };
+  /**
+   * Convierte una cita de invitado/primera visita en una cita asociada a un perfil de paciente.
+   * @param {number} appointmentId
+   * @param {number} patientId
+   * @returns {Promise<object>}
+   */
+  async convertGuestToPatient(appointmentId, patientId) {
+    const appt = await appointmentRepository.findById(appointmentId);
+    if (!appt) {
+      throw new AppError('Cita no encontrada.', 404);
+    }
+
+    if (appt.guest_name) {
+      await query(
+        `UPDATE appointments 
+         SET patient_id = $1, guest_name = NULL, guest_phone = NULL, guest_email = NULL, updated_at = NOW() 
+         WHERE (id = $2 OR (guest_name ILIKE $3 AND patient_id IS NULL)) AND deleted_at IS NULL`,
+        [patientId, appointmentId, appt.guest_name]
+      );
+    } else {
+      await query(
+        `UPDATE appointments SET patient_id = $1, updated_at = NOW() WHERE id = $2`,
+        [patientId, appointmentId]
+      );
+    }
+
+    logger.info(`Cita ID ${appointmentId} convertida a perfil de paciente ID ${patientId}`);
+    return await appointmentRepository.findById(appointmentId);
   }
 }
 

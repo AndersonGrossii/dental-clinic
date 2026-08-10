@@ -118,13 +118,16 @@ class AppointmentRepository extends BaseRepository {
          a.gabinete,
          a.cancellation_reason,
          a.is_first_visit,
+         a.guest_name,
+         a.guest_phone,
+         a.guest_email,
          a.created_at,
          a.updated_at,
          p.first_name AS patient_first_name,
          p.last_name AS patient_last_name,
          p.custom_id AS custom_id,
-         CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
-         p.phone AS patient_phone,
+         CASE WHEN a.patient_id IS NOT NULL THEN CONCAT(p.first_name, ' ', p.last_name) ELSE COALESCE(a.guest_name, 'Primera Visita') END AS patient_name,
+         COALESCE(p.phone, a.guest_phone) AS patient_phone,
          u.first_name AS doctor_first_name,
          u.last_name AS doctor_last_name,
          CONCAT(u.first_name, ' ', u.last_name) AS doctor_name,
@@ -135,7 +138,7 @@ class AppointmentRepository extends BaseRepository {
          s.color AS status_color,
          t.name AS treatment_name
        FROM appointments a
-       INNER JOIN patients p ON a.patient_id = p.id
+       LEFT JOIN patients p ON a.patient_id = p.id
        INNER JOIN doctors d ON a.doctor_id = d.id
        INNER JOIN users u ON d.user_id = u.id
        INNER JOIN appointment_status s ON a.status_id = s.id
@@ -174,14 +177,18 @@ class AppointmentRepository extends BaseRepository {
          a.gabinete,
          a.cancellation_reason,
          a.is_first_visit,
+         a.guest_name,
+         a.guest_phone,
+         a.guest_email,
          a.created_by,
          a.created_at,
          a.updated_at,
          p.first_name AS patient_first_name,
          p.last_name AS patient_last_name,
-         CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
-         p.phone AS patient_phone,
-         p.email AS patient_email,
+         p.custom_id AS custom_id,
+         CASE WHEN a.patient_id IS NOT NULL THEN CONCAT(p.first_name, ' ', p.last_name) ELSE COALESCE(a.guest_name, 'Primera Visita') END AS patient_name,
+         COALESCE(p.phone, a.guest_phone) AS patient_phone,
+         COALESCE(p.email, a.guest_email) AS patient_email,
          p.dni AS patient_dni,
          u.first_name AS doctor_first_name,
          u.last_name AS doctor_last_name,
@@ -195,7 +202,7 @@ class AppointmentRepository extends BaseRepository {
          t.default_price AS treatment_price,
          t.duration_minutes AS treatment_duration
        FROM appointments a
-       INNER JOIN patients p ON a.patient_id = p.id
+       LEFT JOIN patients p ON a.patient_id = p.id
        INNER JOIN doctors d ON a.doctor_id = d.id
        INNER JOIN users u ON d.user_id = u.id
        INNER JOIN appointment_status s ON a.status_id = s.id
@@ -228,14 +235,17 @@ class AppointmentRepository extends BaseRepository {
          a.gabinete,
          a.status_id,
          a.treatment_id,
-         CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
-         p.phone AS patient_phone,
+         a.guest_name,
+         a.guest_phone,
+         a.guest_email,
+         CASE WHEN a.patient_id IS NOT NULL THEN CONCAT(p.first_name, ' ', p.last_name) ELSE COALESCE(a.guest_name, 'Primera Visita') END AS patient_name,
+         COALESCE(p.phone, a.guest_phone) AS patient_phone,
          s.name AS status_name,
          s.label AS status_label,
          s.color AS status_color,
          t.name AS treatment_name
        FROM appointments a
-       INNER JOIN patients p ON a.patient_id = p.id
+       LEFT JOIN patients p ON a.patient_id = p.id
        INNER JOIN appointment_status s ON a.status_id = s.id
        LEFT JOIN treatments t ON a.treatment_id = t.id
        WHERE ${conditions.join(' AND ')}
@@ -293,8 +303,11 @@ class AppointmentRepository extends BaseRepository {
          a.reason,
          a.gabinete,
          a.is_first_visit,
+         a.guest_name,
+         a.guest_phone,
+         a.guest_email,
          p.custom_id AS custom_id,
-         CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
+         CASE WHEN a.patient_id IS NOT NULL THEN CONCAT(p.first_name, ' ', p.last_name) ELSE COALESCE(a.guest_name, 'Primera Visita') END AS patient_name,
          CONCAT(u.first_name, ' ', u.last_name) AS doctor_name,
          d.color AS doctor_color,
          d.specialty AS doctor_specialty,
@@ -303,7 +316,7 @@ class AppointmentRepository extends BaseRepository {
          s.color AS status_color,
          t.name AS treatment_name
        FROM appointments a
-       INNER JOIN patients p ON a.patient_id = p.id
+       LEFT JOIN patients p ON a.patient_id = p.id
        INNER JOIN doctors d ON a.doctor_id = d.id
        INNER JOIN users u ON d.user_id = u.id
        INNER JOIN appointment_status s ON a.status_id = s.id
@@ -389,9 +402,9 @@ class AppointmentRepository extends BaseRepository {
 
     const result = await query(
       `SELECT a.id, a.start_time, a.end_time,
-              CONCAT(p.first_name, ' ', p.last_name) AS patient_name
+              CASE WHEN a.patient_id IS NOT NULL THEN CONCAT(p.first_name, ' ', p.last_name) ELSE COALESCE(a.guest_name, 'Paciente') END AS patient_name
        FROM appointments a
-       INNER JOIN patients p ON a.patient_id = p.id
+       LEFT JOIN patients p ON a.patient_id = p.id
        WHERE ${conditions.join(' AND ')}
        LIMIT 1`,
       params
@@ -428,10 +441,10 @@ class AppointmentRepository extends BaseRepository {
     }
 
     const result = await query(
-      `SELECT a.id, a.start_time, a.end_time,
-              CONCAT(p.first_name, ' ', p.last_name) AS patient_name
+      `SELECT a.id, a.start_time, a.end_time, a.gabinete,
+              CASE WHEN a.patient_id IS NOT NULL THEN CONCAT(p.first_name, ' ', p.last_name) ELSE COALESCE(a.guest_name, 'Paciente') END AS patient_name
        FROM appointments a
-       INNER JOIN patients p ON a.patient_id = p.id
+       LEFT JOIN patients p ON a.patient_id = p.id
        WHERE ${conditions.join(' AND ')}
        LIMIT 1`,
       params

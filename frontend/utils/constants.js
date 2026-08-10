@@ -18,6 +18,7 @@ export const GENDERS = {
 export const APPOINTMENT_STATUSES = {
   PROGRAMADA: 'programada',
   CONFIRMADA: 'confirmada',
+  SALA: 'sala',
   EN_CONSULTA: 'en_consulta',
   COMPLETADA: 'completada',
   CANCELADA: 'cancelada',
