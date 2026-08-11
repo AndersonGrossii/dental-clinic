@@ -64,11 +64,7 @@ class PatientService {
    */
   async generateNextCustomId() {
     const store = als.getStore();
-    const clinicId = store ? store.clinicId : null;
-
-    if (!clinicId) {
-      throw new AppError('No se pudo determinar la clínica actual.', 500);
-    }
+    const clinicId = (store && store.clinicId) ? store.clinicId : 1;
 
     // Obtener código de la clínica
     const clinicRes = await query('SELECT code FROM clinics WHERE id = $1', [clinicId]);

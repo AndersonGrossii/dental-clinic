@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "test": "node tests/run_all_tests.js",
     "migrate": "node database/migrations/runner.js",
     "seed": "node database/seeders/runner.js",
     "setup": "npm run migrate && npm run seed"
