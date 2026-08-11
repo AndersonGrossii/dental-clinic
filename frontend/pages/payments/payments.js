@@ -3,6 +3,8 @@
 // ============================================
 import paymentService from '../../services/payment.service.js';
 import invoiceService from '../../services/invoice.service.js';
+import patientService from '../../services/patient.service.js';
+import treatmentService from '../../services/treatment.service.js';
 import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
 import { formatDate, formatDateTime, formatCurrency } from '../../utils/helpers.js';
@@ -301,17 +303,29 @@ export class Payments {
   /**
    * Modal para registrar un nuevo pago contra una factura pendiente.
    */
+  /**
+   * Modal para registrar un pago (cargando factura existente o creando factura de cero).
+   */
   async showRegisterPaymentModal() {
     let invoices = [];
+    let patients = [];
+    let treatments = [];
+
     try {
-      // Obtener facturas pendientes o parciales
-      const res = await invoiceService.getAll({ limit: 200, status: 'pendiente' });
-      const resParcial = await invoiceService.getAll({ limit: 200, status: 'parcial' });
-      const pendientes = Array.isArray(res) ? res : (res.data || res.rows || []);
-      const parciales = Array.isArray(resParcial) ? resParcial : (resParcial.data || resParcial.rows || []);
+      const [resPend, resParc, resPats, resTreats] = await Promise.all([
+        invoiceService.getAll({ limit: 200, status: 'pendiente' }),
+        invoiceService.getAll({ limit: 200, status: 'parcial' }),
+        patientService.getAll({ limit: 300 }),
+        treatmentService.getAll({ limit: 200 }).catch(() => [])
+      ]);
+
+      const pendientes = Array.isArray(resPend) ? resPend : (resPend.data || resPend.rows || []);
+      const parciales = Array.isArray(resParc) ? resParc : (resParc.data || resParc.rows || []);
       invoices = [...pendientes, ...parciales];
+      patients = Array.isArray(resPats) ? resPats : (resPats.data || resPats.rows || []);
+      treatments = Array.isArray(resTreats) ? resTreats : (resTreats.data || resTreats.rows || []);
     } catch {
-      toast.error('Error al cargar facturas pendientes');
+      toast.error('Error al cargar datos requeridos para registrar el pago');
       return;
     }
 
@@ -325,55 +339,121 @@ export class Payments {
       return `<option value="${inv.id}" data-balance="${balance}" data-total="${inv.total}" data-paid="${inv.amount_paid}">${inv.invoice_number} — ${patientName} — Saldo: ${formatCurrency(balance)}</option>`;
     }).join('');
 
+    const patientOptions = patients.map(p => {
+      const customId = p.custom_id ? `[${p.custom_id}] ` : '';
+      return `<option value="${p.id}">${customId}${p.first_name} ${p.last_name}</option>`;
+    }).join('');
+
+    const treatmentOptions = treatments.map(t => {
+      const priceVal = parseFloat(t.default_price ?? t.price ?? 0);
+      return `<option value="${t.id}" data-price="${priceVal}" data-name="${t.name}">${t.name} (${formatCurrency(priceVal)})</option>`;
+    }).join('');
+
+    const todayStr = new Date().toISOString().split('T')[0];
+
     const content = `
+      <div style="margin-bottom: var(--space-4);">
+        <div style="display: flex; gap: 8px; background: var(--gray-100); padding: 4px; border-radius: var(--radius-md);">
+          <button type="button" id="tab-mode-existing" class="btn btn-sm btn-primary" style="flex: 1; border-radius: var(--radius-sm);">📄 Factura Existente</button>
+          <button type="button" id="tab-mode-new" class="btn btn-sm btn-ghost" style="flex: 1; border-radius: var(--radius-sm);">✨ Facturar y Pagar de Cero</button>
+        </div>
+      </div>
+
       <form id="register-payment-form">
-        <div class="form-group">
-          <label class="form-label">Factura <span style="color: var(--danger-500);">*</span></label>
-          <select name="invoice_id" id="payment-invoice-select" class="form-select" required>
-            <option value="">Seleccione una factura pendiente...</option>
-            ${invoiceOptions}
-          </select>
-        </div>
+        <input type="hidden" id="payment-mode-input" name="payment_mode" value="existing" />
 
-        <div id="invoice-detail-box" style="display: none; background: var(--gray-50); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: var(--space-3); margin: var(--space-3) 0;">
-          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--space-2); text-align: center;">
-            <div>
-              <p style="font-size: var(--text-xs); color: var(--text-secondary); margin: 0;">Total Factura</p>
-              <p id="inv-total" style="font-weight: 700; margin: 2px 0 0 0;">—</p>
-            </div>
-            <div>
-              <p style="font-size: var(--text-xs); color: var(--text-secondary); margin: 0;">Ya Pagado</p>
-              <p id="inv-paid" style="font-weight: 700; color: var(--success-600); margin: 2px 0 0 0;">—</p>
-            </div>
-            <div>
-              <p style="font-size: var(--text-xs); color: var(--text-secondary); margin: 0;">Saldo Pendiente</p>
-              <p id="inv-balance" style="font-weight: 700; color: var(--danger-600); margin: 2px 0 0 0;">—</p>
-            </div>
-          </div>
-        </div>
-
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
+        <!-- MODO A: FACTURA EXISTENTE -->
+        <div id="mode-existing-section" style="background: #fff; padding: var(--space-3); border: 1px solid var(--border-color); border-radius: var(--radius-md); margin-bottom: var(--space-4);">
           <div class="form-group">
-            <label class="form-label">Montante a Pagar <span style="color: var(--danger-500);">*</span></label>
-            <input type="number" name="amount" id="payment-amount-input" class="form-input" step="0.01" min="0.01" placeholder="0.00" required />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Método de Pago <span style="color: var(--danger-500);">*</span></label>
-            <select name="payment_method_id" class="form-select" required>
-              <option value="">Seleccione...</option>
-              ${methodOptions}
+            <label class="form-label">Seleccionar Factura Pendiente <span style="color: var(--danger-500);">*</span></label>
+            <select name="invoice_id" id="payment-invoice-select" class="form-select">
+              <option value="">-- Buscar por No. de Factura o Paciente --</option>
+              ${invoiceOptions}
             </select>
           </div>
+
+          <div id="invoice-detail-box" style="display: none; background: var(--primary-50, #f0fdf4); border: 1px solid var(--primary-200, #bbf7d0); border-radius: var(--radius-md); padding: var(--space-3); margin-top: var(--space-3);">
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--space-2); text-align: center;">
+              <div>
+                <p style="font-size: var(--text-xs); color: var(--text-secondary); margin: 0;">Total Factura</p>
+                <p id="inv-total" style="font-weight: 700; margin: 2px 0 0 0; font-size: var(--text-sm);">—</p>
+              </div>
+              <div>
+                <p style="font-size: var(--text-xs); color: var(--text-secondary); margin: 0;">Ya Pagado</p>
+                <p id="inv-paid" style="font-weight: 700; color: var(--success-600); margin: 2px 0 0 0; font-size: var(--text-sm);">—</p>
+              </div>
+              <div>
+                <p style="font-size: var(--text-xs); color: var(--text-secondary); margin: 0;">Saldo Pendiente</p>
+                <p id="inv-balance" style="font-weight: 700; color: var(--danger-600); margin: 2px 0 0 0; font-size: var(--text-md);">—</p>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div class="form-group" style="margin-top: var(--space-3);">
-          <label class="form-label">No. Referencia / Comprobante</label>
-          <input type="text" name="reference_number" class="form-input" placeholder="Ej: TRX-123456" />
+        <!-- MODO B: CREAR FACTURA DE CERO -->
+        <div id="mode-new-section" style="display: none; background: #fff; padding: var(--space-3); border: 1px solid var(--border-color); border-radius: var(--radius-md); margin-bottom: var(--space-4);">
+          <div class="form-group">
+            <label class="form-label">Paciente <span style="color: var(--danger-500);">*</span></label>
+            <select name="new_patient_id" id="new-invoice-patient-select" class="form-select" disabled>
+              <option value="">-- Seleccionar Paciente --</option>
+              ${patientOptions}
+            </select>
+          </div>
+
+          <div style="margin-top: var(--space-3);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-2);">
+              <label class="form-label" style="margin: 0; font-weight: 600; color: var(--primary-800);">Conceptos de la Nueva Factura</label>
+              <button type="button" id="add-concept-row-btn" class="btn btn-sm btn-primary" style="display: inline-flex; align-items: center; gap: 6px; font-weight: 600; padding: 6px 14px; border-radius: var(--radius-md); font-size: 13px; box-shadow: var(--shadow-sm);">
+                <span style="font-size: 14px;">➕</span> Agregar Concepto
+              </button>
+            </div>
+
+            <div id="new-invoice-items-container" style="display: flex; flex-direction: column; gap: 8px;">
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; margin-top: var(--space-3); padding-top: 8px; border-top: 1px dashed var(--border-color);">
+              <div style="text-align: right;">
+                <span style="font-size: var(--text-xs); color: var(--text-secondary);">Total a Facturar: </span>
+                <strong id="new-invoice-total-display" style="font-size: var(--text-lg); color: var(--primary-700);">€0.00</strong>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div class="form-group" style="margin-top: var(--space-3);">
-          <label class="form-label">Notas</label>
-          <textarea name="notes" class="form-textarea" rows="2" placeholder="Observaciones del pago..."></textarea>
+        <!-- SECCIÓN COMÚN: DETALLES DEL PAGO -->
+        <div style="background: var(--gray-50); padding: var(--space-3); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+          <h4 style="margin: 0 0 var(--space-3) 0; font-size: var(--text-sm); color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 6px;">
+            💳 Detalles del Pago a Registrar
+          </h4>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--space-3);">
+            <div class="form-group">
+              <label class="form-label">Fecha del Pago <span style="color: var(--danger-500);">*</span></label>
+              <input type="date" name="payment_date" class="form-input" value="${todayStr}" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Montante a Pagar (€) <span style="color: var(--danger-500);">*</span></label>
+              <input type="number" name="amount" id="payment-amount-input" class="form-input" step="0.01" min="0.01" placeholder="0.00" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Método de Pago <span style="color: var(--danger-500);">*</span></label>
+              <select name="payment_method_id" class="form-select" required>
+                <option value="">Seleccione...</option>
+                ${methodOptions}
+              </select>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
+            <div class="form-group">
+              <label class="form-label">No. Referencia / Comprobante</label>
+              <input type="text" name="reference_number" class="form-input" placeholder="Ej: TRX-123456" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Notas / Observaciones</label>
+              <input type="text" name="notes" class="form-input" placeholder="Observaciones del pago..." />
+            </div>
+          </div>
         </div>
       </form>
     `;
@@ -385,14 +465,10 @@ export class Payments {
       size: 'lg',
       onConfirm: async (modalBody) => {
         const form = modalBody.querySelector('#register-payment-form');
+        const mode = modalBody.querySelector('#payment-mode-input').value;
         const formData = new FormData(form);
         const data = Object.fromEntries(formData.entries());
 
-        // Validaciones
-        if (!data.invoice_id) {
-          toast.error('Debe seleccionar una factura');
-          return false;
-        }
         if (!data.payment_method_id) {
           toast.error('Debe seleccionar un método de pago');
           return false;
@@ -402,28 +478,121 @@ export class Payments {
           toast.error('Ingrese un montante válido mayor a 0');
           return false;
         }
-
-        data.invoice_id = parseInt(data.invoice_id);
         data.payment_method_id = parseInt(data.payment_method_id);
         data.amount = amount;
 
-        try {
-          await paymentService.create(data);
-          toast.success('Pago registrado exitosamente');
-          await this.loadPayments();
-          return true;
-        } catch (err) {
-          toast.error(err.message || 'Error al registrar el pago');
-          return false;
+        if (mode === 'existing') {
+          if (!data.invoice_id) {
+            toast.error('Debe seleccionar una factura pendiente');
+            return false;
+          }
+          data.invoice_id = parseInt(data.invoice_id);
+
+          try {
+            await paymentService.create(data);
+            toast.success('Pago registrado exitosamente');
+            await this.loadPayments();
+            return true;
+          } catch (err) {
+            toast.error(err.message || 'Error al registrar el pago');
+            return false;
+          }
+        } else {
+          // MODO NUEVA FACTURA
+          const patientSelect = modalBody.querySelector('#new-invoice-patient-select');
+          const patientId = parseInt(patientSelect?.value || 0);
+          if (!patientId) {
+            toast.error('Debe seleccionar un paciente para la nueva factura');
+            return false;
+          }
+
+          const itemCards = modalBody.querySelectorAll('#new-invoice-items-container .concept-item-card');
+          const items = [];
+          itemCards.forEach(card => {
+            const desc = card.querySelector('.item-desc-input')?.value?.trim();
+            const qty = parseFloat(card.querySelector('.item-qty-input')?.value || 1);
+            const price = parseFloat(card.querySelector('.item-price-input')?.value || 0);
+
+            if (desc && price > 0 && qty > 0) {
+              items.push({ description: desc, quantity: qty, unit_price: price });
+            }
+          });
+
+          if (items.length === 0) {
+            toast.error('Debe agregar al menos un concepto válido con precio mayor a 0');
+            return false;
+          }
+
+          try {
+            // 1. Crear factura de cero
+            const newInvoice = await invoiceService.create({
+              patient_id: patientId,
+              items
+            });
+
+            // 2. Registrar el pago vinculado a la factura recién creada
+            await paymentService.create({
+              invoice_id: newInvoice.id,
+              amount: data.amount,
+              payment_method_id: data.payment_method_id,
+              payment_date: data.payment_date,
+              reference_number: data.reference_number,
+              notes: data.notes
+            });
+
+            toast.success(`Factura #${newInvoice.invoice_number || ''} generada y pago registrado exitosamente`);
+            await this.loadPayments();
+            return true;
+          } catch (err) {
+            toast.error(err.message || 'Error al generar la factura y registrar el pago');
+            return false;
+          }
         }
       },
     });
 
-    // Mostrar detalle de factura al seleccionar
+    // LÓGICA DE INTERACCIÓN EN EL MODAL
+    const tabExisting = document.getElementById('tab-mode-existing');
+    const tabNew = document.getElementById('tab-mode-new');
+    const modeInput = document.getElementById('payment-mode-input');
+    const sectionExisting = document.getElementById('mode-existing-section');
+    const sectionNew = document.getElementById('mode-new-section');
+
     const invoiceSelect = document.getElementById('payment-invoice-select');
+    const patientSelect = document.getElementById('new-invoice-patient-select');
     const detailBox = document.getElementById('invoice-detail-box');
     const amountInput = document.getElementById('payment-amount-input');
+    const itemsContainer = document.getElementById('new-invoice-items-container');
+    const totalDisplay = document.getElementById('new-invoice-total-display');
 
+    // Cambio de Pestañas con Aislamiento Estricto
+    if (tabExisting && tabNew) {
+      tabExisting.addEventListener('click', () => {
+        tabExisting.className = 'btn btn-sm btn-primary';
+        tabNew.className = 'btn btn-sm btn-ghost';
+        modeInput.value = 'existing';
+        sectionExisting.style.display = 'block';
+        sectionNew.style.display = 'none';
+
+        if (invoiceSelect) invoiceSelect.disabled = false;
+        if (patientSelect) patientSelect.disabled = true;
+      });
+
+      tabNew.addEventListener('click', () => {
+        tabNew.className = 'btn btn-sm btn-primary';
+        tabExisting.className = 'btn btn-sm btn-ghost';
+        modeInput.value = 'new';
+        sectionExisting.style.display = 'none';
+        sectionNew.style.display = 'block';
+
+        if (invoiceSelect) invoiceSelect.disabled = true;
+        if (patientSelect) patientSelect.disabled = false;
+
+        recalcNewInvoiceTotal();
+      });
+    }
+
+    // Modo A: Detalle de factura seleccionada
     if (invoiceSelect) {
       invoiceSelect.addEventListener('change', () => {
         const opt = invoiceSelect.options[invoiceSelect.selectedIndex];
@@ -436,15 +605,112 @@ export class Payments {
           document.getElementById('inv-paid').textContent = formatCurrency(paid);
           document.getElementById('inv-balance').textContent = formatCurrency(balance);
           if (detailBox) detailBox.style.display = 'block';
-          if (amountInput) {
+          if (amountInput && modeInput.value === 'existing') {
             amountInput.max = balance;
             amountInput.value = balance.toFixed(2);
           }
         } else {
           if (detailBox) detailBox.style.display = 'none';
-          if (amountInput) amountInput.value = '';
+          if (amountInput && modeInput.value === 'existing') amountInput.value = '';
         }
       });
+    }
+
+    // Modo B: Cálculo de Totales y Manejo de Tarjetas de Concepto
+    const recalcNewInvoiceTotal = () => {
+      let sum = 0;
+      if (itemsContainer) {
+        itemsContainer.querySelectorAll('.concept-item-card').forEach(card => {
+          const qty = parseFloat(card.querySelector('.item-qty-input')?.value || 0);
+          const price = parseFloat(card.querySelector('.item-price-input')?.value || 0);
+          const subtotal = qty * price;
+          const subtotalSpan = card.querySelector('.item-subtotal-span');
+          if (subtotalSpan) subtotalSpan.textContent = formatCurrency(subtotal);
+          sum += subtotal;
+        });
+      }
+      if (totalDisplay) totalDisplay.textContent = formatCurrency(sum);
+      if (modeInput.value === 'new' && amountInput) {
+        amountInput.value = sum.toFixed(2);
+      }
+    };
+
+    const createConceptCard = (initialDesc = '', initialPrice = 0) => {
+      const card = document.createElement('div');
+      card.className = 'concept-item-card';
+      card.style.background = '#fff';
+      card.style.border = '1px solid var(--border-color)';
+      card.style.borderRadius = 'var(--radius-sm)';
+      card.style.padding = 'var(--space-2)';
+      card.style.display = 'flex';
+      card.style.flexDirection = 'column';
+      card.style.gap = '6px';
+
+      card.innerHTML = `
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <select class="form-select item-treatment-select" style="font-size: 12px; padding: 4px; flex: 1;">
+            <option value="">-- Tratamiento del catálogo (opcional) --</option>
+            ${treatmentOptions}
+          </select>
+          <button type="button" class="btn btn-xs btn-outline remove-row-btn" style="color: var(--danger-600); border-color: var(--danger-300); padding: 2px 6px;">✕</button>
+        </div>
+        <div>
+          <input type="text" class="form-input item-desc-input" placeholder="Descripción del concepto o servicio..." value="${initialDesc}" style="font-size: 12px; padding: 4px;" required />
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <div style="flex: 1;">
+            <label style="font-size: 10px; color: var(--text-secondary); display: block;">Cant.</label>
+            <input type="number" class="form-input item-qty-input" value="1" min="1" style="font-size: 12px; padding: 4px;" required />
+          </div>
+          <div style="flex: 1.5;">
+            <label style="font-size: 10px; color: var(--text-secondary); display: block;">Precio (€)</label>
+            <input type="number" step="0.01" class="form-input item-price-input" value="${initialPrice}" min="0" style="font-size: 12px; padding: 4px;" required />
+          </div>
+          <div style="flex: 1.5; text-align: right;">
+            <label style="font-size: 10px; color: var(--text-secondary); display: block;">Subtotal</label>
+            <strong class="item-subtotal-span" style="font-size: 12px; color: var(--primary-700);">€0.00</strong>
+          </div>
+        </div>
+      `;
+
+      const treatSelect = card.querySelector('.item-treatment-select');
+      const descInput = card.querySelector('.item-desc-input');
+      const priceInput = card.querySelector('.item-price-input');
+      const qtyInput = card.querySelector('.item-qty-input');
+      const removeBtn = card.querySelector('.remove-row-btn');
+
+      if (treatSelect) {
+        treatSelect.addEventListener('change', () => {
+          const opt = treatSelect.options[treatSelect.selectedIndex];
+          if (opt && opt.value) {
+            if (descInput) descInput.value = opt.dataset.name || '';
+            if (priceInput) priceInput.value = parseFloat(opt.dataset.price || 0).toFixed(2);
+            recalcNewInvoiceTotal();
+          }
+        });
+      }
+
+      if (qtyInput) qtyInput.addEventListener('input', recalcNewInvoiceTotal);
+      if (priceInput) priceInput.addEventListener('input', recalcNewInvoiceTotal);
+      if (removeBtn) {
+        removeBtn.addEventListener('click', () => {
+          card.remove();
+          recalcNewInvoiceTotal();
+        });
+      }
+
+      return card;
+    };
+
+    const addRowBtn = document.getElementById('add-concept-row-btn');
+    if (addRowBtn && itemsContainer) {
+      addRowBtn.addEventListener('click', () => {
+        itemsContainer.appendChild(createConceptCard('', 0));
+        recalcNewInvoiceTotal();
+      });
+      // Card inicial por defecto
+      itemsContainer.appendChild(createConceptCard('', 0));
+      recalcNewInvoiceTotal();
     }
   }
 

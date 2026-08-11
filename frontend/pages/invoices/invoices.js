@@ -695,6 +695,10 @@ export class Invoices {
           <p style="margin: 2px 0;"><strong>Saldo Pendiente:</strong> ${formatCurrency(invoice.balance)}</p>
         </div>
         <div class="form-group">
+          <label class="form-label">Fecha del Pago</label>
+          <input type="date" name="payment_date" class="form-input" value="${new Date().toISOString().split('T')[0]}" required />
+        </div>
+        <div class="form-group" style="margin-top: var(--space-3);">
           <label class="form-label">Montante del Pago ($)</label>
           <input type="number" name="amount" class="form-input" max="${invoice.balance}" min="1" value="${invoice.balance}" required />
         </div>

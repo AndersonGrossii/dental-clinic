@@ -60,11 +60,36 @@ class InvoiceService {
    * @returns {Promise<object>} Factura creada
    */
   async create(data, userId) {
-    const { items, ...invoiceFields } = data;
+    const { items = [], ...invoiceFields } = data;
+
+    // Resolución o creación automática de tratamientos en el catálogo para cada concepto
+    const store = als.getStore();
+    const clinicId = store?.clinicId || 1;
+
+    for (const item of items) {
+      if (!item.treatment_id && item.description) {
+        const matchRes = await query(
+          'SELECT id FROM treatments WHERE LOWER(name) = LOWER($1) AND deleted_at IS NULL LIMIT 1',
+          [item.description.trim()]
+        );
+        if (matchRes.rows.length > 0) {
+          item.treatment_id = matchRes.rows[0].id;
+        } else {
+          const newTreat = await query(
+            'INSERT INTO treatments (name, default_price, description, clinic_id) VALUES ($1, $2, $3, $4) RETURNING id',
+            [item.description.trim(), item.unit_price || 0, 'Tratamiento registrado automáticamente', clinicId]
+          );
+          if (newTreat.rows[0]) {
+            item.treatment_id = newTreat.rows[0].id;
+          }
+        }
+      }
+    }
 
     // Calcular subtotales de cada item
     const processedItems = items.map((item) => ({
       ...item,
+      treatment_id: item.treatment_id || null,
       subtotal: parseFloat((item.quantity * item.unit_price).toFixed(2)),
     }));
 
@@ -102,7 +127,7 @@ class InvoiceService {
 
     const createdInvoice = await invoiceRepository.createWithItems(invoiceData, processedItems);
 
-    // Auto-create an Accepted Treatment (quotation + quotation_items) for items with a treatment_id
+    // Auto-create an Accepted Treatment (quotation + quotation_items) for items
     const treatmentItems = (createdInvoice.items || []).filter(item => item.treatment_id);
     if (treatmentItems.length > 0) {
       const quoteNumber = await quotationRepository.generateNumber();
@@ -281,14 +306,6 @@ class InvoiceService {
            WHERE id = $4`,
           [itemPrice, item.tooth_number || null, doctorId || matchPt.doctor_id, matchPt.id]
         );
-      } else if (item.treatment_id) {
-        const newPt = await query(
-          `INSERT INTO patient_treatments (patient_id, treatment_id, doctor_id, tooth_number, price, status, invoice_id, notes, clinic_id)
-           VALUES ($1, $2, $3, $4, $5, 'completado', $6, $7, $8)
-           RETURNING id`,
-          [patientId, item.treatment_id, doctorId || null, item.tooth_number || null, itemPrice, invoiceId, `Factura #${invoice.invoice_number}`, invoice.clinic_id || null]
-        );
-        if (newPt.rows[0]) matchedPtIds.add(newPt.rows[0].id);
       }
     }
 

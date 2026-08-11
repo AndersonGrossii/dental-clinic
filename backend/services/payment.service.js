@@ -39,7 +39,7 @@ class PaymentService {
    * Actualiza el saldo y estado de la factura en una transacción.
    */
   async create(paymentData, userId) {
-    const { invoice_id, payment_method_id, amount, reference_number, notes } = paymentData;
+    const { invoice_id, payment_method_id, amount, reference_number, notes, payment_date } = paymentData;
 
     if (!invoice_id || !payment_method_id || amount <= 0) {
       throw new AppError('Datos de pago inválidos o incompletos', 400);
@@ -72,14 +72,16 @@ class PaymentService {
         throw new AppError(`El monto del pago ($${paymentAmount}) excede el saldo pendiente ($${balance})`, 400);
       }
 
+      const customDate = payment_date ? new Date(payment_date) : new Date();
+
       // 2. Insertar el pago
       const paymentResult = await client.query(
-        `INSERT INTO payments (invoice_id, payment_method_id, amount, reference_number, notes, created_by${clinicId ? ', clinic_id' : ''})
-         VALUES ($1, $2, $3, $4, $5, $6${clinicId ? ', $7' : ''})
+        `INSERT INTO payments (invoice_id, payment_method_id, amount, reference_number, notes, payment_date, created_by${clinicId ? ', clinic_id' : ''})
+         VALUES ($1, $2, $3, $4, $5, $6, $7${clinicId ? ', $8' : ''})
          RETURNING *`,
         clinicId
-          ? [invoice_id, payment_method_id, paymentAmount, reference_number || null, notes || null, userId, clinicId]
-          : [invoice_id, payment_method_id, paymentAmount, reference_number || null, notes || null, userId]
+          ? [invoice_id, payment_method_id, paymentAmount, reference_number || null, notes || null, customDate, userId, clinicId]
+          : [invoice_id, payment_method_id, paymentAmount, reference_number || null, notes || null, customDate, userId]
       );
       const payment = paymentResult.rows[0];
 

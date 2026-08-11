@@ -54,7 +54,7 @@ export function formatTime(timeString) {
 export function formatDateTime(dateTimeString) {
   if (!dateTimeString) return '';
   const date = new Date(dateTimeString);
-  return date.toLocaleString('es-MX', {
+  return date.toLocaleString('es-ES', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',

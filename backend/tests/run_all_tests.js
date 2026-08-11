@@ -6,6 +6,7 @@ import appointmentService from '../services/appointment.service.js';
 import patientService from '../services/patient.service.js';
 import quotationService from '../services/quotation.service.js';
 import invoiceService from '../services/invoice.service.js';
+import paymentService from '../services/payment.service.js';
 import treatmentService from '../services/treatment.service.js';
 
 let passed = 0;
@@ -148,6 +149,41 @@ async function runAllTests() {
 
     const acceptedQuote = await quotationService.changeStatus(testQuotationId, 'aceptada');
     assert(acceptedQuote.status === 'aceptada', 'Presupuesto actualizado a estado aceptada');
+
+    // Registrar pago con fecha personalizada
+    const invoice = await invoiceService.create({
+      patient_id: testPatientId,
+      items: [
+        { description: 'Tratamiento de prueba', quantity: 1, unit_price: 150 }
+      ]
+    }, adminId);
+    assert(invoice && invoice.id, 'Factura creada exitosamente');
+
+    const quoteCheck = await query('SELECT id, status FROM quotations WHERE patient_id = $1 AND status = \'aceptada\'', [testPatientId]);
+    assert(quoteCheck.rows.length > 0, 'Presupuesto Aceptado (Tratamiento Aceptado) generado correctamente');
+
+    const ptCheck = await query('SELECT id FROM patient_treatments WHERE invoice_id = $1', [invoice.id]);
+    assert(ptCheck.rows.length === 0, 'No se duplica en Historial Odontológico (se reserva para procedimientos clínicos realizados)');
+
+    const paymentMethods = (await query('SELECT id FROM payment_methods LIMIT 1')).rows;
+    const methodId = paymentMethods[0]?.id || 1;
+    const customPaymentDate = '2026-05-10';
+
+    const payment = await paymentService.create({
+      invoice_id: invoice.id,
+      amount: 50,
+      payment_method_id: methodId,
+      payment_date: customPaymentDate,
+      notes: 'Pago con fecha personalizada de prueba'
+    }, adminId);
+
+    const checkPayment = await query('SELECT id, payment_date::text FROM payments WHERE id = $1', [payment.id]);
+    const storedDateStr = checkPayment.rows[0]?.payment_date || '';
+    assert(storedDateStr.startsWith(customPaymentDate), 'Pago guardado con fecha personalizada en la BD', `(Fecha: ${storedDateStr.slice(0, 10)})`);
+
+    await query('DELETE FROM payments WHERE id = $1', [payment.id]);
+    await query('DELETE FROM invoice_items WHERE invoice_id = $1', [invoice.id]);
+    await query('DELETE FROM invoices WHERE id = $1', [invoice.id]);
 
     // --------------------------------------------------
     // TEST 6: Limpieza y Teardown
