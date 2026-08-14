@@ -184,31 +184,32 @@ class PatientService {
 
     const updateData = {};
 
-    if (data.custom_id !== undefined) updateData.custom_id = data.custom_id;
+    if (data.custom_id !== undefined) updateData.custom_id = data.custom_id || null;
     if (data.first_name !== undefined) updateData.first_name = data.first_name;
     if (data.last_name !== undefined) updateData.last_name = data.last_name;
-    if (data.dni !== undefined) updateData.dni = data.dni;
-    if (data.passport !== undefined) updateData.passport = data.passport;
-    if (data.birth_date !== undefined) updateData.birth_date = data.birth_date;
-    if (data.gender !== undefined) updateData.gender = data.gender;
-    if (data.address !== undefined) updateData.address = data.address;
-    if (data.city !== undefined) updateData.city = data.city;
-    if (data.state !== undefined) updateData.state = data.state;
-    if (data.postal_code !== undefined) updateData.postal_code = data.postal_code;
-    if (data.phone !== undefined) updateData.phone = data.phone;
-    if (data.mobile !== undefined) updateData.mobile = data.mobile;
-    if (data.email !== undefined) updateData.email = data.email;
-    if (data.emergency_contact_name !== undefined) updateData.emergency_contact_name = data.emergency_contact_name;
-    if (data.emergency_contact_phone !== undefined) updateData.emergency_contact_phone = data.emergency_contact_phone;
-    if (data.emergency_contact_relationship !== undefined) updateData.emergency_contact_relationship = data.emergency_contact_relationship;
-    if (data.allergies !== undefined) updateData.allergies = data.allergies;
-    if (data.medical_conditions !== undefined) updateData.medical_conditions = data.medical_conditions;
-    if (data.current_medications !== undefined) updateData.current_medications = data.current_medications;
-    if (data.insurance_provider !== undefined) updateData.insurance_provider = data.insurance_provider;
-    if (data.insurance_number !== undefined) updateData.insurance_number = data.insurance_number;
-    if (data.occupation !== undefined) updateData.occupation = data.occupation;
-    if (data.notes !== undefined) updateData.notes = data.notes;
-    if (data.photo_url !== undefined) updateData.photo_url = data.photo_url;
+    if (data.dni !== undefined) updateData.dni = data.dni || null;
+    if (data.passport !== undefined) updateData.passport = data.passport || null;
+    if (data.birth_date !== undefined) updateData.birth_date = data.birth_date || null;
+    if (data.gender !== undefined) updateData.gender = data.gender || null;
+    if (data.address !== undefined) updateData.address = data.address || null;
+    if (data.city !== undefined) updateData.city = data.city || null;
+    if (data.state !== undefined) updateData.state = data.state || null;
+    if (data.postal_code !== undefined) updateData.postal_code = data.postal_code || null;
+    if (data.phone !== undefined) updateData.phone = data.phone || null;
+    if (data.mobile !== undefined) updateData.mobile = data.mobile || null;
+    if (data.email !== undefined) updateData.email = data.email || null;
+    if (data.emergency_contact_name !== undefined) updateData.emergency_contact_name = data.emergency_contact_name || null;
+    if (data.emergency_contact_phone !== undefined) updateData.emergency_contact_phone = data.emergency_contact_phone || null;
+    if (data.emergency_contact_relationship !== undefined) updateData.emergency_contact_relationship = data.emergency_contact_relationship || null;
+    if (data.allergies !== undefined) updateData.allergies = data.allergies || null;
+    if (data.medical_conditions !== undefined) updateData.medical_conditions = data.medical_conditions || null;
+    if (data.current_medications !== undefined) updateData.current_medications = data.current_medications || null;
+    if (data.insurance_provider !== undefined) updateData.insurance_provider = data.insurance_provider || null;
+    if (data.insurance_number !== undefined) updateData.insurance_number = data.insurance_number || null;
+    if (data.occupation !== undefined) updateData.occupation = data.occupation || null;
+    if (data.notes !== undefined) updateData.notes = data.notes || null;
+    if (data.photo_url !== undefined) updateData.photo_url = data.photo_url || null;
+    if (data.is_active !== undefined) updateData.is_active = Boolean(data.is_active);
 
     if (Object.keys(updateData).length === 0) {
       throw new AppError('No se proporcionaron datos para actualizar.', 400);

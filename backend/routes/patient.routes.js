@@ -55,7 +55,7 @@ router.get('/:id', allRoles, patientController.getById);
  * @desc    Actualizar un paciente
  * @access  Propietario, Recepcionista
  */
-router.put('/:id', staffOnly, validate(updatePatientRules), auditMiddleware('ACTUALIZAR_PACIENTE', 'patients'), patientController.update);
+router.put('/:id', allRoles, validate(updatePatientRules), auditMiddleware('ACTUALIZAR_PACIENTE', 'patients'), patientController.update);
 
 /**
  * @route   DELETE /api/v1/patients/:id
