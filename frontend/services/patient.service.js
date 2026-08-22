@@ -36,6 +36,10 @@ class PatientService {
     return await api.get(`/patients/${id}/notes`);
   }
 
+  async getCredit(id) {
+    return await api.get(`/patients/${id}/credit`);
+  }
+
   async createNote(id, data) {
     return await api.post(`/patients/${id}/notes`, data);
   }

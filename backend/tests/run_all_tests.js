@@ -8,6 +8,7 @@ import quotationService from '../services/quotation.service.js';
 import invoiceService from '../services/invoice.service.js';
 import paymentService from '../services/payment.service.js';
 import treatmentService from '../services/treatment.service.js';
+import doctorService from '../services/doctor.service.js';
 
 let passed = 0;
 let failed = 0;
@@ -150,6 +151,10 @@ async function runAllTests() {
     const acceptedQuote = await quotationService.changeStatus(testQuotationId, 'aceptada');
     assert(acceptedQuote.status === 'aceptada', 'Presupuesto actualizado a estado aceptada');
 
+    const acceptedItems = await quotationService.getAcceptedItemsByPatient(testPatientId);
+    assert(acceptedItems.length > 0, 'Tratamientos Aceptados listados correctamente tras aceptar el presupuesto');
+    assert(acceptedItems[0].quote_tax_rate !== undefined && acceptedItems[0].quote_tax_rate !== null, 'Tasa de IVA del presupuesto transmitida a Tratamientos Aceptados');
+
     // Registrar pago con fecha personalizada
     const invoice = await invoiceService.create({
       patient_id: testPatientId,
@@ -186,9 +191,86 @@ async function runAllTests() {
     await query('DELETE FROM invoices WHERE id = $1', [invoice.id]);
 
     // --------------------------------------------------
-    // TEST 6: Limpieza y Teardown
+    // TEST 6: Flujo de Cobranza -> Tratamiento Aceptado + Crédito en Balance -> Conclusión y Débito
     // --------------------------------------------------
-    console.log('\n🔹 [6/6] Limpieza de Datos de Prueba');
+    console.log('\n🔹 [6/7] Flujo de Cobranza en Payments -> Tratamiento Aceptado -> Balance -> Conclusión');
+    
+    // 1. Crear tratamiento aceptado (pendiente)
+    const newPt = await treatmentService.addPatientTreatment({
+      patient_id: testPatientId,
+      treatment_id: treatment.id,
+      price: 200.00,
+      status: 'pendiente',
+      notes: 'Tratamiento de prueba aceptado'
+    });
+    assert(newPt && newPt.id, 'Tratamiento Aceptado (pendiente) registrado');
+    assert(newPt.status === 'pendiente', 'Status inicial es pendiente (Aceptado)');
+
+    // 2. Procesar pago desde Payments y generar comprobante
+    const payResult = await paymentService.processTreatmentPayment({
+      patient_id: testPatientId,
+      treatment_ids: [newPt.id],
+      document_type: 'recibo',
+      payment_method_id: methodId,
+      amount: 200.00,
+      notes: 'Pago de prueba de tratamiento aceptado'
+    }, adminId);
+
+    assert(payResult && payResult.document, 'Comprobante y pago procesados correctamente');
+    
+    // Verificar que el crédito (+200) fue registrado en la cuenta del paciente
+    const balanceAfterPay = await patientService.getCredit(testPatientId);
+    assert(balanceAfterPay.balance === 200.00, 'Crédito (+200.00) registrado en balance del paciente tras cobrar');
+
+    // 3. Concluir el tratamiento (Odontograma / Histórico)
+    const completedPt = await treatmentService.updatePatientTreatment(newPt.id, {
+      status: 'completado',
+      user_id: adminId
+    });
+    assert(completedPt.status === 'completado', 'Tratamiento marcado como completado (Historial Odontológico)');
+
+    // 4. Verificar que se restó el saldo (balance vuelve a 0)
+    const balanceAfterCompletion = await patientService.getCredit(testPatientId);
+    assert(balanceAfterCompletion.balance === 0.00, 'Saldo restado correctamente (-200.00) al concluir el tratamiento', `(Saldo actual: $${balanceAfterCompletion.balance})`);
+
+    // Limpieza del test 6
+    if (payResult?.payment?.id) await query('DELETE FROM payments WHERE id = $1', [payResult.payment.id]);
+    if (payResult?.document?.id) {
+      await query('DELETE FROM invoice_items WHERE invoice_id = $1', [payResult.document.id]);
+      await query('DELETE FROM invoices WHERE id = $1', [payResult.document.id]);
+    }
+    await query('DELETE FROM patient_credits WHERE patient_id = $1', [testPatientId]);
+    await query('DELETE FROM patient_treatments WHERE id = $1', [newPt.id]);
+
+    // --------------------------------------------------
+    // TEST 7: Días Específicos de Atención (doctor_workdays)
+    // --------------------------------------------------
+    console.log('\n🔹 [7/8] Días Específicos de Atención (doctor_workdays)');
+    const testWorkdate = '2026-11-21';
+    const workdayRec = await doctorService.addWorkday(docId, {
+      work_date: testWorkdate,
+      start_time: '09:00',
+      end_time: '14:00',
+      notes: 'Test Especialista Visiting'
+    });
+    assert(workdayRec && workdayRec.id, 'Día específico registrado con éxito');
+
+    const doctorWorkdaysList = await doctorService.getWorkdays(docId);
+    assert(doctorWorkdaysList.length > 0, 'Días específicos listados para el doctor');
+
+    const availWorkday = await doctorService.getAvailability(docId, testWorkdate);
+    assert(availWorkday.length > 0, 'Horarios disponibles generados para la fecha específica registrada (2026-11-21)');
+
+    const availOffday = await doctorService.getAvailability(docId, '2026-11-22');
+    assert(availOffday.length === 0, 'Día no registrado marcado correctamente como NO disponible para el doctor visitante');
+
+    await doctorService.removeWorkday(workdayRec.id, docId);
+    assert(true, 'Día específico de prueba eliminado correctamente');
+
+    // --------------------------------------------------
+    // TEST 8: Limpieza y Teardown
+    // --------------------------------------------------
+    console.log('\n🔹 [8/8] Limpieza de Datos de Prueba');
     if (testAppointmentId) {
       await appointmentService.delete(testAppointmentId);
       assert(true, 'Cita de prueba eliminada');

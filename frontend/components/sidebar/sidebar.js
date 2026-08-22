@@ -49,6 +49,7 @@ export class Sidebar {
       { path: '#/treatments', label: 'Tratamientos', icon: icons.treatments, roles: ['propietario', 'direccion', 'recepcionista', 'doctor'] },
       { path: '#/quotations', label: 'Presupuestos', icon: icons.quotations, roles: ['propietario', 'direccion', 'recepcionista'] },
       { path: '#/invoices', label: 'Facturación', icon: icons.invoices, roles: ['propietario', 'direccion', 'recepcionista'] },
+      { path: '#/receipts', label: 'Recibos', icon: icons.quotations, roles: ['propietario', 'direccion', 'recepcionista'] },
       { path: '#/payments', label: 'Pagos', icon: icons.payments, roles: ['propietario', 'direccion', 'recepcionista'] },
       { path: '#/reports', label: 'Reportes', icon: icons.reports, roles: ['propietario', 'direccion'] },
       { path: '#/settings', label: 'Configuración', icon: icons.settings, roles: ['propietario', 'direccion', 'doctor'] },

@@ -222,6 +222,22 @@ export const getInvoices = async (req, res, next) => {
 };
 
 /**
+ * Obtiene el saldo a favor y los movimientos de crédito/débito de un paciente.
+ */
+export const getCredit = async (req, res, next) => {
+  try {
+    const patientId = parseInt(req.params.id, 10);
+    if (!patientId) {
+      return res.status(400).json({ success: false, message: 'ID de paciente inválido.' });
+    }
+    const credit = await patientService.getCredit(patientId);
+    return ApiResponse.success(res, credit, 'Saldo a favor del paciente obtenido exitosamente.');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Obtiene estadísticas generales de pacientes.
  * @param {import('express').Request} req
  * @param {import('express').Response} res

@@ -145,11 +145,11 @@ class TreatmentRepository extends BaseRepository {
    * @returns {Promise<Array>}
    */
   async getPatientTreatments(patientId) {
-    const conditions = ['pt.patient_id = $1', 'pt.deleted_at IS NULL'];
+    const conditions = ['pt.patient_id = $1', "pt.status = 'completado'", 'pt.deleted_at IS NULL'];
     const params = [patientId];
     scopeClinic(conditions, params, 'pt');
 
-    const result = await query(
+     const result = await query(
       `SELECT
          pt.id,
          pt.patient_id,
@@ -158,6 +158,7 @@ class TreatmentRepository extends BaseRepository {
          pt.appointment_id,
          pt.tooth_number,
          pt.price,
+         pt.tax_rate,
          pt.status,
          pt.notes,
          pt.start_date,
@@ -168,6 +169,8 @@ class TreatmentRepository extends BaseRepository {
          inv.invoice_number,
          inv.status AS invoice_status,
          inv.total AS invoice_total,
+         inv.amount_paid AS invoice_amount_paid,
+         inv.balance AS invoice_balance,
          t.name AS treatment_name,
          t.code AS treatment_code,
          tc.name AS category_name,
@@ -176,7 +179,33 @@ class TreatmentRepository extends BaseRepository {
          d.specialty AS doctor_specialty,
          qi.id AS quotation_item_id,
          q.quote_number,
-         (qi.id IS NOT NULL OR pt.notes ILIKE '%Presupuesto%') AS is_from_quotation
+         (qi.id IS NOT NULL OR pt.notes ILIKE '%Presupuesto%') AS is_from_quotation,
+         COALESCE(
+           (
+             SELECT json_agg(sub) FROM (
+                SELECT
+                  inv2.id,
+                  inv2.invoice_number,
+                  COALESCE(inv2.document_type, 'factura') AS document_type,
+                  inv2.status,
+                  inv2.total,
+                  inv2.amount_paid,
+                  inv2.balance,
+                  inv2.created_at,
+                  inv2.tax_rate,
+                  SUM(ii.total) AS item_total
+               FROM invoice_items ii
+               JOIN invoices inv2 ON ii.invoice_id = inv2.id
+               WHERE (ii.patient_treatment_id = pt.id
+                      OR (pt.invoice_id = inv2.id AND ii.patient_treatment_id IS NULL AND ii.treatment_id = pt.treatment_id))
+                 AND inv2.deleted_at IS NULL
+                 AND inv2.status != 'cancelada'
+               GROUP BY inv2.id
+               ORDER BY inv2.created_at ASC
+             ) sub
+           ),
+           '[]'::json
+         ) AS linked_documents
        FROM patient_treatments pt
        INNER JOIN treatments t ON pt.treatment_id = t.id
        LEFT JOIN treatment_categories tc ON t.category_id = tc.id
@@ -189,7 +218,48 @@ class TreatmentRepository extends BaseRepository {
        ORDER BY pt.created_at DESC`,
       params
     );
-    return result.rows;
+
+    return result.rows.map(row => {
+      const docs = Array.isArray(row.linked_documents) ? row.linked_documents : [];
+      const uniqueDocs = docs.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+      const storedTaxRate = parseFloat(row.tax_rate || 0);
+      const treatmentBasePrice = parseFloat(row.price || 0);
+      const treatmentTaxAmount = parseFloat((treatmentBasePrice * (storedTaxRate / 100)).toFixed(2));
+      const treatmentTaxedTotal = parseFloat((treatmentBasePrice + treatmentTaxAmount).toFixed(2));
+
+      // Total pagado por los items pertenecientes a este tratamiento.
+      // ii.total guarda el monto NETO por item; el bruto = neto * (1 + tasa_del_documento/100).
+      const totalPaidGross = uniqueDocs.reduce((sum, d) => {
+        const docTax = parseFloat(d.tax_rate || 0);
+        const net = parseFloat(d.item_total || 0);
+        const gross = docTax > 0 ? net * (1 + docTax / 100.0) : net;
+        return sum + parseFloat(gross.toFixed(2));
+      }, 0);
+      const remaining = Math.max(0, parseFloat((treatmentTaxedTotal - totalPaidGross).toFixed(2)));
+
+      let computedStatus = 'pendiente';
+      if (remaining <= 0 && uniqueDocs.length > 0) {
+        computedStatus = 'pagada';
+      } else if (totalPaidGross > 0) {
+        computedStatus = 'parcial';
+      }
+
+      const latestDoc = uniqueDocs.length > 0 ? uniqueDocs[uniqueDocs.length - 1] : null;
+
+      return {
+        ...row,
+        tax_rate: storedTaxRate,
+        taxed_total: treatmentTaxedTotal,
+        linked_documents: uniqueDocs,
+        total_paid_amount: totalPaidGross,
+        remaining_balance: remaining,
+        invoice_status: computedStatus,
+        invoice_id: latestDoc ? latestDoc.id : row.invoice_id,
+        invoice_number: latestDoc ? latestDoc.invoice_number : row.invoice_number,
+        invoice_balance: remaining,
+      };
+    });
   }
 
   /**

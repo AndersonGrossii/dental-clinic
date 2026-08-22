@@ -102,6 +102,52 @@ export const removeUnavailability = async (req, res, next) => {
   }
 };
 
+export const getWorkdays = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { date_from, date_to } = req.query;
+    const records = await doctorService.getWorkdays(id, date_from || null, date_to || null);
+    return ApiResponse.success(res, records, 'Días específicos de atención obtenidos exitosamente');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const addWorkday = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    if (req.user.roleName === 'doctor') {
+      if (!req.user.doctorId || Number(id) !== Number(req.user.doctorId)) {
+        return ApiResponse.error(res, 'No tiene permisos para modificar la configuración de otro doctor.', 403);
+      }
+    }
+
+    const workdayData = req.body;
+    const record = await doctorService.addWorkday(id, workdayData);
+    return ApiResponse.created(res, record, 'Día específico de atención registrado exitosamente');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const removeWorkday = async (req, res, next) => {
+  try {
+    const { id, workdayId } = req.params;
+
+    if (req.user.roleName === 'doctor') {
+      if (!req.user.doctorId || Number(id) !== Number(req.user.doctorId)) {
+        return ApiResponse.error(res, 'No tiene permisos para modificar la configuración de otro doctor.', 403);
+      }
+    }
+
+    await doctorService.removeWorkday(workdayId, id);
+    return ApiResponse.success(res, null, 'Día específico de atención eliminado exitosamente');
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const create = async (req, res, next) => {
   try {
     const doctor = await doctorService.create(req.body);

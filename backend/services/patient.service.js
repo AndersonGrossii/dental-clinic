@@ -2,6 +2,7 @@
 // Servicio de Pacientes
 // ============================================
 import patientRepository from '../repositories/patient.repository.js';
+import patientCreditRepository from '../repositories/patient_credit.repository.js';
 import { toPatientDTO, toPatientListDTO } from '../dtos/patient.dto.js';
 import { AppError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
@@ -353,6 +354,24 @@ class PatientService {
     }
 
     return patientRepository.getInvoices(patientId, options);
+  }
+
+  /**
+   * Obtiene el saldo a favor y los movimientos de crédito/débito de un paciente.
+   * @param {number} patientId
+   * @returns {Promise<{ balance: number, movements: Array }>}
+   */
+  async getCredit(patientId) {
+    const patient = await patientRepository.findById(patientId);
+
+    if (!patient) {
+      throw new AppError('Paciente no encontrado.', 404);
+    }
+
+    const balance = await patientCreditRepository.getBalance(patientId);
+    const movements = await patientCreditRepository.getMovements(patientId);
+
+    return { balance, movements };
   }
 
   /**

@@ -3,6 +3,7 @@
 // ============================================
 import treatmentRepository from '../repositories/treatment.repository.js';
 import invoiceRepository from '../repositories/invoice.repository.js';
+import patientCreditRepository from '../repositories/patient_credit.repository.js';
 import { AppError } from '../utils/errors.js';
 
 /**
@@ -194,11 +195,13 @@ class TreatmentService {
     let invoiceId = data.invoice_id || null;
     const price = parseFloat(data.price !== undefined ? data.price : (treatment.default_price || 0));
 
-    if (!invoiceId && data.create_invoice !== false) {
+    // Tasa de IVA capturada al registrar el tratamiento (uso, por clínica)
+    const taxRate = data.tax_rate !== undefined && data.tax_rate !== null ? parseFloat(data.tax_rate) : 0.00;
+
+    if (!invoiceId && data.create_invoice === true) {
       const invoiceNumber = await invoiceRepository.generateNumber();
 
       const subtotal = price;
-      const taxRate = data.tax_rate !== undefined && data.tax_rate !== null ? parseFloat(data.tax_rate) : 16.00;
       const discountAmount = 0.00;
       const discountPct = 0.00;
       const taxable = subtotal - discountAmount;
@@ -247,6 +250,7 @@ class TreatmentService {
       end_date: data.end_date || null,
       created_by: data.created_by || null,
       invoice_id: invoiceId,
+      tax_rate: taxRate,
     };
 
     return treatmentRepository.createPatientTreatment(ptData);
@@ -282,6 +286,21 @@ class TreatmentService {
     }
 
     const updated = await treatmentRepository.updatePatientTreatment(id, updateData);
+
+    // Si cambió a estado completado, registrar débito en patient_credits para subtraer del saldo
+    if (data.status === 'completado' && existing.status !== 'completado') {
+      const completionPrice = parseFloat(data.price !== undefined ? data.price : existing.price);
+      await patientCreditRepository.insert({
+        patient_id: existing.patient_id,
+        clinic_id: existing.clinic_id || 1,
+        type: 'debit',
+        amount: completionPrice,
+        source: 'payment_apply',
+        invoice_id: existing.invoice_id || null,
+        notes: `Consumo por tratamiento concluido: ${existing.treatment_name || 'Tratamiento'}`,
+        created_by: data.created_by || null
+      });
+    }
 
     // Si cambió el precio o las notas y tiene una factura asociada sin pagos, actualizar los items e importes de la factura
     if (data.price !== undefined && existing.invoice_id && parseFloat(existing.invoice_amount_paid || 0) <= 0) {

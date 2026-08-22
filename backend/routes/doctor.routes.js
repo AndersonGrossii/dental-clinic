@@ -18,6 +18,7 @@ router.get('/:id', allRoles, controller.getById);
 router.get('/:id/schedule', allRoles, controller.getSchedule);
 router.get('/:id/availability', allRoles, controller.getAvailability);
 router.get('/:id/unavailability', allRoles, controller.getUnavailability);
+router.get('/:id/workdays', allRoles, controller.getWorkdays);
 
 router.post('/', managementOnly, validate(createDoctorRules), auditMiddleware('CREAR_DOCTOR', 'doctors'), controller.create);
 router.put('/:id', managementOnly, validate(updateDoctorRules), auditMiddleware('ACTUALIZAR_DOCTOR', 'doctors'), controller.update);
@@ -26,5 +27,8 @@ router.delete('/:id', managementOnly, auditMiddleware('ELIMINAR_DOCTOR', 'doctor
 router.put('/:id/schedule', allRoles, auditMiddleware('ACTUALIZAR_HORARIO_DOCTOR', 'doctor_schedules'), controller.updateSchedule);
 router.post('/:id/unavailability', allRoles, auditMiddleware('REGISTRAR_NO_DISPONIBILIDAD', 'doctor_unavailability'), controller.addUnavailability);
 router.delete('/:id/unavailability/:unavailId', allRoles, auditMiddleware('ELIMINAR_NO_DISPONIBILIDAD', 'doctor_unavailability'), controller.removeUnavailability);
+
+router.post('/:id/workdays', allRoles, auditMiddleware('REGISTRAR_DIA_TRABAJO_DOCTOR', 'doctor_workdays'), controller.addWorkday);
+router.delete('/:id/workdays/:workdayId', allRoles, auditMiddleware('ELIMINAR_DIA_TRABAJO_DOCTOR', 'doctor_workdays'), controller.removeWorkday);
 
 export default router;

@@ -8,14 +8,14 @@ import { parsePagination } from '../utils/pagination.js';
 export const getAll = async (req, res, next) => {
   try {
     const { page, limit, sortBy, sortOrder } = parsePagination(req.query);
-    const { patient_id, status, date_from, date_to } = req.query;
+    const { patient_id, status, document_type, date_from, date_to, search } = req.query;
 
     const { invoices, pagination } = await invoiceService.getAll({
       page,
       limit,
       sortBy,
       sortOrder,
-      filters: { patient_id, status, date_from, date_to },
+      filters: { patient_id, status, document_type, date_from, date_to, search },
     });
 
     return ApiResponse.paginated(res, invoices, pagination, 'Facturas obtenidas exitosamente');

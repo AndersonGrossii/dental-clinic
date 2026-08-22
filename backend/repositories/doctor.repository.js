@@ -166,6 +166,71 @@ export class DoctorRepository extends BaseRepository {
   }
 
   /**
+   * Obtiene los días específicos de atención de un doctor (doctor_workdays).
+   */
+  async getWorkdays(doctorId, startDate = null, endDate = null) {
+    const conditions = ['doctor_id = $1'];
+    const params = [doctorId];
+    scopeClinic(conditions, params);
+
+    if (startDate) {
+      conditions.push(`work_date >= $${params.length + 1}`);
+      params.push(startDate);
+    }
+    if (endDate) {
+      conditions.push(`work_date <= $${params.length + 1}`);
+      params.push(endDate);
+    }
+
+    const result = await query(
+      `SELECT * FROM doctor_workdays
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY work_date ASC`,
+      params
+    );
+    return result.rows;
+  }
+
+  /**
+   * Registra una fecha específica de atención para un doctor.
+   */
+  async addWorkday(doctorId, workdayData) {
+    const { work_date, start_time, end_time, break_start, break_end, notes } = workdayData;
+    const clinicId = this.getClinicId();
+    const result = await query(
+      `INSERT INTO doctor_workdays (doctor_id, work_date, start_time, end_time, break_start, break_end, notes${clinicId ? ', clinic_id' : ''})
+       VALUES ($1, $2, $3, $4, $5, $6, $7${clinicId ? ', $8' : ''})
+       ON CONFLICT (doctor_id, work_date) DO UPDATE
+       SET start_time = EXCLUDED.start_time,
+           end_time = EXCLUDED.end_time,
+           break_start = EXCLUDED.break_start,
+           break_end = EXCLUDED.break_end,
+           notes = EXCLUDED.notes,
+           updated_at = NOW()
+       RETURNING *`,
+      clinicId
+        ? [doctorId, work_date, start_time || '09:00', end_time || '18:00', break_start || null, break_end || null, notes || null, clinicId]
+        : [doctorId, work_date, start_time || '09:00', end_time || '18:00', break_start || null, break_end || null, notes || null]
+    );
+    return result.rows[0];
+  }
+
+  /**
+   * Elimina un día específico de atención.
+   */
+  async removeWorkday(id, doctorId) {
+    const conditions = ['id = $1', 'doctor_id = $2'];
+    const params = [id, doctorId];
+    scopeClinic(conditions, params);
+
+    const result = await query(
+      `DELETE FROM doctor_workdays WHERE ${conditions.join(' AND ')}`,
+      params
+    );
+    return result.rowCount > 0;
+  }
+
+  /**
    * Crea un usuario y su perfil de doctor en una transacción.
    * @param {object} userData - Datos del usuario (role_id, first_name, last_name, email, password_hash, phone)
    * @param {object} doctorData - Datos del doctor (specialty, license_number, bio, consultation_duration, color)

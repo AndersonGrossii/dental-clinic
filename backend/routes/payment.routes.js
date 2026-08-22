@@ -6,7 +6,7 @@ import * as controller from '../controllers/payment.controller.js';
 import { authMiddleware } from '../middlewares/auth.middleware.js';
 import { managementOnly, staffOnly, allRoles } from '../middlewares/role.middleware.js';
 import { validate } from '../middlewares/validation.middleware.js';
-import { createPaymentRules } from '../validators/payment.validator.js';
+import { createPaymentRules, processTreatmentPaymentRules } from '../validators/payment.validator.js';
 import { auditMiddleware } from '../middlewares/audit.middleware.js';
 
 const router = Router();
@@ -18,6 +18,7 @@ router.get('/methods', allRoles, controller.getPaymentMethods);
 router.get('/invoice/:invoiceId', allRoles, controller.getByInvoice);
 
 router.post('/', staffOnly, validate(createPaymentRules), auditMiddleware('REGISTRAR_PAGO', 'payments'), controller.create);
+router.post('/process-treatments', staffOnly, validate(processTreatmentPaymentRules), auditMiddleware('PROCESAR_PAGO_TRATAMIENTOS', 'payments'), controller.processTreatmentPayment);
 router.delete('/:id', managementOnly, auditMiddleware('ELIMINAR_PAGO', 'payments'), controller.remove);
 
 export default router;

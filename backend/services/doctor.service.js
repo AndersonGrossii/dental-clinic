@@ -204,6 +204,34 @@ class DoctorService {
   }
 
   /**
+   * Obtiene las fechas específicas de atención del doctor.
+   */
+  async getWorkdays(doctorId, startDate = null, endDate = null) {
+    const doctor = await this.getById(doctorId);
+    if (!doctor) throw new AppError('Doctor no encontrado', 404);
+    return doctorRepository.getWorkdays(doctorId, startDate, endDate);
+  }
+
+  /**
+   * Registra una fecha específica de atención para un doctor.
+   */
+  async addWorkday(doctorId, workdayData) {
+    const doctor = await this.getById(doctorId);
+    if (!doctor) throw new AppError('Doctor no encontrado', 404);
+    if (!workdayData.work_date) throw new AppError('Debe proporcionar la fecha de atención (work_date)', 400);
+    return doctorRepository.addWorkday(doctorId, workdayData);
+  }
+
+  /**
+   * Elimina un registro de fecha específica de atención.
+   */
+  async removeWorkday(id, doctorId) {
+    const removed = await doctorRepository.removeWorkday(id, doctorId);
+    if (!removed) throw new AppError('Registro de día de atención no encontrado', 404);
+    return true;
+  }
+
+  /**
    * Calcula los intervalos de disponibilidad de un doctor en una fecha específica.
    */
   async getAvailability(doctorId, dateString) {
@@ -213,14 +241,42 @@ class DoctorService {
       throw new AppError('Fecha inválida', 400);
     }
 
-    const dayOfWeek = date.getDay(); // 0 = Domingo, 1 = Lunes, ...
-    
-    // 1. Obtener horario para ese día de la semana
-    const schedules = await doctorRepository.getSchedule(doctorId);
-    const daySchedule = schedules.find(s => s.day_of_week === dayOfWeek);
+    // 1. Obtener horario para ese día: verificar primero si el doctor tiene días específicos asignados (doctor_workdays)
+    const workdays = await doctorRepository.getWorkdays(doctorId);
+    let daySchedule = null;
 
-    if (!daySchedule || !daySchedule.is_active) {
-      return []; // No trabaja este día
+    if (workdays && workdays.length > 0) {
+      // Si el doctor utiliza días específicos de atención, buscar si trabaja en esta fecha exacta
+      const targetYMD = dateString.split('T')[0];
+      const matchWorkday = workdays.find(w => {
+        const wDate = w.work_date;
+        let wYMD = '';
+        if (typeof wDate === 'string') {
+          wYMD = wDate.split('T')[0];
+        } else if (wDate instanceof Date) {
+          const year = wDate.getFullYear();
+          const month = String(wDate.getMonth() + 1).padStart(2, '0');
+          const day = String(wDate.getDate()).padStart(2, '0');
+          wYMD = `${year}-${month}-${day}`;
+        } else {
+          wYMD = String(wDate).split('T')[0];
+        }
+        return wYMD === targetYMD;
+      });
+
+      if (!matchWorkday) {
+        return []; // No atiende en esta fecha específica
+      }
+      daySchedule = matchWorkday;
+    } else {
+      // Si no tiene días específicos, usar la agenda semanal recurrente por día de la semana
+      const dayOfWeek = date.getDay(); // 0 = Domingo, 1 = Lunes, ...
+      const schedules = await doctorRepository.getSchedule(doctorId);
+      daySchedule = schedules.find(s => s.day_of_week === dayOfWeek);
+
+      if (!daySchedule || !daySchedule.is_active) {
+        return []; // No trabaja este día de la semana
+      }
     }
 
     // 2. Verificar si está de vacaciones o no disponible

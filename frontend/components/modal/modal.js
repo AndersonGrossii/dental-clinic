@@ -21,7 +21,8 @@ class Modal {
   static show({
     title,
     content,
-    size = 'lg', // sm, md, lg, xl
+    footer = null,
+    size = 'lg', // sm, md, lg, xl, full
     confirmText = 'Confirmar',
     cancelText = 'Cancelar',
     onConfirm = null,
@@ -34,6 +35,13 @@ class Modal {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay animate-fade-in';
     
+    const footerHtml = footer !== null ? `<div class="modal-footer">${footer}</div>` : `
+      <div class="modal-footer">
+        <button class="btn btn-outline modal-btn-cancel">${cancelText}</button>
+        <button class="btn btn-primary modal-btn-confirm">${confirmText}</button>
+      </div>
+    `;
+
     overlay.innerHTML = `
       <div class="modal modal-${size} animate-scale-in">
         <div class="modal-header">
@@ -43,10 +51,7 @@ class Modal {
         <div class="modal-body">
           ${typeof content === 'string' ? content : ''}
         </div>
-        <div class="modal-footer">
-          <button class="btn btn-outline modal-btn-cancel">${cancelText}</button>
-          <button class="btn btn-primary modal-btn-confirm">${confirmText}</button>
-        </div>
+        ${footerHtml}
       </div>
     `;
 
@@ -64,14 +69,14 @@ class Modal {
     };
 
     // Eventos
-    overlay.querySelector('.modal-close').addEventListener('click', close);
+    overlay.querySelector('.modal-close')?.addEventListener('click', close);
     
-    overlay.querySelector('.modal-btn-cancel').addEventListener('click', () => {
+    overlay.querySelector('.modal-btn-cancel')?.addEventListener('click', () => {
       if (onCancel) onCancel();
       close();
     });
 
-    overlay.querySelector('.modal-btn-confirm').addEventListener('click', async (e) => {
+    overlay.querySelector('.modal-btn-confirm')?.addEventListener('click', async (e) => {
       if (onConfirm) {
         const btn = e.target;
         btn.disabled = true;

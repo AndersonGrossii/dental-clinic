@@ -36,6 +36,21 @@ class DoctorService {
     return await api.delete(`/doctors/${id}/unavailability/${unavailId}`);
   }
 
+  async getWorkdays(id, dateFrom = null, dateTo = null) {
+    const params = {};
+    if (dateFrom) params.date_from = dateFrom;
+    if (dateTo) params.date_to = dateTo;
+    return await api.get(`/doctors/${id}/workdays`, params);
+  }
+
+  async addWorkday(id, data) {
+    return await api.post(`/doctors/${id}/workdays`, data);
+  }
+
+  async removeWorkday(id, workdayId) {
+    return await api.delete(`/doctors/${id}/workdays/${workdayId}`);
+  }
+
   async create(data) {
     return await api.post('/doctors', data);
   }

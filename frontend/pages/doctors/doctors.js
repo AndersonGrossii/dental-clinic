@@ -53,32 +53,50 @@ export class Doctors {
     const filtered = this.doctorsList.filter(doc => 
       `${doc.first_name} ${doc.last_name}`.toLowerCase().includes(query) ||
       (doc.specialty || '').toLowerCase().includes(query)
-    );
-
-    let cards = filtered.map(doc => `
-      <div class="card" style="border-top: 4px solid ${doc.color || '#0891b2'}; ${doc.is_active === false ? 'opacity: 0.7;' : ''}">
-        <div style="display: flex; flex-direction: column; align-items: center; text-align: center; padding: var(--space-4);">
-          <span style="font-size: 24px; font-weight: bold; background-color: ${doc.color || '#0891b2'}; color: white; width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: var(--space-3);">
-            ${((doc.first_name || 'D')[0] || 'D').toUpperCase()}${((doc.last_name || 'D')[0] || 'D').toUpperCase()}
+    );    let cards = filtered.map(doc => `
+      <div class="card doctor-card" style="border-top: 4px solid ${doc.color || '#0891b2'}; ${doc.is_active === false ? 'opacity: 0.75;' : ''} padding: var(--space-4); display: flex; flex-direction: column; justify-content: space-between; position: relative; border-radius: var(--radius-lg, 12px); box-shadow: 0 2px 10px rgba(0,0,0,0.03);">
+        
+        <!-- Header Actions & Active Status -->
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: var(--space-3);">
+          <span style="font-size: 11px; padding: 2px 10px; border-radius: 12px; font-weight: 600; background: ${doc.is_active !== false ? 'var(--success-50, #f0fdf4)' : 'var(--danger-50, #fef2f2)'}; color: ${doc.is_active !== false ? 'var(--success-700, #15803d)' : 'var(--danger-700, #b91c1c)'}; border: 1px solid ${doc.is_active !== false ? 'var(--success-200, #bbf7d0)' : 'var(--danger-200, #fecaca)'};">
+            ${doc.is_active !== false ? '● Activo' : '○ Inactivo'}
           </span>
-          <h3 style="margin: 0;">Dr/a. ${doc.first_name} ${doc.last_name}</h3>
-          <p style="color: var(--primary-600); font-weight: 500; font-size: var(--text-sm); margin: var(--space-1) 0;">${doc.specialty}</p>
-          <p style="color: var(--text-secondary); font-size: var(--text-xs); margin-bottom: var(--space-4);">Lic. Profesional: ${doc.license_number || 'N/A'}</p>
-          
-          <div style="width: 100%; display: flex; gap: var(--space-2); margin-top: var(--space-2);">
-            <button class="btn btn-sm btn-outline view-schedule-btn" data-id="${doc.id}" style="flex: 1;">Ver Horario</button>
-            <button class="btn btn-sm btn-secondary add-unavail-btn" data-id="${doc.id}" style="flex: 1;">Inasistencias</button>
-          </div>
-          <div style="width: 100%; display: flex; gap: var(--space-2); margin-top: var(--space-2);">
-            <button class="btn btn-sm btn-primary edit-doctor-btn" data-id="${doc.id}" style="flex: 1;">Editar</button>
-            <button class="btn btn-sm ${doc.is_active !== false ? 'btn-outline' : 'btn-success'} toggle-active-btn" data-id="${doc.id}" data-active="${doc.is_active !== false}" style="flex: 1;">
-              ${doc.is_active !== false ? 'Desactivar' : 'Activar'}
+          <div style="display: flex; gap: 4px;">
+            <button class="btn btn-xs btn-outline edit-doctor-btn" data-id="${doc.id}" title="Editar Perfil Doctor" style="padding: 3px 8px; font-size: 12px; border-radius: 6px;">✏️ Editar</button>
+            <button class="btn btn-xs ${doc.is_active !== false ? 'btn-outline' : 'btn-success'} toggle-active-btn" data-id="${doc.id}" data-active="${doc.is_active !== false}" title="${doc.is_active !== false ? 'Desactivar Doctor' : 'Activar Doctor'}" style="padding: 3px 8px; font-size: 12px; border-radius: 6px;">
+              ${doc.is_active !== false ? '⏸️' : '▶️'}
             </button>
-          </div>
-          <div style="width: 100%; margin-top: var(--space-2);">
-            <button class="btn btn-sm btn-danger delete-doctor-btn" data-id="${doc.id}" style="width: 100%;">Eliminar</button>
+            <button class="btn btn-xs btn-danger delete-doctor-btn" data-id="${doc.id}" title="Eliminar Doctor" style="padding: 3px 8px; font-size: 12px; border-radius: 6px;">🗑️</button>
           </div>
         </div>
+
+        <!-- Doctor Avatar & Profile Info -->
+        <div style="display: flex; flex-direction: column; align-items: center; text-align: center; margin-bottom: var(--space-4);">
+          <span style="font-size: 22px; font-weight: bold; background-color: ${doc.color || '#0891b2'}; color: white; width: 70px; height: 70px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: var(--space-2); box-shadow: 0 4px 12px rgba(0,0,0,0.12);">
+            ${((doc.first_name || 'D')[0] || 'D').toUpperCase()}${((doc.last_name || 'D')[0] || 'D').toUpperCase()}
+          </span>
+          <h3 style="margin: 0; font-size: 16px; font-weight: 700; color: var(--text-primary);">Dr/a. ${doc.first_name} ${doc.last_name}</h3>
+          <p style="color: var(--primary-700, #0369a1); font-weight: 600; font-size: var(--text-xs); margin: 4px 0 6px 0; background: var(--primary-50, #f0f9ff); padding: 3px 12px; border-radius: 12px; border: 1px solid var(--primary-100, #e0f2fe); display: inline-block;">
+            ${doc.specialty}
+          </p>
+          <p style="color: var(--text-secondary); font-size: 11px; margin: 0;">Cédula: <strong>${doc.license_number || 'N/A'}</strong></p>
+        </div>
+
+        <!-- Schedule & Availability Actions -->
+        <div style="width: 100%; display: flex; flex-direction: column; gap: 6px; margin-top: auto; padding-top: var(--space-3); border-top: 1px dashed var(--border-color, #e2e8f0);">
+          <div style="display: flex; gap: 6px;">
+            <button class="btn btn-sm btn-outline view-schedule-btn" data-id="${doc.id}" style="flex: 1; font-size: 11px; padding: 6px 8px; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 4px; font-weight: 600;">
+              🗓️ Horario Semanal
+            </button>
+            <button class="btn btn-sm view-workdays-btn" data-id="${doc.id}" style="flex: 1; font-size: 11px; padding: 6px 8px; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 4px; font-weight: 600; background: var(--primary-50, #f0f9ff); color: var(--primary-700, #0369a1); border: 1px solid var(--primary-200, #bae6fd);">
+              📍 Días Específicos
+            </button>
+          </div>
+          <button class="btn btn-sm btn-secondary add-unavail-btn" data-id="${doc.id}" style="width: 100%; font-size: 11px; padding: 6px 8px; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 4px; font-weight: 500;">
+            🌴 Ausencias y Vacaciones
+          </button>
+        </div>
+
       </div>
     `).join('');
 
@@ -100,25 +118,45 @@ export class Doctors {
 
     this.addBtnClickListener = () => this.showDoctorModal();
     this.containerClickListener = async (e) => {
-      if (e.target.classList.contains('view-schedule-btn')) {
-        const id = e.target.getAttribute('data-id');
+      const scheduleBtn = e.target.closest('.view-schedule-btn');
+      if (scheduleBtn) {
+        const id = scheduleBtn.getAttribute('data-id');
         this.showScheduleModal(id);
+        return;
       }
-      if (e.target.classList.contains('add-unavail-btn')) {
-        const id = e.target.getAttribute('data-id');
+
+      const workdaysBtn = e.target.closest('.view-workdays-btn');
+      if (workdaysBtn) {
+        const id = workdaysBtn.getAttribute('data-id');
+        this.showWorkdaysModal(id);
+        return;
+      }
+
+      const unavailBtn = e.target.closest('.add-unavail-btn');
+      if (unavailBtn) {
+        const id = unavailBtn.getAttribute('data-id');
         this.showUnavailabilityModal(id);
+        return;
       }
-      if (e.target.classList.contains('edit-doctor-btn')) {
-        const id = e.target.getAttribute('data-id');
+
+      const editBtn = e.target.closest('.edit-doctor-btn');
+      if (editBtn) {
+        const id = editBtn.getAttribute('data-id');
         this.showDoctorModal(id);
+        return;
       }
-      if (e.target.classList.contains('delete-doctor-btn')) {
-        const id = e.target.getAttribute('data-id');
+
+      const deleteBtn = e.target.closest('.delete-doctor-btn');
+      if (deleteBtn) {
+        const id = deleteBtn.getAttribute('data-id');
         this.showDeleteConfirm(id);
+        return;
       }
-      if (e.target.classList.contains('toggle-active-btn')) {
-        const id = e.target.getAttribute('data-id');
-        const isActive = e.target.getAttribute('data-active') === 'true';
+
+      const toggleBtn = e.target.closest('.toggle-active-btn');
+      if (toggleBtn) {
+        const id = toggleBtn.getAttribute('data-id');
+        const isActive = toggleBtn.getAttribute('data-active') === 'true';
         try {
           await doctorService.update(id, { isActive: !isActive });
           toast.success(`Doctor ${!isActive ? 'activado' : 'desactivado'} con éxito`);
@@ -126,6 +164,7 @@ export class Doctors {
         } catch (err) {
           toast.error(err.message || 'Error al cambiar estado del doctor');
         }
+        return;
       }
     };
 
@@ -383,6 +422,280 @@ export class Doctors {
     } catch {
       toast.error('Error al cargar el horario del doctor');
     }
+  }
+
+  async showWorkdaysModal(doctorId) {
+    let records = [];
+    try {
+      const res = await doctorService.getWorkdays(doctorId);
+      records = res?.data || res || [];
+    } catch (err) {
+      toast.error('Error al cargar días específicos de atención');
+    }
+
+    const doc = this.doctorsList.find(d => d.id == doctorId) || {};
+
+    const renderList = () => {
+      if (!records || records.length === 0) {
+        return `<p style="text-align: center; color: var(--text-secondary); font-size: var(--text-sm); margin: var(--space-3) 0;">No se han configurado días específicos. El doctor utiliza la agenda semanal estándar.</p>`;
+      }
+      return `
+        <div style="max-height: 180px; overflow-y: auto; margin-bottom: var(--space-3); border: 1px solid var(--border-color); border-radius: var(--radius);">
+          <table style="width: 100%; border-collapse: collapse; font-size: var(--text-xs);">
+            <thead>
+              <tr style="background: var(--gray-100); text-align: left;">
+                <th style="padding: 6px 10px;">Fecha</th>
+                <th style="padding: 6px 10px;">Horario</th>
+                <th style="padding: 6px 10px;">Notas</th>
+                <th style="padding: 6px 10px; text-align: right;">Acción</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${records.map(r => {
+                const dateStr = typeof r.work_date === 'string' ? r.work_date.split('T')[0] : new Date(r.work_date).toISOString().split('T')[0];
+                return `
+                  <tr style="border-top: 1px solid var(--border-color);">
+                    <td style="padding: 6px 10px; font-weight: 600;">${dateStr}</td>
+                    <td style="padding: 6px 10px;">${r.start_time.substring(0, 5)} - ${r.end_time.substring(0, 5)}</td>
+                    <td style="padding: 6px 10px; color: var(--text-secondary);">${r.notes || '-'}</td>
+                    <td style="padding: 6px 10px; text-align: right;">
+                      <button class="btn btn-xs btn-danger delete-workday" data-id="${r.id}" style="padding: 2px 6px; font-size: 10px;">Eliminar</button>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    };
+
+    const renderForm = () => {
+      const todayStr = new Date().toISOString().split('T')[0];
+      return `
+        <form id="workday-form" style="background: var(--gray-50); padding: var(--space-3); border-radius: var(--radius); border: 1px solid var(--border-color);">
+          <h4 style="margin: 0 0 var(--space-2) 0; font-size: var(--text-sm);">+ Agregar Día Específico de Atención</h4>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2);">
+            <div class="form-group">
+              <label class="form-label" style="font-size: var(--text-xs);">Fecha de Atención</label>
+              <input type="date" name="work_date" class="form-input" min="${todayStr}" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" style="font-size: var(--text-xs);">Notas / Motivo</label>
+              <input type="text" name="notes" class="form-input" placeholder="Ej: Especialista Cirugía" />
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); margin-top: var(--space-2);">
+            <div class="form-group">
+              <label class="form-label" style="font-size: var(--text-xs);">Hora Inicio</label>
+              <input type="time" name="start_time" class="form-input" value="09:00" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" style="font-size: var(--text-xs);">Hora Fin</label>
+              <input type="time" name="end_time" class="form-input" value="18:00" required />
+            </div>
+          </div>
+          <div style="margin-top: var(--space-3);">
+            <button type="submit" class="btn btn-primary btn-sm" style="width: 100%;">Guardar Fecha de Atención</button>
+          </div>
+        </form>
+      `;
+    };
+
+    const modalContainer = document.createElement('div');
+
+    const refreshUI = () => {
+      modalContainer.innerHTML = `
+        <div id="workday-list-section">
+          <p style="font-size: var(--text-xs); color: var(--text-secondary); margin-bottom: var(--space-2);">
+            Doctor/a: <strong>Dr/a. ${doc.first_name} ${doc.last_name}</strong>. Agregue fechas específicas si el doctor solo atiende días seleccionados.
+          </p>
+          ${renderList()}
+        </div>
+        <div id="workday-form-section">${renderForm()}</div>
+      `;
+
+      const form = modalContainer.querySelector('#workday-form');
+      if (form) {
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const formData = new FormData(form);
+          const data = Object.fromEntries(formData.entries());
+          try {
+            await doctorService.addWorkday(doctorId, data);
+            const res = await doctorService.getWorkdays(doctorId);
+            records = res?.data || res || [];
+            refreshUI();
+            toast.success('Día específico registrado con éxito');
+          } catch (err) {
+            toast.error(err.message || 'Error al guardar fecha');
+          }
+        });
+      }
+    };
+
+    refreshUI();
+
+    Modal.show({
+      title: 'Días Específicos de Atención (Visiting Doctor)',
+      content: modalContainer,
+      size: 'md',
+      confirmText: null,
+      onConfirm: null,
+    });
+
+    modalContainer.addEventListener('click', async (e) => {
+      const deleteBtn = e.target.closest('.delete-workday');
+      if (deleteBtn) {
+        const id = deleteBtn.getAttribute('data-id');
+        if (!confirm('¿Eliminar esta fecha específica de atención?')) return;
+        try {
+          await doctorService.removeWorkday(doctorId, id);
+          records = records.filter(r => String(r.id) !== String(id));
+          refreshUI();
+          toast.success('Fecha específica eliminada');
+        } catch (err) {
+          toast.error(err.message || 'Error al eliminar');
+        }
+      }
+    });
+  }
+
+  async showWorkdaysModal(doctorId) {
+    let records = [];
+    try {
+      const res = await doctorService.getWorkdays(doctorId);
+      records = res?.data || res || [];
+    } catch (err) {
+      toast.error('Error al cargar días específicos de atención');
+    }
+
+    const doc = this.doctorsList.find(d => d.id == doctorId) || {};
+
+    const renderList = () => {
+      if (!records || records.length === 0) {
+        return `<p style="text-align: center; color: var(--text-secondary); font-size: var(--text-sm); margin: var(--space-3) 0;">No se han configurado días específicos. El doctor utiliza la agenda semanal estándar.</p>`;
+      }
+      return `
+        <div style="max-height: 200px; overflow-y: auto; margin-bottom: var(--space-3); border: 1px solid var(--border-color); border-radius: var(--radius);">
+          <table style="width: 100%; border-collapse: collapse; font-size: var(--text-xs);">
+            <thead>
+              <tr style="background: var(--gray-100); text-align: left;">
+                <th style="padding: 6px 10px;">Fecha</th>
+                <th style="padding: 6px 10px;">Horario</th>
+                <th style="padding: 6px 10px;">Notas</th>
+                <th style="padding: 6px 10px; text-align: right;">Acción</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${records.map(r => {
+                const dateStr = typeof r.work_date === 'string' ? r.work_date.split('T')[0] : new Date(r.work_date).toISOString().split('T')[0];
+                return `
+                  <tr style="border-top: 1px solid var(--border-color);">
+                    <td style="padding: 6px 10px; font-weight: 600;">${dateStr}</td>
+                    <td style="padding: 6px 10px;">${(r.start_time || '').substring(0, 5)} - ${(r.end_time || '').substring(0, 5)}</td>
+                    <td style="padding: 6px 10px; color: var(--text-secondary);">${r.notes || '-'}</td>
+                    <td style="padding: 6px 10px; text-align: right;">
+                      <button class="btn btn-xs btn-danger delete-workday" data-id="${r.id}" style="padding: 2px 6px; font-size: 10px;">Eliminar</button>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    };
+
+    const renderForm = () => {
+      const todayStr = new Date().toISOString().split('T')[0];
+      return `
+        <form id="workday-form" style="background: var(--gray-50); padding: var(--space-3); border-radius: var(--radius); border: 1px solid var(--border-color);">
+          <h4 style="margin: 0 0 var(--space-2) 0; font-size: var(--text-sm);">+ Agregar Día Específico de Atención</h4>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2);">
+            <div class="form-group">
+              <label class="form-label" style="font-size: var(--text-xs);">Fecha de Atención</label>
+              <input type="date" name="work_date" class="form-input" min="${todayStr}" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" style="font-size: var(--text-xs);">Notas / Motivo</label>
+              <input type="text" name="notes" class="form-input" placeholder="Ej: Especialista Cirugía" />
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); margin-top: var(--space-2);">
+            <div class="form-group">
+              <label class="form-label" style="font-size: var(--text-xs);">Hora Inicio</label>
+              <input type="time" name="start_time" class="form-input" value="09:00" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" style="font-size: var(--text-xs);">Hora Fin</label>
+              <input type="time" name="end_time" class="form-input" value="18:00" required />
+            </div>
+          </div>
+          <div style="margin-top: var(--space-3);">
+            <button type="submit" class="btn btn-primary btn-sm" style="width: 100%;">Guardar Fecha de Atención</button>
+          </div>
+        </form>
+      `;
+    };
+
+    const modalContainer = document.createElement('div');
+
+    const refreshUI = () => {
+      modalContainer.innerHTML = `
+        <div id="workday-list-section">
+          <p style="font-size: var(--text-xs); color: var(--text-secondary); margin-bottom: var(--space-2);">
+            Doctor/a: <strong>Dr/a. ${doc.first_name} ${doc.last_name}</strong>. Configurar fechas de atendimento específicas para doutores visitantes.
+          </p>
+          ${renderList()}
+        </div>
+        <div id="workday-form-section">${renderForm()}</div>
+      `;
+
+      const form = modalContainer.querySelector('#workday-form');
+      if (form) {
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const formData = new FormData(form);
+          const data = Object.fromEntries(formData.entries());
+          try {
+            await doctorService.addWorkday(doctorId, data);
+            const res = await doctorService.getWorkdays(doctorId);
+            records = res?.data || res || [];
+            refreshUI();
+            toast.success('Día específico registrado con éxito');
+          } catch (err) {
+            toast.error(err.message || 'Error al guardar fecha');
+          }
+        });
+      }
+    };
+
+    refreshUI();
+
+    Modal.show({
+      title: 'Días Específicos de Atención (Visiting Doctor)',
+      content: modalContainer,
+      size: 'md',
+      confirmText: null,
+      onConfirm: null,
+    });
+
+    modalContainer.addEventListener('click', async (e) => {
+      const deleteBtn = e.target.closest('.delete-workday');
+      if (deleteBtn) {
+        const id = deleteBtn.getAttribute('data-id');
+        if (!confirm('¿Eliminar esta fecha específica de atención?')) return;
+        try {
+          await doctorService.removeWorkday(doctorId, id);
+          records = records.filter(r => String(r.id) !== String(id));
+          refreshUI();
+          toast.success('Fecha específica eliminada');
+        } catch (err) {
+          toast.error(err.message || 'Error al eliminar');
+        }
+      }
+    });
   }
 
   async showUnavailabilityModal(doctorId) {

@@ -93,6 +93,13 @@ router.get('/:id/treatments', allRoles, patientController.getTreatments);
 router.get('/:id/invoices', allRoles, patientController.getInvoices);
 
 /**
+ * @route   GET /api/v1/patients/:id/credit
+ * @desc    Obtener saldo a favor y movimientos del paciente
+ * @access  Todos los roles
+ */
+router.get('/:id/credit', allRoles, patientController.getCredit);
+
+/**
  * @route   GET /api/v1/patients/:id/images
  * @desc    Obtener imágenes del paciente
  * @access  Todos los roles

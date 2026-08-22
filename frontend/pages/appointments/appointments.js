@@ -17,8 +17,10 @@ export class Appointments {
     this.isDoctor = false;
     this.doctorUnavail = {};
     this.doctorSchedule = null;
+    this.doctorWorkdays = [];
     this.allDoctorUnavail = {};
     this.allDoctorSchedules = {};
+    this.allDoctorWorkdays = {};
     this.doctorColors = {};
     
     // Bind handler
@@ -124,8 +126,10 @@ export class Appointments {
 
       this.doctorUnavail = {};
       this.doctorSchedule = null;
+      this.doctorWorkdays = [];
       this.allDoctorUnavail = {};
       this.allDoctorSchedules = {};
+      this.allDoctorWorkdays = {};
 
       const docsResponse = await doctorService.getAll();
       this.doctorsList = (docsResponse || []).filter(d => d.is_active);
@@ -133,12 +137,13 @@ export class Appointments {
         this.doctorsList.map(d => [d.id, d.color || '#0891b2'])
       );
 
-      // Fetch unavailability for the visible doctor(s)
+      // Fetch unavailability, schedules and workdays for the visible doctor(s)
       if (this.filters.doctor_id) {
         const id = this.filters.doctor_id;
-        const [unavail, schedule] = await Promise.all([
-          doctorService.getUnavailability(id, range.start, range.end),
-          doctorService.getSchedule(id),
+        const [unavail, schedule, workdays] = await Promise.all([
+          doctorService.getUnavailability(id, range.start, range.end).catch(() => []),
+          doctorService.getSchedule(id).catch(() => []),
+          doctorService.getWorkdays(id).catch(() => []),
         ]);
         (unavail || []).forEach(rec => {
           const d = new Date(rec.start_date.slice(0, 10) + 'T12:00:00');
@@ -151,14 +156,18 @@ export class Appointments {
           }
         });
         this.doctorSchedule = schedule || [];
+        this.doctorWorkdays = workdays || [];
       } else if (!this.isDoctor && this.doctorsList.length > 0) {
-        // Fetch unavailability + schedules for ALL doctors (for colored dots)
-        const [unavailResults, scheduleResults] = await Promise.all([
+        // Fetch unavailability + schedules + workdays for ALL doctors
+        const [unavailResults, scheduleResults, workdayResults] = await Promise.all([
           Promise.all(this.doctorsList.map(d =>
             doctorService.getUnavailability(d.id, range.start, range.end).catch(() => [])
           )),
           Promise.all(this.doctorsList.map(d =>
             doctorService.getSchedule(d.id).catch(() => [])
+          )),
+          Promise.all(this.doctorsList.map(d =>
+            doctorService.getWorkdays(d.id).catch(() => [])
           )),
         ]);
         this.doctorsList.forEach((d, i) => {
@@ -175,11 +184,47 @@ export class Appointments {
           });
           this.allDoctorUnavail[d.id] = unavail;
           this.allDoctorSchedules[d.id] = scheduleResults[i] || [];
+          this.allDoctorWorkdays[d.id] = workdayResults[i] || [];
         });
       }
     } catch (err) {
       toast.error('Error al cargar la agenda de citas');
     }
+  }
+
+  getDoctorDaySchedule(doctorId, dateStr) {
+    const workdays = this.filters.doctor_id ? this.doctorWorkdays : (this.allDoctorWorkdays ? this.allDoctorWorkdays[doctorId] : []);
+    if (Array.isArray(workdays) && workdays.length > 0) {
+      const match = workdays.find(w => {
+        const wDate = w.work_date;
+        let wYMD = '';
+        if (typeof wDate === 'string') {
+          wYMD = wDate.slice(0, 10);
+        } else if (wDate instanceof Date) {
+          const year = wDate.getFullYear();
+          const month = String(wDate.getMonth() + 1).padStart(2, '0');
+          const day = String(wDate.getDate()).padStart(2, '0');
+          wYMD = `${year}-${month}-${day}`;
+        } else {
+          wYMD = String(wDate).slice(0, 10);
+        }
+        return wYMD === dateStr;
+      });
+      if (match) {
+        return {
+          start_time: match.start_time || '09:00',
+          end_time: match.end_time || '18:00',
+          break_start: match.break_start || null,
+          break_end: match.break_end || null,
+          is_active: true
+        };
+      }
+      return null;
+    }
+
+    const dow = new Date(dateStr + 'T12:00:00').getDay();
+    const schedule = this.filters.doctor_id ? this.doctorSchedule : (this.allDoctorSchedules ? this.allDoctorSchedules[doctorId] : []);
+    return Array.isArray(schedule) ? schedule.find(s => s.day_of_week === dow && s.is_active) : null;
   }
 
   getVisibleRange() {
@@ -517,10 +562,7 @@ export class Appointments {
           const unavail = this.filters.doctor_id ? this.doctorUnavail : this.allDoctorUnavail[d.id];
           if (unavail && unavail[dateStr] && unavail[dateStr].length > 0) return false;
 
-          const schedule = this.filters.doctor_id ? this.doctorSchedule : this.allDoctorSchedules[d.id];
-          const daySchedule = Array.isArray(schedule)
-            ? schedule.find(s => s.day_of_week === dow && s.is_active)
-            : null;
+          const daySchedule = this.getDoctorDaySchedule(d.id, dateStr);
 
           if (!daySchedule) return false;
 
@@ -537,10 +579,7 @@ export class Appointments {
         });
 
         const isBreak = activeDoctors.length === 0 && displayedDoctors.some(d => {
-          const schedule = this.filters.doctor_id ? this.doctorSchedule : this.allDoctorSchedules[d.id];
-          const daySchedule = Array.isArray(schedule)
-            ? schedule.find(s => s.day_of_week === dow && s.is_active)
-            : null;
+          const daySchedule = this.getDoctorDaySchedule(d.id, dateStr);
           if (daySchedule && daySchedule.break_start && daySchedule.break_end) {
             const bs = daySchedule.break_start.substring(0, 5);
             const be = daySchedule.break_end.substring(0, 5);
@@ -649,10 +688,7 @@ export class Appointments {
         const unavail = this.filters.doctor_id ? this.doctorUnavail : this.allDoctorUnavail[d.id];
         if (unavail && unavail[dateStr] && unavail[dateStr].length > 0) return false;
 
-        const schedule = this.filters.doctor_id ? this.doctorSchedule : this.allDoctorSchedules[d.id];
-        const daySchedule = Array.isArray(schedule)
-          ? schedule.find(s => s.day_of_week === dow && s.is_active)
-          : null;
+        const daySchedule = this.getDoctorDaySchedule(d.id, dateStr);
 
         if (!daySchedule) return false;
 
@@ -669,10 +705,7 @@ export class Appointments {
       });
 
       const isBreak = activeDoctors.length === 0 && displayedDoctors.some(d => {
-        const schedule = this.filters.doctor_id ? this.doctorSchedule : this.allDoctorSchedules[d.id];
-        const daySchedule = Array.isArray(schedule)
-          ? schedule.find(s => s.day_of_week === dow && s.is_active)
-          : null;
+        const daySchedule = this.getDoctorDaySchedule(d.id, dateStr);
         if (daySchedule && daySchedule.break_start && daySchedule.break_end) {
           const bs = daySchedule.break_start.substring(0, 5);
           const be = daySchedule.break_end.substring(0, 5);
@@ -1497,10 +1530,7 @@ export class Appointments {
     return this.doctorsList.filter(d => {
       const unavail = this.allDoctorUnavail[d.id];
       if (unavail && unavail[dateStr] && unavail[dateStr].length > 0) return false;
-      const schedule = this.allDoctorSchedules[d.id];
-      const daySchedule = Array.isArray(schedule)
-        ? schedule.find(s => s.day_of_week === dow && s.is_active)
-        : null;
+      const daySchedule = this.getDoctorDaySchedule(d.id, dateStr);
       if (!daySchedule) return false;
       const start = (daySchedule.start_time || '00:00').substring(0, 5);
       const end = (daySchedule.end_time || '00:00').substring(0, 5);

@@ -31,6 +31,12 @@ class InvoiceRepository extends BaseRepository {
       paramIndex++;
     }
 
+    if (filters.document_type) {
+      conditions.push(`i.document_type = $${paramIndex}`);
+      params.push(filters.document_type);
+      paramIndex++;
+    }
+
     if (filters.patient_id) {
       conditions.push(`i.patient_id = $${paramIndex}`);
       params.push(filters.patient_id);
@@ -166,21 +172,63 @@ class InvoiceRepository extends BaseRepository {
   }
 
   /**
-   * Genera un número de factura secuencial con formato FAC-XXXX-CCC.
+   * Genera un número de documento secuencial con relleno de huecos (reutiliza números de comprobantes cancelados o eliminados).
+   * Formato: FAC-0001-CCC o REC-0001-CCC
+   * @param {string} documentType - 'factura' | 'recibo'
    * @returns {Promise<string>}
    */
-  async generateNumber() {
+  async generateDocumentNumber(documentType = 'factura') {
+    const prefix = documentType === 'recibo' ? 'REC' : 'FAC';
     const store = als.getStore();
     let clinicSuffix = '';
-    if (store?.clinicId) {
-      const codeResult = await query('SELECT code FROM clinics WHERE id = $1', [store.clinicId]);
+    let clinicId = store?.clinicId;
+
+    if (clinicId) {
+      const codeResult = await query('SELECT code FROM clinics WHERE id = $1', [clinicId]);
       if (codeResult.rows.length > 0) {
         clinicSuffix = '-' + codeResult.rows[0].code;
       }
     }
-    const result = await query("SELECT nextval('invoice_number_seq') AS seq");
-    const seq = result.rows[0].seq.toString().padStart(4, '0');
-    return `FAC-${seq}${clinicSuffix}`;
+
+    // Buscar todos los números existentes activos para este tipo de documento y clínica
+    const conditions = ['deleted_at IS NULL', "status != 'cancelada'"];
+    const params = [documentType];
+    conditions.push('document_type = $1');
+
+    if (clinicId) {
+      conditions.push('clinic_id = $2');
+      params.push(clinicId);
+    }
+
+    const sql = `SELECT invoice_number FROM invoices WHERE ${conditions.join(' AND ')}`;
+    const result = await query(sql, params);
+
+    const usedNumbers = new Set();
+    const regex = new RegExp(`^${prefix}-(\\d{4})`);
+
+    for (const row of result.rows) {
+      const match = row.invoice_number ? row.invoice_number.match(regex) : null;
+      if (match) {
+        usedNumbers.add(parseInt(match[1], 10));
+      }
+    }
+
+    // Encontrar el menor número entero >= 1 no utilizado
+    let seq = 1;
+    while (usedNumbers.has(seq)) {
+      seq++;
+    }
+
+    const paddedSeq = seq.toString().padStart(4, '0');
+    return `${prefix}-${paddedSeq}${clinicSuffix}`;
+  }
+
+  async generateNumber() {
+    return this.generateDocumentNumber('factura');
+  }
+
+  async generateReceiptNumber() {
+    return this.generateDocumentNumber('recibo');
   }
 
   /**

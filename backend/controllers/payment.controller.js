@@ -30,7 +30,7 @@ export const getByInvoice = async (req, res, next) => {
   try {
     const { invoiceId } = req.params;
     const payments = await paymentService.getByInvoice(invoiceId);
-    return ApiResponse.success(res, payments, 'Pagos de factura obtenidos');
+    return ApiResponse.success(res, payments, 'Pagos obtenidos exitosamente');
   } catch (error) {
     next(error);
   }
@@ -55,11 +55,21 @@ export const create = async (req, res, next) => {
   }
 };
 
+export const processTreatmentPayment = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const result = await paymentService.processTreatmentPayment(req.body, userId);
+    return ApiResponse.created(res, result, 'Pago de tratamientos procesado y comprobante generado exitosamente');
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const remove = async (req, res, next) => {
   try {
     const { id } = req.params;
     await paymentService.delete(id);
-    return ApiResponse.success(res, null, 'Pago eliminado exitosamente');
+    return ApiResponse.success(res, null, 'Pago y comprobante anulados exitosamente');
   } catch (error) {
     next(error);
   }

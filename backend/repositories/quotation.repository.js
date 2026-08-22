@@ -313,25 +313,68 @@ class QuotationRepository extends BaseRepository {
     );
   }
 
-  async getAcceptedItemsByPatient(patientId) {
+    async getAcceptedItemsByPatient(patientId) {
     const queryStr = `
       SELECT 
-        qi.*,
+        qi.id,
+        qi.description,
+        qi.quantity,
+        qi.unit_price,
+        qi.total,
+        qi.tooth_number,
+        qi.execution_status,
+        qi.created_at,
         q.quote_number,
         q.doctor_id,
         q.clinic_id,
+        q.tax_rate AS quote_tax_rate,
         d.first_name AS doctor_first_name,
         d.last_name AS doctor_last_name,
-        t.name AS catalog_treatment_name
+        t.name AS catalog_treatment_name,
+        false AS is_patient_treatment
       FROM quotation_items qi
       JOIN quotations q ON qi.quotation_id = q.id
       LEFT JOIN doctors doc ON q.doctor_id = doc.id
       LEFT JOIN users d ON doc.user_id = d.id
       LEFT JOIN treatments t ON qi.treatment_id = t.id
       WHERE q.patient_id = $1
-        AND qi.status = 'aceptado'
+        AND (qi.status = 'aceptado' OR q.status = 'aceptada')
+        AND COALESCE(qi.execution_status, 'pendiente') != 'realizado'
         AND q.deleted_at IS NULL
-      ORDER BY qi.created_at DESC
+
+      UNION ALL
+
+      SELECT 
+        pt.id,
+        COALESCE(t.name, 'Tratamiento') AS description,
+        1 AS quantity,
+        pt.price AS unit_price,
+        pt.price AS total,
+        pt.tooth_number,
+        CASE 
+          WHEN pt.status = 'completado' THEN 'realizado'
+          WHEN pt.status = 'en_progreso' THEN 'en_proceso'
+          ELSE 'pendiente'
+        END AS execution_status,
+        pt.created_at,
+        COALESCE(i.invoice_number, 'Cobro Directo') AS quote_number,
+        pt.doctor_id,
+        pt.clinic_id,
+        COALESCE(pt.tax_rate, 0) AS quote_tax_rate,
+        d.first_name AS doctor_first_name,
+        d.last_name AS doctor_last_name,
+        t.name AS catalog_treatment_name,
+        true AS is_patient_treatment
+      FROM patient_treatments pt
+      LEFT JOIN treatments t ON pt.treatment_id = t.id
+      LEFT JOIN invoices i ON pt.invoice_id = i.id
+      LEFT JOIN doctors doc ON pt.doctor_id = doc.id
+      LEFT JOIN users d ON doc.user_id = d.id
+      WHERE pt.patient_id = $1
+        AND pt.status IN ('pendiente', 'en_progreso')
+        AND pt.deleted_at IS NULL
+
+      ORDER BY created_at DESC
     `;
     const result = await query(queryStr, [patientId]);
     return result.rows;
@@ -403,7 +446,11 @@ class QuotationRepository extends BaseRepository {
       } else if (executionStatus === 'realizado') {
         if (patientTreatmentId) {
           // Si ya existía un ID de tratamiento previamente soft-deleted, restaurarlo
-          await client.query(`UPDATE patient_treatments SET deleted_at = NULL, updated_at = NOW() WHERE id = $1`, [patientTreatmentId]);
+          const quoteTaxRate = parseFloat(item.quote_tax_rate || 0);
+          await client.query(
+            `UPDATE patient_treatments SET deleted_at = NULL, tax_rate = $2, updated_at = NOW() WHERE id = $1`,
+            [patientTreatmentId, quoteTaxRate]
+          );
         } else {
           let treatmentId = item.treatment_id;
 
@@ -434,133 +481,28 @@ class QuotationRepository extends BaseRepository {
             }
           }
 
-          let invoiceId = item.invoice_id;
-          let invoiceNumber = null;
-
-          if (!invoiceId) {
-            const existingInv = await client.query(
-              `SELECT id, invoice_number, subtotal, tax_rate, tax_amount, discount_amount, discount_percentage, total, amount_paid 
-               FROM invoices 
-               WHERE quotation_id = $1 AND deleted_at IS NULL AND status != 'pagada'
-               ORDER BY id DESC LIMIT 1`,
-              [item.quotation_id]
-            );
-
-            if (existingInv.rows.length > 0) {
-              const inv = existingInv.rows[0];
-              invoiceId = inv.id;
-              invoiceNumber = inv.invoice_number;
-
-              const itemUnit = parseFloat(item.unit_price || item.total || 0);
-              const itemQty = parseInt(item.quantity || 1, 10);
-              const itemDiscount = parseFloat(item.discount || 0.00);
-              const itemTotal = parseFloat((itemQty * itemUnit - itemDiscount).toFixed(2));
-
-              await client.query(
-                `INSERT INTO invoice_items
-                   (invoice_id, treatment_id, description, quantity, unit_price, discount, total${item.clinic_id ? ', clinic_id' : ''})
-                 VALUES
-                   ($1, $2, $3, $4, $5, $6, $7${item.clinic_id ? ', $8' : ''})`,
-                item.clinic_id
-                  ? [invoiceId, treatmentId || null, item.description, itemQty, itemUnit, itemDiscount, itemTotal, item.clinic_id]
-                  : [invoiceId, treatmentId || null, item.description, itemQty, itemUnit, itemDiscount, itemTotal]
-              );
-
-              const itemsRes = await client.query(`SELECT quantity, unit_price, discount FROM invoice_items WHERE invoice_id = $1`, [invoiceId]);
-              let sumRawSubtotal = 0;
-              let sumItemDiscounts = 0;
-              for (const ii of itemsRes.rows) {
-                sumRawSubtotal += parseFloat(ii.quantity || 1) * parseFloat(ii.unit_price || 0);
-                sumItemDiscounts += parseFloat(ii.discount || 0);
-              }
-
-              const taxRate = parseFloat(inv.tax_rate !== null && inv.tax_rate !== undefined ? inv.tax_rate : (item.quote_tax_rate || 16.00));
-              const discountPct = parseFloat(inv.discount_percentage !== null && inv.discount_percentage !== undefined ? inv.discount_percentage : (item.quote_discount_pct || 0.00));
-
-              const subtotal = parseFloat((sumRawSubtotal - sumItemDiscounts).toFixed(2));
-              const discountAmount = parseFloat((subtotal * (discountPct / 100)).toFixed(2));
-              const taxable = subtotal - discountAmount;
-              const taxAmount = parseFloat((taxable * (taxRate / 100)).toFixed(2));
-              const total = parseFloat((taxable + taxAmount).toFixed(2));
-              const balance = parseFloat((total - parseFloat(inv.amount_paid || 0)).toFixed(2));
-
-              await client.query(
-                `UPDATE invoices 
-                 SET subtotal = $1, tax_rate = $2, tax_amount = $3, discount_amount = $4, discount_percentage = $5, total = $6, balance = $7, updated_at = NOW() 
-                 WHERE id = $8`,
-                [subtotal, taxRate, taxAmount, discountAmount, discountPct, total, balance, invoiceId]
-              );
-            } else {
-              let clinicSuffix = '';
-              if (item.clinic_id) {
-                const codeResult = await client.query('SELECT code FROM clinics WHERE id = $1', [item.clinic_id]);
-                if (codeResult.rows.length > 0) {
-                  clinicSuffix = '-' + codeResult.rows[0].code;
-                }
-              }
-              const seqRes = await client.query("SELECT nextval('invoice_number_seq') AS seq");
-              const seq = seqRes.rows[0].seq.toString().padStart(4, '0');
-              invoiceNumber = `FAC-${seq}${clinicSuffix}`;
-
-              const doctorId = item.quote_doctor_id || item.doctor_id || null;
-              const taxRate = parseFloat(item.quote_tax_rate !== null && item.quote_tax_rate !== undefined ? item.quote_tax_rate : 16.00);
-              const discountPct = parseFloat(item.quote_discount_pct || 0.00);
-              const itemUnit = parseFloat(item.unit_price || item.total || 0);
-              const itemQty = parseInt(item.quantity || 1, 10);
-              const itemDiscount = parseFloat(item.discount || 0.00);
-              const itemSubtotal = parseFloat((itemQty * itemUnit).toFixed(2));
-
-              const subtotal = parseFloat((itemSubtotal - itemDiscount).toFixed(2));
-              const discountAmount = parseFloat((subtotal * (discountPct / 100)).toFixed(2));
-              const taxable = subtotal - discountAmount;
-              const taxAmount = parseFloat((taxable * (taxRate / 100)).toFixed(2));
-              const total = parseFloat((taxable + taxAmount).toFixed(2));
-
-              const invRes = await client.query(
-                `INSERT INTO invoices
-                   (invoice_number, quotation_id, patient_id, doctor_id, subtotal, tax_rate, tax_amount, discount_amount, discount_percentage, total, balance, amount_paid, status, notes, created_by${item.clinic_id ? ', clinic_id' : ''})
-                 VALUES
-                   ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, 0, 'pendiente', $11, $12${item.clinic_id ? ', $13' : ''})
-                 RETURNING id`,
-                item.clinic_id
-                  ? [invoiceNumber, item.quotation_id, item.patient_id, doctorId, subtotal, taxRate, taxAmount, discountAmount, discountPct, total, `Factura por tratamiento realizado desde Presupuesto #${item.quote_number}`, userId || null, item.clinic_id]
-                  : [invoiceNumber, item.quotation_id, item.patient_id, doctorId, subtotal, taxRate, taxAmount, discountAmount, discountPct, total, `Factura por tratamiento realizado desde Presupuesto #${item.quote_number}`, userId || null]
-              );
-              invoiceId = invRes.rows[0].id;
-
-              await client.query(
-                `INSERT INTO invoice_items
-                   (invoice_id, treatment_id, description, quantity, unit_price, discount, total${item.clinic_id ? ', clinic_id' : ''})
-                 VALUES
-                   ($1, $2, $3, $4, $5, $6, $7${item.clinic_id ? ', $8' : ''})`,
-                item.clinic_id
-                  ? [invoiceId, treatmentId || null, item.description, itemQty, itemUnit, itemDiscount, itemSubtotal - itemDiscount, item.clinic_id]
-                  : [invoiceId, treatmentId || null, item.description, itemQty, itemUnit, itemDiscount, itemSubtotal - itemDiscount]
-              );
-            }
-
-            await client.query(`UPDATE quotation_items SET invoice_id = $1 WHERE id = $2`, [invoiceId, itemId]);
-          } else {
-            const invRes = await client.query(`SELECT invoice_number FROM invoices WHERE id = $1`, [invoiceId]);
-            if (invRes.rows.length > 0) {
-              invoiceNumber = invRes.rows[0].invoice_number;
-            }
-          }
-
-          const notesText = `Proveniente de Presupuesto #${item.quote_number}${invoiceNumber ? ` (Factura #${invoiceNumber})` : ''}`;
+          const notesText = `Proveniente de Presupuesto #${item.quote_number}`;
 
           if (treatmentId) {
+            const quoteTaxRate = parseFloat(item.quote_tax_rate || 0);
             const ptRes = await client.query(
               `INSERT INTO patient_treatments 
-                 (patient_id, treatment_id, doctor_id, tooth_number, price, status, notes, invoice_id, end_date, created_by${item.clinic_id ? ', clinic_id' : ''})
+                 (patient_id, treatment_id, doctor_id, tooth_number, price, tax_rate, status, notes, invoice_id, end_date, created_by${item.clinic_id ? ', clinic_id' : ''})
                VALUES 
-                 ($1, $2, $3, $4, $5, 'completado', $6, $7, NOW(), $8${item.clinic_id ? ', $9' : ''})
+                 ($1, $2, $3, $4, $5, $6, 'completado', $7, $8, NOW(), $9${item.clinic_id ? ', $10' : ''})
                RETURNING id`,
               item.clinic_id
-                ? [item.patient_id, treatmentId, item.doctor_id || null, item.tooth_number || null, item.total, notesText, invoiceId || null, userId || null, item.clinic_id]
-                : [item.patient_id, treatmentId, item.doctor_id || null, item.tooth_number || null, item.total, notesText, invoiceId || null, userId || null]
+                ? [item.patient_id, treatmentId, item.doctor_id || null, item.tooth_number || null, item.total, quoteTaxRate, notesText, item.invoice_id || null, userId || null, item.clinic_id]
+                : [item.patient_id, treatmentId, item.doctor_id || null, item.tooth_number || null, item.total, quoteTaxRate, notesText, item.invoice_id || null, userId || null]
             );
             patientTreatmentId = ptRes.rows[0].id;
+
+            // Registrar débito en patient_credits por la conclusión del tratamiento del presupuesto
+            await client.query(
+              `INSERT INTO patient_credits (patient_id, clinic_id, type, amount, source, invoice_id, notes, created_by)
+               VALUES ($1, $2, 'debit', $3, 'payment_apply', $4, $5, $6)`,
+              [item.patient_id, item.clinic_id || 1, item.total, item.invoice_id || null, `Consumo por tratamiento concluido de Presupuesto #${item.quote_number}`, userId || null]
+            );
           }
         }
       }

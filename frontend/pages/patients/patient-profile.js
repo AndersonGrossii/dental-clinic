@@ -6,6 +6,7 @@ import treatmentService from '../../services/treatment.service.js';
 import appointmentService from '../../services/appointment.service.js';
 import quotationService from '../../services/quotation.service.js';
 import invoiceService from '../../services/invoice.service.js';
+import paymentService from '../../services/payment.service.js';
 import prescriptionService from '../../services/prescription.service.js';
 import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
@@ -25,6 +26,7 @@ export class PatientProfile {
     this.prescriptions = [];
     this.acceptedTreatments = [];
     this.activeTab = 'info';
+    this.patientCredit = null;
     this.abortController = null;
   }
 
@@ -49,6 +51,8 @@ export class PatientProfile {
       this.prescriptions = Array.isArray(prescRes) ? prescRes : (prescRes.rows || []);
       const acceptedRes = await quotationService.getAcceptedItemsByPatient(this.patientId);
       this.acceptedTreatments = Array.isArray(acceptedRes) ? acceptedRes : (acceptedRes?.data || []);
+      const creditRes = await patientService.getCredit(this.patientId).catch(() => null);
+      this.patientCredit = creditRes && creditRes.balance !== undefined ? creditRes : null;
       
       this.renderProfile();
     } catch (err) {
@@ -105,17 +109,23 @@ export class PatientProfile {
                 <h3 style="margin-bottom: var(--space-4); border-bottom: 2px solid var(--gray-100); padding-bottom: 4px;">Resumen Financiero</h3>
                 <div style="display: flex; flex-direction: column; gap: var(--space-3); background-color: var(--gray-50); padding: var(--space-4); border-radius: var(--radius-md); border: 1px solid var(--border-color);">
                   <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="color: var(--text-secondary); font-weight: 500;">Débito (Total facturado):</span>
+                    <span style="color: var(--text-secondary); font-weight: 500;">Débito (Total Tratamientos):</span>
                     <span style="font-weight: 600; color: var(--danger-600);">${formatCurrency(pat.total_debit || pat.financial?.totalDebit || 0)}</span>
                   </div>
                   <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="color: var(--text-secondary); font-weight: 500;">Crédito (Total pagado):</span>
+                    <span style="color: var(--text-secondary); font-weight: 500;">Crédito (Total Pagado):</span>
                     <span style="font-weight: 600; color: var(--success-600);">${formatCurrency(pat.total_credit || pat.financial?.totalCredit || 0)}</span>
                   </div>
+                  ${this.patientCredit && parseFloat(this.patientCredit.balance) > 0 ? `
+                  <div style="display: flex; justify-content: space-between; align-items: center; background: var(--success-50); border: 1px solid var(--success-300); border-radius: var(--radius-sm); padding: var(--space-2);">
+                    <span style="font-weight: 600; color: var(--success-800);">Saldo a Favor:</span>
+                    <span style="font-weight: 700; color: var(--success-700);">${formatCurrency(this.patientCredit.balance)}</span>
+                  </div>
+                  ` : ''}
                   <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding-top: var(--space-2); margin-top: var(--space-1);">
                     <span style="font-weight: 700; color: var(--text-primary);">Saldo Pendiente:</span>
-                    <span style="font-weight: 700; color: ${parseFloat(pat.balance || 0) > 0 ? 'var(--danger-600)' : parseFloat(pat.balance || 0) < 0 ? 'var(--success-600)' : 'var(--primary-600)'};">
-                      ${formatCurrency(pat.balance || pat.financial?.balance || 0)}
+                    <span style="font-weight: 700; color: ${parseFloat(pat.total_debit || 0) > parseFloat(pat.total_credit || 0) ? 'var(--danger-600)' : 'var(--success-600)'};">
+                      ${formatCurrency(Math.max(0, parseFloat(pat.total_debit || 0) - parseFloat(pat.total_credit || 0)))}
                     </span>
                   </div>
                 </div>
@@ -126,29 +136,68 @@ export class PatientProfile {
       `;
     } else if (this.activeTab === 'treatments') {
       let treatmentRows = this.clinicalTreatments.map(t => {
-        const invBadge = t.invoice_number 
-          ? `<a href="#/invoices" class="badge badge-info" style="font-weight: 600; text-decoration: none;">📄 #${t.invoice_number}</a>
-             <span class="badge ${t.invoice_status === 'pagada' ? 'badge-success' : 'badge-warning'}" style="font-size: 10px; margin-left: 4px;">${t.invoice_status === 'pagada' ? 'Pagada' : 'Pendiente'}</span>`
-          : `<span style="color: var(--text-secondary); font-size: 12px;">Sin Factura</span>`;
+        const linkedDocs = Array.isArray(t.linked_documents) && t.linked_documents.length > 0
+          ? t.linked_documents
+          : (t.invoice_number ? [{ id: t.invoice_id, invoice_number: t.invoice_number, document_type: t.invoice_number.startsWith('REC') ? 'recibo' : 'factura' }] : []);
+
+        const isPaid = (t.remaining_balance !== undefined ? t.remaining_balance <= 0 : (t.invoice_id && t.invoice_status === 'pagada')) && linkedDocs.length > 0;
+        const pendingPrice = t.remaining_balance !== undefined ? parseFloat(t.remaining_balance) : (t.invoice_balance !== undefined ? parseFloat(t.invoice_balance) : parseFloat(t.price || 0));
+        const paidSoFar = t.total_paid_amount !== undefined ? parseFloat(t.total_paid_amount) : (parseFloat(t.price || 0) - pendingPrice);
+
+        const docsBadgesHtml = linkedDocs.map(d => `
+          <button type="button" class="btn btn-xs view-profile-document-btn" data-id="${d.id}" style="font-weight: 600; padding: 2px 8px; font-size: 11px; background: var(--primary-100); color: var(--primary-800); border: 1px solid var(--primary-300); border-radius: var(--radius-sm); cursor: pointer; margin-right: 2px; margin-bottom: 2px;" title="Ver Comprobante ${d.invoice_number}">
+            ${(d.document_type === 'recibo' || (d.invoice_number && d.invoice_number.startsWith('REC'))) ? '🧾' : '📄'} #${d.invoice_number}
+          </button>
+        `).join('');
+
+        const invBadge = linkedDocs.length > 0 
+          ? `<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px;">
+               ${docsBadgesHtml}
+               <span class="badge ${isPaid ? 'badge-success' : 'badge-warning'}" style="font-size: 10px;">${isPaid ? 'Pagado' : 'Parcial / Pendiente'}</span>
+             </div>`
+          : `<span class="badge badge-secondary" style="font-size: 11px;">Pendiente Pago</span>`;
 
         const isFromQuote = t.is_from_quotation || (t.notes && t.notes.includes('Presupuesto #'));
-        const actionHtml = isFromQuote
-          ? `<span class="badge badge-secondary" style="font-size: 11px; padding: 4px 8px;" title="Derivado de presupuesto. Gestionar en Tratamientos Aceptados">Origen: Presupuesto</span>`
-          : `<div style="display: flex; gap: 4px; justify-content: flex-end;">
-               <button type="button" class="btn btn-sm btn-outline edit-patient-treatment-btn" data-id="${t.id}" title="Editar Tratamiento">✏️ Editar</button>
-               <button type="button" class="btn btn-sm btn-danger delete-patient-treatment-btn" data-id="${t.id}" title="Eliminar Tratamiento">🗑️ Eliminar</button>
-             </div>`;
+        const actionButtons = [];
+
+        if (!isPaid) {
+          actionButtons.push(`<button type="button" class="btn btn-sm btn-success pay-single-treatment-btn" data-id="${t.id}" data-price="${pendingPrice}" data-invoice-id="${t.invoice_id || ''}" data-name="${t.treatment_name}" title="Registrar Pago">💳 Pagar (${formatCurrency(pendingPrice)})</button>`);
+        }
+
+        if (!isFromQuote) {
+          actionButtons.push(`<button type="button" class="btn btn-sm btn-outline edit-patient-treatment-btn" data-id="${t.id}" title="Editar Tratamiento">✏️</button>`);
+          actionButtons.push(`<button type="button" class="btn btn-sm btn-danger delete-patient-treatment-btn" data-id="${t.id}" title="Eliminar Tratamiento">🗑️</button>`);
+        }
+
+        const actionHtml = `<div style="display: flex; gap: 4px; justify-content: flex-end; align-items: center;">${actionButtons.join('')}</div>`;
 
         const notesCell = t.notes && t.notes.trim()
           ? `<button type="button" class="btn btn-sm btn-outline view-treatment-notes-btn" data-id="${t.id}" style="font-size: 11px; padding: 2px 8px;">📝 Ver Notas</button>`
           : `<span style="color: var(--text-tertiary); font-size: 12px; italic;">Sin notas</span>`;
 
+        const chkCell = !isPaid
+          ? `<input type="checkbox" class="treatment-select-chk" data-id="${t.id}" data-price="${pendingPrice}" data-invoice-id="${t.invoice_id || ''}" data-name="${t.treatment_name}" style="transform: scale(1.2); cursor: pointer;" />`
+          : `<span style="color: var(--success-600); font-weight: bold;">✓</span>`;
+
+        const basePrice = parseFloat(t.price || 0);
+        const taxedTotal = t.taxed_total !== undefined ? parseFloat(t.taxed_total) : basePrice;
+        const taxRate = parseFloat(t.tax_rate || 0);
+
+        let priceCellHtml = taxRate > 0 
+          ? `<strong>${formatCurrency(taxedTotal)}</strong> <small style="color: var(--text-secondary); font-size: 11px;">(Base: ${formatCurrency(basePrice)} + IVA ${taxRate}%)</small>`
+          : `<strong>${formatCurrency(basePrice)}</strong>`;
+
+        if (paidSoFar > 0 && !isPaid) {
+          priceCellHtml += `<br><span style="font-size: 11px; color: var(--warning-700); font-weight: 600;">(Abonado: ${formatCurrency(paidSoFar)} | Pendiente: ${formatCurrency(pendingPrice)})</span>`;
+        }
+
         return `
-          <tr>
+          <tr class="${!isPaid ? 'unpaid-treatment-row' : ''}">
+            <td style="text-align: center;">${chkCell}</td>
             <td>${t.created_at ? formatDate(t.created_at) : 'N/A'}</td>
             <td><strong>${t.treatment_name}</strong></td>
             <td>${t.tooth_number ? `Pieza #${t.tooth_number}` : 'General'}</td>
-            <td><strong>${formatCurrency(t.price)}</strong></td>
+            <td>${priceCellHtml}</td>
             <td><span class="badge ${t.status === 'completado' ? 'badge-success' : 'badge-warning'}">${(t.status || 'completado').toUpperCase()}</span></td>
             <td>${invBadge}</td>
             <td>${notesCell}</td>
@@ -162,7 +211,7 @@ export class PatientProfile {
       if (this.clinicalTreatments.length === 0) {
         treatmentRows = `
           <tr>
-            <td colspan="8" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
+            <td colspan="9" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
               No se han registrado tratamientos en el expediente de este paciente.
             </td>
           </tr>
@@ -170,25 +219,29 @@ export class PatientProfile {
       }
 
       tabContent = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4); flex-wrap: wrap; gap: var(--space-2);">
           <div>
             <h3 style="margin: 0;">Historial Dental de Tratamientos</h3>
             <p style="margin: 4px 0 0 0; font-size: var(--text-xs); color: var(--text-secondary);">
-              Tratamientos realizados y vinculación automática a facturas.
+              Seleccione los tratamientos realizados que desea abonar para generar el comprobante.
             </p>
           </div>
-          <button id="add-treatment-history-btn" class="btn btn-sm btn-primary">+ Agregar Tratamiento</button>
+          <div style="display: flex; gap: var(--space-2);">
+            <button id="pay-selected-treatments-btn" class="btn btn-sm btn-success" disabled style="opacity: 0.6;">💳 Pagar Seleccionados (<span id="selected-count">0</span>)</button>
+            <button id="add-treatment-history-btn" class="btn btn-sm btn-primary">+ Agregar Tratamiento</button>
+          </div>
         </div>
         <div class="table-container">
           <table>
             <thead>
               <tr>
+                <th style="width: 40px; text-align: center;"><input type="checkbox" id="select-all-treatments-chk" title="Seleccionar todos los tratamientos pendientes" style="transform: scale(1.2); cursor: pointer;" /></th>
                 <th>Fecha</th>
                 <th>Tratamiento</th>
                 <th>Pieza</th>
                 <th>Precio</th>
                 <th>Estado</th>
-                <th>Factura Asociada</th>
+                <th>Comprobante</th>
                 <th>Notas / Origen</th>
                 <th style="text-align: right;">Acciones</th>
               </tr>
@@ -267,7 +320,9 @@ export class PatientProfile {
         cancelada: 'badge-danger',
       };
 
-      let invoiceRows = (this.invoices || []).map(inv => `
+      const facturaDocs = (this.invoices || []).filter(inv => inv.document_type === 'factura' || (!inv.document_type && inv.invoice_number?.startsWith('FAC')));
+
+      let invoiceRows = facturaDocs.map(inv => `
         <tr class="clickable-table-row profile-invoice-main-row" data-id="${inv.id}">
           <td><strong># ${inv.invoice_number}</strong></td>
           <td>${inv.doctor_name ? `Dr/a. ${inv.doctor_name}` : 'N/A'}</td>
@@ -300,7 +355,7 @@ export class PatientProfile {
         </tr>
       `).join('');
 
-      if (!this.invoices || this.invoices.length === 0) {
+      if (facturaDocs.length === 0) {
         invoiceRows = `
           <tr>
             <td colspan="8" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
@@ -334,6 +389,88 @@ export class PatientProfile {
             </thead>
             <tbody>
               ${invoiceRows}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } else if (this.activeTab === 'receipts') {
+      const STATUS_LABELS = {
+        pendiente: 'Abierta / Pendiente',
+        parcial: 'Parcialmente Pagado',
+        pagada: 'Pagado',
+        cancelada: 'Cancelado',
+      };
+
+      const STATUS_BADGES = {
+        pendiente: 'badge-warning',
+        parcial: 'badge-info',
+        pagada: 'badge-success',
+        cancelada: 'badge-danger',
+      };
+
+      const reciboDocs = (this.invoices || []).filter(inv => inv.document_type === 'recibo' || (inv.invoice_number && inv.invoice_number.startsWith('REC')));
+
+      let receiptRows = reciboDocs.map(rec => `
+        <tr class="clickable-table-row profile-receipt-main-row" data-id="${rec.id}">
+          <td><strong style="color: var(--primary-700);"># ${rec.invoice_number}</strong></td>
+          <td>${rec.doctor_name ? `Dr/a. ${rec.doctor_name}` : 'N/A'}</td>
+          <td><strong>${formatCurrency(rec.total)}</strong></td>
+          <td style="color: var(--success-600);">${formatCurrency(rec.amount_paid)}</td>
+          <td style="color: var(--danger-600);"><strong>${formatCurrency(rec.balance)}</strong></td>
+          <td><span class="badge ${STATUS_BADGES[rec.status] || 'badge-secondary'}">${STATUS_LABELS[rec.status] || rec.status}</span></td>
+          <td>${rec.created_at ? formatDate(rec.created_at) : 'N/A'}</td>
+          <td style="text-align: right;">
+            <button type="button" class="btn btn-sm btn-outline toggle-profile-receipt-actions-btn" data-id="${rec.id}">
+              Acciones ▾
+            </button>
+          </td>
+        </tr>
+        <tr class="profile-receipt-actions-bar-row" id="profile-receipt-actions-${rec.id}" style="display: none; background: var(--gray-50);">
+          <td colspan="8" style="padding: 12px 16px; border-bottom: 2px solid var(--primary-400);">
+            <div style="display: flex; gap: var(--space-3); align-items: center; justify-content: space-between; flex-wrap: wrap;">
+              <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);">
+                🧾 Opciones para Recibo #${rec.invoice_number}:
+              </div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="btn btn-sm btn-outline view-profile-receipt-btn" data-id="${rec.id}">🖨️ Ver / Imprimir Recibo</button>
+                ${parseFloat(rec.balance || 0) > 0 ? `<button class="btn btn-sm btn-success pay-profile-receipt-btn" data-id="${rec.id}">💳 Registrar Pago Restante</button>` : ''}
+                <button class="btn btn-sm btn-danger delete-profile-receipt-btn" data-id="${rec.id}">✕ Anular Recibo</button>
+              </div>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+
+      if (reciboDocs.length === 0) {
+        receiptRows = `
+          <tr>
+            <td colspan="8" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
+              No se han registrado recibos de pago para este paciente.
+            </td>
+          </tr>
+        `;
+      }
+
+      tabContent = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4); flex-wrap: wrap; gap: var(--space-2);">
+          <h3>Recibos de Pago Emitidos</h3>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>No. Recibo</th>
+                <th>Doctor</th>
+                <th>Monto Total</th>
+                <th>Pagado</th>
+                <th>Saldo Restante</th>
+                <th>Estado</th>
+                <th>Fecha Emisión</th>
+                <th style="text-align: right;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${receiptRows}
             </tbody>
           </table>
         </div>
@@ -429,7 +566,12 @@ export class PatientProfile {
       const completedCount = allAccepted.filter(t => t.execution_status === 'realizado').length;
       const inProgressCount = allAccepted.filter(t => t.execution_status === 'en_proceso').length;
       const pendingCount = allAccepted.filter(t => (!t.execution_status || t.execution_status === 'pendiente')).length;
-      const totalFinancialValue = allAccepted.reduce((acc, t) => acc + parseFloat(t.total || 0), 0);
+      const taxedTotal = (t) => {
+        const net = parseFloat(t.total || 0);
+        const tax = parseFloat(t.quote_tax_rate || 0);
+        return parseFloat((net * (1 + tax / 100)).toFixed(2));
+      };
+      const totalFinancialValue = allAccepted.reduce((acc, t) => acc + taxedTotal(t), 0);
       const completionPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
       const EXEC_BADGES = {
@@ -446,6 +588,10 @@ export class PatientProfile {
 
       let acceptedRows = allAccepted.map(t => {
         const execStatus = t.execution_status || 'pendiente';
+        const itemNet = parseFloat(t.total || 0);
+        const itemTaxRate = parseFloat(t.quote_tax_rate || 0);
+        const itemVat = parseFloat((itemNet * (itemTaxRate / 100)).toFixed(2));
+        const itemGross = parseFloat((itemNet + itemVat).toFixed(2));
 
         return `
           <tr>
@@ -455,7 +601,12 @@ export class PatientProfile {
               ${t.tooth_number ? `<span class="badge badge-secondary" style="font-size: 11px; margin-left: 6px; padding: 2px 6px;">🦷 Diente #${t.tooth_number}</span>` : ''}
             </td>
             <td>${t.doctor_first_name ? `Dr/a. ${t.doctor_first_name} ${t.doctor_last_name || ''}` : '<span style="color: var(--text-secondary); italic">Sin asignar</span>'}</td>
-            <td><strong style="color: var(--primary-700);">${formatCurrency(t.total)}</strong></td>
+            <td>
+              <strong style="color: var(--primary-700);">${formatCurrency(itemGross)}</strong>
+              <div style="font-size: 11px; color: var(--text-tertiary);">
+                Neto ${formatCurrency(itemNet)} + IVA (${itemTaxRate}%) ${formatCurrency(itemVat)}
+              </div>
+            </td>
             <td>
               <span class="badge ${EXEC_BADGES[execStatus] || 'badge-secondary'}" style="font-weight: 600; padding: 4px 10px;">
                 ${EXEC_LABELS[execStatus] || execStatus}
@@ -465,17 +616,17 @@ export class PatientProfile {
               <div class="status-toggle-segmented">
                 <button type="button" 
                   class="status-toggle-btn btn-status-pending ${execStatus === 'pendiente' ? 'active' : ''} set-exec-status-btn" 
-                  data-id="${t.id}" data-status="pendiente" title="Marcar como pendiente">
+                  data-id="${t.id}" data-is-patient-treatment="${t.is_patient_treatment ? 'true' : 'false'}" data-status="pendiente" title="Marcar como pendiente">
                   ⏳ Pendiente
                 </button>
                 <button type="button" 
                   class="status-toggle-btn btn-status-in-progress ${execStatus === 'en_proceso' ? 'active' : ''} set-exec-status-btn" 
-                  data-id="${t.id}" data-status="en_proceso" title="Marcar en proceso">
+                  data-id="${t.id}" data-is-patient-treatment="${t.is_patient_treatment ? 'true' : 'false'}" data-status="en_proceso" title="Marcar en proceso">
                   ⚙️ En Proceso
                 </button>
                 <button type="button" 
                   class="status-toggle-btn btn-status-completed ${execStatus === 'realizado' ? 'active' : ''} set-exec-status-btn" 
-                  data-id="${t.id}" data-status="realizado" title="Marcar como realizado y añadir al historial odontológico">
+                  data-id="${t.id}" data-is-patient-treatment="${t.is_patient_treatment ? 'true' : 'false'}" data-status="realizado" title="Marcar como realizado y añadir al historial odontológico">
                   ✅ Realizado
                 </button>
               </div>
@@ -693,6 +844,7 @@ export class PatientProfile {
         ${tabLink('accepted-treatments', 'Tratamientos Aceptados')}
         ${tabLink('appointments', 'Historial de Citas')}
         ${tabLink('invoices', 'Facturas')}
+        ${tabLink('receipts', 'Recibos')}
         ${tabLink('quotations', 'Presupuestos')}
         ${tabLink('notes', 'Notas de Evolución')}
         ${tabLink('prescriptions', 'Prescripciones')}
@@ -935,6 +1087,54 @@ export class PatientProfile {
       }, { signal });
     });
 
+    // Receipts table row toggle in patient profile
+    this.container.querySelectorAll('.profile-receipt-main-row').forEach(row => {
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('.view-profile-receipt-btn, .pay-profile-receipt-btn, .delete-profile-receipt-btn')) {
+          return;
+        }
+
+        const id = row.getAttribute('data-id');
+        const targetActionsRow = this.container.querySelector(`#profile-receipt-actions-${id}`);
+        if (targetActionsRow) {
+          const isOpen = targetActionsRow.style.display !== 'none';
+          this.container.querySelectorAll('.profile-receipt-actions-bar-row').forEach(r => r.style.display = 'none');
+          this.container.querySelectorAll('.profile-receipt-main-row').forEach(r => r.classList.remove('row-active'));
+          if (!isOpen) {
+            targetActionsRow.style.display = 'table-row';
+            row.classList.add('row-active');
+          }
+        }
+      }, { signal });
+    });
+
+    this.container.querySelectorAll('.view-profile-receipt-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const { Receipts } = await import('../receipts/receipts.js');
+        new Receipts(this.container).printReceipt(btn.dataset.id);
+      }, { signal });
+    });
+
+    this.container.querySelectorAll('.pay-profile-receipt-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const { Receipts } = await import('../receipts/receipts.js');
+        new Receipts(this.container).showRegisterPaymentModal(btn.dataset.id, async () => {
+          await this.render();
+          this.mount();
+        });
+      }, { signal });
+    });
+
+    this.container.querySelectorAll('.delete-profile-receipt-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const { Receipts } = await import('../receipts/receipts.js');
+        new Receipts(this.container).confirmDeleteReceipt(btn.dataset.id, async () => {
+          await this.render();
+          this.mount();
+        });
+      }, { signal });
+    });
+
     // Quotation buttons in patient profile
     const addProfileQuoteBtn = this.container.querySelector('#add-profile-quote-btn');
     if (addProfileQuoteBtn) {
@@ -1028,7 +1228,13 @@ export class PatientProfile {
         const status = btn.getAttribute('data-status');
         try {
           btn.disabled = true;
-          await quotationService.updateExecutionStatus(itemId, status);
+          const isPatientTreatment = btn.getAttribute('data-is-patient-treatment') === 'true';
+          if (isPatientTreatment) {
+            const ptStatusMap = { realizado: 'completado', en_proceso: 'en_progreso', pendiente: 'pendiente' };
+            await treatmentService.updatePatientTreatment(itemId, { status: ptStatusMap[status] || status });
+          } else {
+            await quotationService.updateExecutionStatus(itemId, status);
+          }
           if (status === 'realizado') {
             toast.success('¡Tratamiento completado! Se ha añadido al Historial Odontológico.');
           } else {
@@ -1053,6 +1259,77 @@ export class PatientProfile {
         } catch (err) {
           toast.error(err.message || 'Error al eliminar');
         }
+      });
+    });
+
+    // Checkboxes de selección de tratamientos en Historial Odontológico
+    const selectAllChk = this.container.querySelector('#select-all-treatments-chk');
+    const treatmentChks = this.container.querySelectorAll('.treatment-select-chk');
+    const paySelectedBtn = this.container.querySelector('#pay-selected-treatments-btn');
+    const selectedCountSpan = this.container.querySelector('#selected-count');
+
+    const updateSelectedUI = () => {
+      const checkedCount = Array.from(treatmentChks).filter(c => c.checked).length;
+      if (selectedCountSpan) selectedCountSpan.textContent = checkedCount;
+      if (paySelectedBtn) {
+        paySelectedBtn.disabled = checkedCount === 0;
+        paySelectedBtn.style.opacity = checkedCount > 0 ? '1' : '0.6';
+      }
+    };
+
+    if (selectAllChk) {
+      selectAllChk.addEventListener('change', (e) => {
+        treatmentChks.forEach(chk => chk.checked = e.target.checked);
+        updateSelectedUI();
+      });
+    }
+
+    treatmentChks.forEach(chk => {
+      chk.addEventListener('change', () => {
+        if (selectAllChk) {
+          selectAllChk.checked = Array.from(treatmentChks).every(c => c.checked);
+        }
+        updateSelectedUI();
+      });
+    });
+
+    if (paySelectedBtn) {
+      paySelectedBtn.addEventListener('click', () => {
+        const selected = Array.from(treatmentChks)
+          .filter(c => c.checked)
+          .map(c => {
+            const chk = this.clinicalTreatments.find(t => String(t.id) === c.getAttribute('data-id'));
+            return {
+              id: c.getAttribute('data-id'),
+              price: parseFloat(c.getAttribute('data-price') || 0),
+              treatment_name: c.getAttribute('data-name'),
+              tax_rate: chk ? parseFloat(chk.tax_rate || 0) : 0,
+              remaining_balance: chk?.remaining_balance,
+            };
+          });
+        this.showTreatmentPaymentModal(selected);
+      });
+    }
+
+    this.container.querySelectorAll('.pay-single-treatment-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const chk = this.clinicalTreatments.find(t => String(t.id) === btn.getAttribute('data-id'));
+        const selected = [{
+          id: btn.getAttribute('data-id'),
+          price: parseFloat(btn.getAttribute('data-price') || 0),
+          treatment_name: btn.getAttribute('data-name'),
+          tax_rate: chk ? parseFloat(chk.tax_rate || 0) : 0,
+          remaining_balance: chk?.remaining_balance,
+        }];
+        this.showTreatmentPaymentModal(selected);
+      });
+    });
+
+    this.container.querySelectorAll('.view-profile-document-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const docId = btn.getAttribute('data-id');
+        if (docId) this.showDocumentModal(docId);
       });
     });
   }
@@ -1235,6 +1512,8 @@ export class PatientProfile {
       return;
     }
 
+    const modalDefaultTax = parseFloat(state.get('clinicInfo')?.tax_rate || 0) || 16;
+
     const activeTreatments = treatments.filter(t => t.is_active);
 
     const options = activeTreatments
@@ -1253,8 +1532,8 @@ export class PatientProfile {
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
           <div class="form-group">
-            <label class="form-label">Precio Base</label>
-            <input type="number" id="base-price" class="form-input" readonly value="0.00" step="0.01" style="background-color: var(--gray-100, #f3f4f6); font-weight: 500;" />
+            <label class="form-label">Precio Base <small style="font-weight: 400;">(sin IVA, editable)</small></label>
+            <input type="number" id="base-price" class="form-input" value="0.00" step="0.01" min="0" required />
           </div>
           <div class="form-group">
             <label class="form-label">Diente / Pieza (Opcional)</label>
@@ -1276,7 +1555,7 @@ export class PatientProfile {
           </div>
           <div class="form-group">
             <label class="form-label">Impuesto (%)</label>
-            <input type="number" name="tax_rate" id="tax-rate" class="form-input" value="16" min="0" step="0.5" placeholder="16" />
+            <input type="number" name="tax_rate" id="tax-rate" class="form-input" value="${modalDefaultTax}" min="0" step="0.5" placeholder="${modalDefaultTax}" />
           </div>
           <div class="form-group">
             <label class="form-label">Precio Final</label>
@@ -1301,8 +1580,11 @@ export class PatientProfile {
         data.patient_id = Number(this.patientId);
         data.status = 'completado';
         data.treatment_id = Number(data.treatment_id);
-        data.price = parseFloat(data.price || 0);
-        data.tax_rate = parseFloat(data.tax_rate !== undefined ? data.tax_rate : 16);
+        const finalPrice = parseFloat(data.price || 0);
+        const taxRateVal = parseFloat(data.tax_rate !== undefined && data.tax_rate !== '' ? data.tax_rate : 0);
+        // El precio guardado en el historial es el precio BASE (sin IVA); el IVA se aplica al facturar/pagar.
+        data.price = taxRateVal > 0 ? parseFloat((finalPrice / (1 + taxRateVal / 100)).toFixed(2)) : finalPrice;
+        data.tax_rate = taxRateVal;
         if (data.tooth_number) data.tooth_number = Number(data.tooth_number);
 
         try {
@@ -1369,6 +1651,7 @@ export class PatientProfile {
       discountTypeSelect.addEventListener('change', () => recalculate('discount'));
       discountValueInput.addEventListener('input', () => recalculate('discount'));
       taxRateInput.addEventListener('input', () => recalculate('tax'));
+      basePriceInput.addEventListener('input', () => recalculate('discount'));
       finalPriceInput.addEventListener('input', () => recalculate('final'));
     }
   }
@@ -1845,5 +2128,317 @@ export class PatientProfile {
     if (printBtn) printBtn.addEventListener('click', () => printWindow.print());
     const logo = printWindow.document.querySelector('#print-logo');
     if (logo) logo.addEventListener('error', () => { logo.style.display = 'none'; });
+  }
+
+  async showTreatmentPaymentModal(treatments) {
+    if (!treatments || treatments.length === 0) return;
+
+    try {
+      const methods = await paymentService.getMethods();
+      const methodOpts = methods.map(m => `<option value="${m.id}">${m.label || m.name}</option>`).join('');
+
+      const { patientCredit, patientCreditBalance } = await (async () => {
+        try {
+          const res = await patientService.getCredit(this.patientId);
+          const data = Array.isArray(res) ? res[0] : res;
+          const bal = parseFloat(data?.balance || 0);
+          return { patientCredit: bal > 0, patientCreditBalance: bal };
+        } catch {
+          return { patientCredit: false, patientCreditBalance: 0 };
+        }
+      })();
+
+      // IVA: se toma automáticamente de la tasa configurada al registrar el tratamiento.
+      // Si el tratamiento tiene IVA 0%, el pago no debe añadir IVA (se respeta ese 0).
+      // Solo se usa la tasa de la clínica cuando el tratamiento no trae tasa alguna.
+      const storedTaxRate = (() => {
+        const rates = treatments.map(t => parseFloat(t.tax_rate ?? 0));
+        if (rates.length > 0) {
+          const unique = [...new Set(rates)];
+          if (unique.length === 1) return unique[0];
+          return Math.max(...rates);
+        }
+        const clinicTax = parseFloat(state.get('clinicInfo')?.tax_rate || 0);
+        return clinicTax > 0 ? clinicTax : 0;
+      })();
+      const isTaxFixed = true;
+
+      const rawSubtotal = treatments.reduce((sum, t) => {
+        const pending = (t.remaining_balance !== undefined && t.remaining_balance !== null)
+          ? parseFloat(t.remaining_balance)
+          : ((t.invoice_id && t.invoice_balance !== undefined && t.invoice_balance !== null)
+            ? parseFloat(t.invoice_balance)
+            : parseFloat(t.price || 0));
+        return sum + pending;
+      }, 0);
+
+      const initialTotal = rawSubtotal;
+
+      const itemsListHtml = treatments.map(t => {
+        const pending = (t.remaining_balance !== undefined && t.remaining_balance !== null)
+          ? parseFloat(t.remaining_balance)
+          : parseFloat(t.price || 0);
+        return `
+          <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed var(--border-color); font-size: 13px;">
+            <span><strong>${t.treatment_name || t.name}</strong> ${t.tooth_number ? `(Pieza #${t.tooth_number})` : ''}</span>
+            <span><strong>${formatCurrency(pending)}</strong> ${(t.linked_documents && t.linked_documents.length > 0) ? `<small style="color: var(--warning-700); font-size: 11px;">(Saldo Restante Pendiente)</small>` : ''}</span>
+          </div>
+        `;
+      }).join('');
+
+      const taxFieldHtml = storedTaxRate > 0 ? `
+        <div style="margin-bottom: var(--space-3); background: var(--primary-50); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--primary-200); font-size: 13px; color: var(--primary-900);">
+          ℹ️ Este comprobante aplicará un IVA del <strong>${storedTaxRate}%</strong> sobre este pago. Se calcula proporcionalmente.
+        </div>
+        <input type="hidden" id="pay-modal-tax-rate" name="tax_rate" value="${storedTaxRate}" />
+        <input type="hidden" id="pay-modal-disc-amt" name="discount_amount" value="0" />
+      ` : `
+        <div style="margin-bottom: var(--space-3); background: var(--gray-50); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color); font-size: 13px; color: var(--text-secondary);">
+          ℹ️ Este comprobante no lleva IVA (<strong>0%</strong>). El monto íntegro se registrará como neto.
+        </div>
+        <input type="hidden" id="pay-modal-tax-rate" name="tax_rate" value="0" />
+        <input type="hidden" id="pay-modal-disc-amt" name="discount_amount" value="0" />
+      `;
+
+      const content = `
+        <form id="treatment-payment-modal-form">
+          <div style="margin-bottom: var(--space-4); background: var(--gray-50); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+            <div style="font-weight: 600; font-size: 13px; margin-bottom: 6px; color: var(--text-secondary);">Tratamientos Seleccionados (${treatments.length}):</div>
+            ${itemsListHtml}
+          </div>
+
+          <div class="form-group" style="margin-bottom: var(--space-4);">
+            <label class="form-label" style="font-weight: 600;">Tipo de Comprobante a Generar para este Pago</label>
+            <div style="display: flex; gap: 16px; margin-top: 6px;">
+              <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; font-weight: 500;">
+                <input type="radio" name="document_type" value="recibo" checked style="transform: scale(1.2);" />
+                🧾 Recibo de Pago (REC)
+              </label>
+              <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; font-weight: 500;">
+                <input type="radio" name="document_type" value="factura" style="transform: scale(1.2);" />
+                📄 Factura Oficial (FAC)
+              </label>
+            </div>
+          </div>
+
+          ${taxFieldHtml}
+
+          <div class="form-group" style="margin-bottom: var(--space-3);">
+            <label class="form-label" style="font-weight: 600;">Monto Bruto a Abonar en esta Cuota / Pago ($)</label>
+            <input type="number" step="0.01" id="pay-modal-amount" name="amount" class="form-input" value="${initialTotal}" min="0.01" required />
+            <div id="partial-pay-notice" style="display: none; font-size: 12px; color: var(--warning-700); margin-top: 4px; font-weight: 500;">
+              ⚡ Se registrará un pago parcial de esta cuota. Quedará un saldo pendiente que podrá abonarse posteriormente.
+            </div>
+          </div>
+
+          <!-- Summary Box -->
+          <div style="background: var(--primary-50); border: 1px solid var(--primary-200); padding: 12px 16px; border-radius: var(--radius-md); margin-bottom: var(--space-4);">
+            <div style="display: flex; justify-content: space-between; font-size: 13px;"><span>Neto / Subtotal de esta cuota:</span> <span id="summary-subtotal">$0.00</span></div>
+            <div style="display: flex; justify-content: space-between; font-size: 13px;"><span>IVA <span id="summary-tax-rate">${storedTaxRate}</span>% del monto de este pago:</span> <span id="summary-tax-amount">+$0.00</span></div>
+            <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: bold; border-top: 1px solid var(--primary-300); margin-top: 6px; padding-top: 6px; color: var(--primary-900);">
+              <span>TOTAL DE ESTE COMPROBANTE:</span> <span id="summary-total">${formatCurrency(initialTotal)}</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Método de Pago</label>
+            <select name="payment_method_id" class="form-select" required>
+              ${methodOpts}
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">No. Referencia / Operación (opcional)</label>
+            <input type="text" name="reference_number" class="form-input" placeholder="Ej: TRANS-98765" />
+          </div>
+
+          ${patientCredit ? `
+          <div style="background: var(--success-50); border: 1px solid var(--success-300); border-radius: var(--radius-md); padding: var(--space-3); margin-bottom: var(--space-3);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <strong style="color: var(--success-800);">🏦 Saldo a Favor Disponible</strong>
+              <span style="font-size: 13px; font-weight: 600; color: var(--success-700);">${formatCurrency(patientCreditBalance)}</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <label class="form-label" style="margin: 0; white-space: nowrap; font-size: 13px;">Usar saldo:</label>
+              <input type="number" id="credit-used-input" name="credit_used" class="form-input" step="0.01" min="0" max="${patientCreditBalance}" value="0" style="width: 150px;" />
+              <span style="font-size: 11px; color: var(--text-secondary);">Reduce el efectivo a recibir.</span>
+            </div>
+          </div>
+          ` : ''}
+
+          <div class="form-group">
+            <label class="form-label">Notas (opcional)</label>
+            <textarea name="notes" class="form-input" rows="2"></textarea>
+          </div>
+        </form>
+      `;
+
+      Modal.show({
+        title: 'Registrar Pago y Generar Comprobante',
+        content,
+        size: 'lg',
+        footer: `
+          <button class="btn btn-outline" onclick="Modal.close()">Cancelar</button>
+          <button class="btn btn-success" id="confirm-treatment-payment-btn">💳 Confirmar Pago</button>
+        `,
+      });
+
+      const taxRateInput = document.getElementById('pay-modal-tax-rate');
+      const discAmtInput = document.getElementById('pay-modal-disc-amt');
+      const amountInput = document.getElementById('pay-modal-amount');
+      const noticeDiv = document.getElementById('partial-pay-notice');
+
+      const recalc = () => {
+        const tr = isTaxFixed ? storedTaxRate : parseFloat(taxRateInput?.value || 0);
+        const P = parseFloat(amountInput?.value || 0);
+
+        const net = parseFloat((P / (1 + tr / 100.0)).toFixed(2));
+        const vat = parseFloat((P - net).toFixed(2));
+
+        if (document.getElementById('summary-subtotal')) document.getElementById('summary-subtotal').textContent = formatCurrency(net);
+        if (document.getElementById('summary-tax-rate')) document.getElementById('summary-tax-rate').textContent = tr;
+        if (document.getElementById('summary-tax-amount')) document.getElementById('summary-tax-amount').textContent = `+${formatCurrency(vat)}`;
+        if (document.getElementById('summary-total')) document.getElementById('summary-total').textContent = formatCurrency(P);
+
+        if (noticeDiv) {
+          if (P < initialTotal) {
+            noticeDiv.style.display = 'block';
+          } else {
+            noticeDiv.style.display = 'none';
+          }
+        }
+      };
+
+      recalc();
+
+      taxRateInput?.addEventListener('input', recalc);
+      discAmtInput?.addEventListener('input', recalc);
+      amountInput?.addEventListener('input', recalc);
+
+      document.getElementById('confirm-treatment-payment-btn')?.addEventListener('click', async () => {
+        const form = document.getElementById('treatment-payment-modal-form');
+        if (!form) return;
+        const formData = new FormData(form);
+
+        const treatmentIds = treatments.map(t => parseInt(t.id, 10));
+
+        const payload = {
+          patient_id: parseInt(this.patientId, 10),
+          treatment_ids: treatmentIds,
+          document_type: formData.get('document_type'),
+          payment_method_id: parseInt(formData.get('payment_method_id'), 10),
+          amount: parseFloat(formData.get('amount')),
+          credit_used: parseFloat(formData.get('credit_used') || 0),
+          tax_rate: parseFloat(formData.get('tax_rate')),
+          discount_amount: parseFloat(formData.get('discount_amount') || 0),
+          reference_number: formData.get('reference_number') || null,
+          notes: formData.get('notes') || null,
+        };
+
+        try {
+          const res = await paymentService.processTreatmentPayment(payload);
+          const docNum = res?.document?.invoice_number || '';
+          toast.success(`¡Pago registrado exitosamente! Comprobante #${docNum} generado.`);
+          Modal.close();
+          await this.render();
+          this.mount();
+        } catch (err) {
+          toast.error(err.message || 'Error al procesar el pago');
+        }
+      });
+    } catch (err) {
+      console.error('Error al abrir modal de pago:', err);
+      toast.error(err.message || 'Error al abrir modal de pago');
+    }
+  }
+
+  async showDocumentModal(invoiceId) {
+    try {
+      const doc = await invoiceService.getById(invoiceId);
+      if (!doc) return;
+
+      const isReceipt = doc.document_type === 'recibo';
+      const docTitle = isReceipt ? 'RECIBO DE PAGO' : 'FACTURA OFICIAL';
+      const docIcon = isReceipt ? '🧾' : '📄';
+
+      const itemsHtml = (doc.items || []).map(item => `
+        <tr>
+          <td style="padding: 8px; border-bottom: 1px solid var(--border-color);">${item.description}</td>
+          <td style="padding: 8px; border-bottom: 1px solid var(--border-color); text-align: center;">${item.quantity}</td>
+          <td style="padding: 8px; border-bottom: 1px solid var(--border-color); text-align: right;">${formatCurrency(item.unit_price)}</td>
+          <td style="padding: 8px; border-bottom: 1px solid var(--border-color); text-align: right;">${formatCurrency(item.total)}</td>
+        </tr>
+      `).join('');
+
+      const content = `
+        <div id="printable-profile-doc" style="padding: var(--space-4); font-family: inherit;">
+          <div style="display: flex; justify-content: space-between; border-bottom: 2px solid var(--primary-500); padding-bottom: var(--space-3); margin-bottom: var(--space-4);">
+            <div>
+              <h2 style="margin: 0; color: var(--primary-700);">${docIcon} ${docTitle}</h2>
+              <p style="margin: 4px 0 0 0; font-size: 18px; font-weight: bold;"># ${doc.invoice_number}</p>
+            </div>
+            <div style="text-align: right;">
+              <p style="margin: 0; font-weight: 600;">Fecha: ${formatDate(doc.created_at)}</p>
+              <p style="margin: 4px 0 0 0; color: var(--text-secondary);">Estado: ${(doc.status || '').toUpperCase()}</p>
+            </div>
+          </div>
+
+          <div style="margin-bottom: var(--space-4);">
+            <p style="margin: 0;"><strong>Paciente:</strong> ${doc.patient_name || 'N/A'}</p>
+            ${doc.patient_dni ? `<p style="margin: 4px 0 0 0;"><strong>DNI/ID:</strong> ${doc.patient_dni}</p>` : ''}
+            ${doc.doctor_name ? `<p style="margin: 4px 0 0 0;"><strong>Atendido por:</strong> Dr/a. ${doc.doctor_name}</p>` : ''}
+          </div>
+
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: var(--space-4);">
+            <thead>
+              <tr style="background: var(--gray-100); border-bottom: 2px solid var(--border-color);">
+                <th style="padding: 8px; text-align: left;">Tratamiento / Concepto</th>
+                <th style="padding: 8px; text-align: center;">Cant.</th>
+                <th style="padding: 8px; text-align: right;">Precio Unit.</th>
+                <th style="padding: 8px; text-align: right;">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemsHtml}
+            </tbody>
+          </table>
+
+          <div style="display: flex; justify-content: flex-end; margin-top: var(--space-4);">
+            <div style="width: 260px;">
+              <div style="display: flex; justify-content: space-between; padding: 4px 0;"><span>Subtotal:</span> <span>${formatCurrency(doc.subtotal)}</span></div>
+              ${parseFloat(doc.discount_amount || 0) > 0 ? `<div style="display: flex; justify-content: space-between; padding: 4px 0;"><span>Descuento:</span> <span>-${formatCurrency(doc.discount_amount)}</span></div>` : ''}
+              <div style="display: flex; justify-content: space-between; padding: 4px 0;"><span>Impuestos (${doc.tax_rate || 0}%):</span> <span>${formatCurrency(doc.tax_amount)}</span></div>
+              <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 18px; font-weight: bold; border-top: 2px solid var(--border-color);"><span>TOTAL:</span> <span>${formatCurrency(doc.total)}</span></div>
+              <div style="display: flex; justify-content: space-between; padding: 4px 0; color: var(--success-600); font-weight: 600;"><span>Monto Pagado:</span> <span>${formatCurrency(doc.amount_paid)}</span></div>
+              <div style="display: flex; justify-content: space-between; padding: 4px 0; color: var(--danger-600); font-weight: 600;"><span>Saldo Restante:</span> <span>${formatCurrency(doc.balance)}</span></div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      Modal.show({
+        title: `${docTitle} #${doc.invoice_number}`,
+        content,
+        size: 'lg',
+        footer: `
+          <button class="btn btn-outline" onclick="Modal.close()">Cerrar</button>
+          <button class="btn btn-primary" id="print-profile-doc-btn" data-id="${doc.id}" data-type="${doc.document_type || 'factura'}">🖨️ Imprimir / PDF</button>
+        `,
+      });
+
+      document.getElementById('print-profile-doc-btn')?.addEventListener('click', async (e) => {
+        const id = e.target.getAttribute('data-id');
+        const type = e.target.getAttribute('data-type');
+        if (type === 'recibo') {
+          const { Receipts } = await import('../receipts/receipts.js');
+          new Receipts(this.container).printReceipt(id);
+        } else {
+          const { Invoices } = await import('../invoices/invoices.js');
+          new Invoices(this.container).printInvoice(id);
+        }
+      });
+    } catch (err) {
+      toast.error('Error al abrir el comprobante');
+    }
   }
 }

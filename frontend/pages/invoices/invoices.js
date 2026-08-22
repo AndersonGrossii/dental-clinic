@@ -29,8 +29,9 @@ export class Invoices {
 
   async render() {
     try {
-      const response = await invoiceService.getAll();
-      this.invoicesList = Array.isArray(response) ? response : (response?.invoices || response?.data || []);
+      const response = await invoiceService.getAll({ document_type: 'factura' });
+      const rawList = Array.isArray(response) ? response : (response?.invoices || response?.data || []);
+      this.invoicesList = rawList.filter(i => i.document_type === 'factura' || (!i.document_type && i.invoice_number?.startsWith('FAC')));
       this.renderView();
     } catch (err) {
       toast.error('Error al cargar facturas');

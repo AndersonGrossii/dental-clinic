@@ -62,9 +62,8 @@ class PatientRepository extends BaseRepository {
        FROM patients p
        LEFT JOIN (
          SELECT pt.patient_id,
-                SUM(pt.price * (1 + COALESCE(i.tax_rate, 21) / 100.0)) AS total_debit
+                SUM(pt.price * (1 + COALESCE(pt.tax_rate, 0) / 100.0)) AS total_debit
          FROM patient_treatments pt
-         LEFT JOIN invoices i ON i.id = pt.invoice_id AND i.deleted_at IS NULL
          WHERE pt.status = 'completado' AND pt.deleted_at IS NULL
          GROUP BY pt.patient_id
        ) dbt ON dbt.patient_id = p.id
@@ -127,9 +126,8 @@ class PatientRepository extends BaseRepository {
        FROM patients p
        LEFT JOIN (
          SELECT pt.patient_id,
-                SUM(pt.price * (1 + COALESCE(i.tax_rate, 21) / 100.0)) AS total_debit
+                SUM(pt.price * (1 + COALESCE(pt.tax_rate, 0) / 100.0)) AS total_debit
          FROM patient_treatments pt
-         LEFT JOIN invoices i ON i.id = pt.invoice_id AND i.deleted_at IS NULL
          WHERE pt.status = 'completado' AND pt.deleted_at IS NULL
          GROUP BY pt.patient_id
        ) dbt ON dbt.patient_id = p.id
@@ -197,9 +195,8 @@ class PatientRepository extends BaseRepository {
        ) pi ON pi.patient_id = p.id
        LEFT JOIN (
          SELECT pt.patient_id,
-                SUM(pt.price * (1 + COALESCE(i.tax_rate, 21) / 100.0)) AS total_debit
+                SUM(pt.price * (1 + COALESCE(pt.tax_rate, 0) / 100.0)) AS total_debit
          FROM patient_treatments pt
-         LEFT JOIN invoices i ON i.id = pt.invoice_id AND i.deleted_at IS NULL
          WHERE pt.status = 'completado' AND pt.deleted_at IS NULL
          GROUP BY pt.patient_id
        ) dbt ON dbt.patient_id = p.id
@@ -350,32 +347,34 @@ class PatientRepository extends BaseRepository {
    */
   async getTreatments(patientId, { limit = 20, offset = 0 } = {}) {
     const clinicId = this.getClinicId();
-    const conditions = ['patient_id = $1'];
+    const conditions = ['pt.patient_id = $1'];
     const params = [patientId];
     if (clinicId) {
-      conditions.push(`clinic_id = $${params.length + 1}`);
+      conditions.push(`pt.clinic_id = $${params.length + 1}`);
       params.push(clinicId);
     }
     const where = conditions.join(' AND ');
 
     const countResult = await query(
-      `SELECT COUNT(*) AS total FROM treatments
-       WHERE ${where} AND deleted_at IS NULL`,
+      `SELECT COUNT(*) AS total FROM patient_treatments pt
+       WHERE ${where} AND pt.deleted_at IS NULL`,
       params
     );
     const total = parseInt(countResult.rows[0].total, 10);
 
     const dataResult = await query(
-      `SELECT t.*, u.first_name AS doctor_name, u.last_name AS doctor_lastname
-       FROM treatments t
-       LEFT JOIN doctors doc ON doc.id = t.doctor_id
+      `SELECT pt.*, t.name AS treatment_name, t.code AS treatment_code,
+              tc.name AS category_name, tc.color AS category_color,
+              u.first_name AS doctor_name, u.last_name AS doctor_lastname
+       FROM patient_treatments pt
+       INNER JOIN treatments t ON t.id = pt.treatment_id
+       LEFT JOIN treatment_categories tc ON t.category_id = tc.id
+       LEFT JOIN doctors doc ON doc.id = pt.doctor_id
        LEFT JOIN users u ON u.id = doc.user_id
-       WHERE t.patient_id = $1 AND t.deleted_at IS NULL
-       ORDER BY t.created_at DESC
-       LIMIT $2 OFFSET $3`,
-      clinicId
-        ? [patientId, clinicId, limit, offset]
-        : [patientId, limit, offset]
+       WHERE ${where} AND pt.deleted_at IS NULL
+       ORDER BY pt.created_at DESC
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, limit, offset]
     );
 
     return { rows: dataResult.rows, total };
@@ -507,3 +506,4 @@ class PatientRepository extends BaseRepository {
 }
 
 export default new PatientRepository();
+

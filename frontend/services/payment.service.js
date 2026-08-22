@@ -16,8 +16,16 @@ class PaymentService {
     return await api.get('/payments/methods');
   }
 
+  async getPaymentMethods() {
+    return await this.getMethods();
+  }
+
   async create(data) {
     return await api.post('/payments', data);
+  }
+
+  async processTreatmentPayment(data) {
+    return await api.post('/payments/process-treatments', data);
   }
 
   async remove(id) {
