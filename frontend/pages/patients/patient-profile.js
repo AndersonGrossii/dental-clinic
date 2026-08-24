@@ -730,7 +730,7 @@ export class PatientProfile {
       `;
     } else if (this.activeTab === 'notes') {
       const userRole = state.get('user')?.role_name;
-      const canWriteNotes = ['propietario', 'direccion', 'doctor'].includes(userRole);
+      const canWriteNotes = ['propietario', 'direccion', 'doctor','higienista'].includes(userRole);
 
       let noteRows = (this.clinicalNotes || []).map(n => `
         <div style="border-bottom: 1px solid var(--border-color); padding: var(--space-4) 0; margin-bottom: var(--space-2);">
