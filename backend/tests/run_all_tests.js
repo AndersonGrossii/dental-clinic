@@ -77,6 +77,15 @@ async function runAllTests() {
     });
     assert(updatedPatient.custom_id === updatedCustomId, 'custom_id editado y guardado correctamente en la BD', `(${updatedPatient.custom_id})`);
 
+    // Creación de Nota Clínica de Evolución
+    const createdNote = await patientService.createNote(testPatientId, adminId, {
+      title: 'Limpieza e Higiene Dental Post-Tratamiento',
+      content: 'Tratamiento de profilaxis realizado sin complicaciones. Instrucciones de higiene entregadas.',
+      type: 'clinica'
+    });
+    assert(createdNote && createdNote.id, 'Nota de evolución clínica registrada con éxito', `(Nota ID: ${createdNote.id})`);
+    assert(createdNote.content.includes('profilaxis'), 'Contenido de la nota guardado correctamente');
+
     // --------------------------------------------------
     // TEST 3: Citas de Primera Visita (Invitados) y Conversión
     // --------------------------------------------------

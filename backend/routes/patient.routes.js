@@ -116,9 +116,9 @@ router.get('/:id/notes', allRoles, patientController.getNotes);
 /**
  * @route   POST /api/v1/patients/:id/notes
  * @desc    Crear una nota de evolución clínica para el paciente
- * @access  Propietario, Dirección, Doctor
+ * @access  Propietario, Dirección, Doctor, Higienista
  */
-router.post('/:id/notes', roleMiddleware('propietario', 'direccion', 'doctor'), patientController.createNote);
+router.post('/:id/notes', roleMiddleware('propietario', 'direccion', 'doctor', 'higienista'), patientController.createNote);
 
 /**
  * @route   GET /api/v1/patients/:id/prescriptions

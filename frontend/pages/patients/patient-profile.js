@@ -739,7 +739,7 @@ export class PatientProfile {
             <span style="font-size: var(--text-xs); color: var(--text-tertiary); white-space: nowrap;">${formatDate(n.created_at)}</span>
           </div>
           <div style="font-size: var(--text-xs); color: var(--text-secondary); margin-bottom: var(--space-2);">
-            Escrito por: <strong>${n.author_name} ${n.author_lastname}</strong> (${n.author_role.charAt(0).toUpperCase() + n.author_role.slice(1)})
+            Escrito por: <strong>${n.author_name || ''} ${n.author_lastname || ''}</strong> (${n.author_role ? (n.author_role.charAt(0).toUpperCase() + n.author_role.slice(1)) : 'Usuario'})
           </div>
           <p style="font-size: var(--text-sm); margin: 0; color: var(--color-text); white-space: pre-wrap;">${n.content}</p>
         </div>
