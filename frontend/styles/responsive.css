@@ -2,95 +2,57 @@
    Estilos Responsivos (Media Queries)
    ============================================ */
 
-/* Tablets y Laptops chicas */
-@media (max-width: 1024px) {
-  :root {
-    --sidebar-width: 72px;
+/* Laptops medianas y tablets en horizontal */
+@media (max-width: 1080px) {
+  .top-nav__brand-title {
+    display: none;
   }
 }
 
-/* Teléfonos (modo drawer overlay) */
-@media (max-width: 768px) {
-  :root {
-    --sidebar-width: 0px;
-    --page-padding: var(--space-4);
-  }
-
-  #app-container {
-    flex-direction: column;
-  }
-
-  /* Sidebar: drawer overlay */
-  .sb {
-    transform: translateX(-100%);
-    box-shadow: none !important;
-    z-index: calc(var(--z-sidebar) + 10);
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    width: 280px !important;
-  }
-
-  .sb.sb--mobile-open {
-    transform: translateX(0);
-    box-shadow: 4px 0 24px rgba(0,0,0,0.15) !important;
-  }
-
-  .sb--hidden {
-    transform: translateX(-100%) !important;
-  }
-
-  .sb--mobile-open.sb--hidden {
-    transform: translateX(0) !important;
-  }
-
-  /* Sidebar mobile overlay backdrop */
-  .sb-mobile-overlay {
-    position: fixed;
-    inset: 0;
-    background-color: rgba(0, 0, 0, 0.5);
-    z-index: calc(var(--z-sidebar) + 9);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.3s ease;
-  }
-
-  .sb-mobile-overlay--visible {
-    opacity: 1;
-    pointer-events: auto;
-  }
-
-  /* Hide floating expand button on mobile — hamburger replaces it */
-  .sb__expand-float {
+/* Tablets y pantallas chicas */
+@media (max-width: 900px) {
+  .top-nav__icons-bar {
     display: none !important;
   }
 
-  /* Navbar adjustments */
-  .navbar {
-    padding: 0 var(--space-3);
+  .top-nav__divider {
+    display: none !important;
   }
 
-  .navbar-hamburger {
+  .top-nav__hamburger-btn {
     display: flex !important;
   }
 
-  .navbar-search {
-    display: none;
+  .top-nav__user-details {
+    display: none !important;
   }
 
-  .navbar-user-name {
-    display: none;
+  .top-nav__logout-text {
+    display: none !important;
   }
 
-  .app-container:has(.sb--hidden) .navbar {
-    padding-left: var(--space-3);
+  .top-navbar {
+    padding: 0 var(--space-3);
+  }
+}
+
+/* Teléfonos */
+@media (max-width: 768px) {
+  :root {
+    --page-padding: var(--space-4);
+  }
+
+  .top-nav__clinic-switcher {
+    display: none !important;
+  }
+
+  .top-nav__logout-btn {
+    padding: 6px;
   }
 
   /* Main content full width */
   .main-content {
     margin-left: 0 !important;
-  }
-
-  .app-container:has(.sb--hidden) .main-content {
-    margin-left: 0;
   }
 
   /* Page */

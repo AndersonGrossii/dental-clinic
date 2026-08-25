@@ -160,9 +160,87 @@ async function runAllTests() {
     const acceptedQuote = await quotationService.changeStatus(testQuotationId, 'aceptada');
     assert(acceptedQuote.status === 'aceptada', 'Presupuesto actualizado a estado aceptada');
 
+    // Marcar tratamiento de la cotización como realizado para que se renderice en Tratamientos Realizados
+    const quoteItems = acceptedQuote.items || [];
+    if (quoteItems.length > 0) {
+      await quotationService.updateExecutionStatus(quoteItems[0].id, 'realizado', adminId);
+    }
+
     const acceptedItems = await quotationService.getAcceptedItemsByPatient(testPatientId);
-    assert(acceptedItems.length > 0, 'Tratamientos Aceptados listados correctamente tras aceptar el presupuesto');
-    assert(acceptedItems[0].quote_tax_rate !== undefined && acceptedItems[0].quote_tax_rate !== null, 'Tasa de IVA del presupuesto transmitida a Tratamientos Aceptados');
+    assert(acceptedItems.length > 0, 'Tratamientos Realizados listados correctamente tras completar el tratamiento');
+    assert(acceptedItems[0].quote_tax_rate !== undefined && acceptedItems[0].quote_tax_rate !== null, 'Tasa de IVA del presupuesto transmitida a Tratamientos Realizados');
+
+    // Revertir estado de ejecución para no afectar pruebas financieras posteriores
+    if (quoteItems.length > 0) {
+      await quotationService.updateExecutionStatus(quoteItems[0].id, 'en_proceso', adminId);
+    }
+
+    // Prueba de conversión de cotización directa a Recibo (REC) y pago directo
+    const quoteDoc = await invoiceService.createFromQuotation(testQuotationId, adminId, null, 'recibo');
+    assert(quoteDoc && quoteDoc.id, 'Documento de recibo generado directamente desde cotización aceptada');
+    assert(quoteDoc.invoice_number.startsWith('REC-'), 'Número de recibo secuencial (REC) asignado correctamente');
+
+    // Prueba de Cotización con Múltiples Ítems y Abono Desglosado por Tratamiento
+    const multiItemQuote = await quotationService.create({
+      patient_id: testPatientId,
+      doctor_id: docId,
+      notes: 'Presupuesto con múltiples ítems para abono desglosado',
+      items: [
+        { treatment_id: treatment.id, description: 'Extracción dental', unit_price: 100, quantity: 1, discount: 0 },
+        { treatment_id: treatment.id, description: 'Implante dental', unit_price: 400, quantity: 1, discount: 0 }
+      ]
+    }, adminId);
+    await quotationService.changeStatus(multiItemQuote.id, 'aceptada');
+
+    const multiItemAllocations = [
+      { id: multiItemQuote.items[0].id, amount: 60.00 },
+      { id: multiItemQuote.items[1].id, amount: 250.00 }
+    ];
+
+    const allocDoc = await invoiceService.createFromQuotation(multiItemQuote.id, adminId, null, 'recibo', multiItemAllocations);
+    assert(allocDoc && allocDoc.id, 'Recibo generado con abonos desglosados por tratamiento');
+    assert(allocDoc.items.some(i => i.description.includes('Abono Parcial') && i.description.includes('60%')), 'Recibo indica valor parcial y porcentaje del 60% para Extracción');
+    assert(allocDoc.items.some(i => i.description.includes('Abono Parcial') && i.description.includes('62.5%')), 'Recibo indica valor parcial y porcentaje del 62.5% para Implante');
+
+    const allocPaymentMethods = (await query('SELECT id FROM payment_methods LIMIT 1')).rows;
+    const allocMethodId = allocPaymentMethods[0]?.id || 1;
+    await paymentService.create({
+      invoice_id: allocDoc.id,
+      amount: allocDoc.total,
+      payment_method_id: allocMethodId,
+      notes: 'Pago de recibo de prueba con abono desglosado'
+    }, adminId);
+
+    const updatedMultiQuote = await quotationService.getById(multiItemQuote.id);
+    const item1 = updatedMultiQuote.items.find(i => i.id === multiItemQuote.items[0].id);
+    const item2 = updatedMultiQuote.items.find(i => i.id === multiItemQuote.items[1].id);
+
+    assert(item1.amount_paid === 60, 'Monto cobrado para Extracción es 60€');
+    assert(item1.payment_status === 'parcial', 'Estado de pago para Extracción es parcial (naranja)');
+    assert(item2.amount_paid === 250, 'Monto cobrado para Implante es 250€');
+    assert(item2.payment_status === 'parcial', 'Estado de pago para Implante es parcial (naranja)');
+
+    // Crear segundo recibo para completar Extracción (40€ faltantes)
+    const secondAllocations = [{ id: multiItemQuote.items[0].id, amount: 40.00 }];
+    const secondDoc = await invoiceService.createFromQuotation(multiItemQuote.id, adminId, null, 'recibo', secondAllocations);
+    await paymentService.create({
+      invoice_id: secondDoc.id,
+      amount: secondDoc.total,
+      payment_method_id: allocMethodId,
+      notes: 'Segundo pago para completar Extracción'
+    }, adminId);
+
+    const secondDocDetail = await invoiceService.getById(secondDoc.id);
+    const completedExtraccion = secondDocDetail.items.find(i => i.quotation_item_id === multiItemQuote.items[0].id);
+    assert(completedExtraccion && parseFloat(completedExtraccion.previously_paid) === 60, 'Recibo #2 reconoce 60€ abonados previamente');
+    assert(completedExtraccion && completedExtraccion.is_final_payment_of_partial === true, 'Recibo #2 reconoce que este abono completa al 100% la Extracción');
+
+    // Limpieza de cotización multi-item de prueba
+    await query('DELETE FROM payments WHERE invoice_id IN ($1, $2)', [allocDoc.id, secondDoc.id]);
+    await query('DELETE FROM invoice_items WHERE invoice_id IN ($1, $2)', [allocDoc.id, secondDoc.id]);
+    await query('DELETE FROM invoices WHERE id IN ($1, $2)', [allocDoc.id, secondDoc.id]);
+    await query('DELETE FROM quotation_items WHERE quotation_id = $1', [multiItemQuote.id]);
+    await query('DELETE FROM quotations WHERE id = $1', [multiItemQuote.id]);
 
     // Registrar pago con fecha personalizada
     const invoice = await invoiceService.create({
@@ -195,61 +273,94 @@ async function runAllTests() {
     const storedDateStr = checkPayment.rows[0]?.payment_date || '';
     assert(storedDateStr.startsWith(customPaymentDate), 'Pago guardado con fecha personalizada en la BD', `(Fecha: ${storedDateStr.slice(0, 10)})`);
 
-    await query('DELETE FROM payments WHERE id = $1', [payment.id]);
-    await query('DELETE FROM invoice_items WHERE invoice_id = $1', [invoice.id]);
-    await query('DELETE FROM invoices WHERE id = $1', [invoice.id]);
+    await query('DELETE FROM payments WHERE invoice_id IN (SELECT id FROM invoices WHERE patient_id = $1)', [testPatientId]);
+    await query('DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE patient_id = $1)', [testPatientId]);
+    await query('DELETE FROM invoices WHERE patient_id = $1', [testPatientId]);
+    await query('DELETE FROM quotation_items WHERE quotation_id IN (SELECT id FROM quotations WHERE patient_id = $1)', [testPatientId]);
+    await query('DELETE FROM quotations WHERE patient_id = $1', [testPatientId]);
+    await query('DELETE FROM patient_treatments WHERE patient_id = $1', [testPatientId]);
 
     // --------------------------------------------------
     // TEST 6: Flujo de Cobranza -> Tratamiento Aceptado + Crédito en Balance -> Conclusión y Débito
     // --------------------------------------------------
     console.log('\n🔹 [6/7] Flujo de Cobranza en Payments -> Tratamiento Aceptado -> Balance -> Conclusión');
-    
-    // 1. Crear tratamiento aceptado (pendiente)
-    const newPt = await treatmentService.addPatientTreatment({
-      patient_id: testPatientId,
-      treatment_id: treatment.id,
-      price: 200.00,
-      status: 'pendiente',
-      notes: 'Tratamiento de prueba aceptado'
-    });
-    assert(newPt && newPt.id, 'Tratamiento Aceptado (pendiente) registrado');
-    assert(newPt.status === 'pendiente', 'Status inicial es pendiente (Aceptado)');
 
-    // 2. Procesar pago desde Payments y generar comprobante
-    const payResult = await paymentService.processTreatmentPayment({
-      patient_id: testPatientId,
-      treatment_ids: [newPt.id],
-      document_type: 'recibo',
+    const patient6 = await patientService.create({
+      first_name: 'Prueba',
+      last_name: 'Cobranza',
+      phone: '555000999',
+      email: `cobranza_${Date.now()}@test.com`
+    }, adminId);
+    const testPatientId6 = patient6.id;
+
+    // 1. Crear adelantamiento inicial ($200)
+    const initAdv = await paymentService.create({
+      patient_id: testPatientId6,
       payment_method_id: methodId,
       amount: 200.00,
-      notes: 'Pago de prueba de tratamiento aceptado'
+      notes: 'Adelanto inicial de prueba'
+    }, adminId);
+    assert(initAdv && initAdv.payment, 'Adelantamiento inicial registrado con éxito');
+
+    const patInit = await patientService.getById(testPatientId6);
+    assert(parseFloat(patInit.balance) === 200.00, 'Balance inicial es +200.00 tras adelantamiento');
+    assert(parseFloat(patInit.available_credit) === 200.00, 'Saldo(Crédito) inicial es 200.00');
+
+    // 2. Registrar tratamiento completado de 200€
+    const newPt = await treatmentService.addPatientTreatment({
+      patient_id: testPatientId6,
+      treatment_id: treatment.id,
+      price: 200.00,
+      status: 'completado',
+      notes: 'Tratamiento completado de prueba'
+    });
+    assert(newPt && newPt.id, 'Tratamiento completado registrado');
+
+    const patAfterPt = await patientService.getById(testPatientId6);
+    assert(parseFloat(patAfterPt.balance) === 0.00, 'Balance se actualiza a 0.00 al completar tratamiento de 200€');
+    assert(parseFloat(patAfterPt.available_credit) === 200.00, 'Saldo(Crédito) permanece en 200.00 sin usar');
+
+    // 3. Test de Escenario Completo (Adelanto $5,000 + Tratamiento $3,500)
+    const advPay = await paymentService.create({
+      patient_id: testPatientId6,
+      payment_method_id: methodId,
+      amount: 5000.00,
+      notes: 'Adelanto de prueba 5000'
     }, adminId);
 
-    assert(payResult && payResult.document, 'Comprobante y pago procesados correctamente');
-    
-    // Verificar que el crédito (+200) fue registrado en la cuenta del paciente
-    const balanceAfterPay = await patientService.getCredit(testPatientId);
-    assert(balanceAfterPay.balance === 200.00, 'Crédito (+200.00) registrado en balance del paciente tras cobrar');
-
-    // 3. Concluir el tratamiento (Odontograma / Histórico)
-    const completedPt = await treatmentService.updatePatientTreatment(newPt.id, {
+    const ptScenario = await treatmentService.addPatientTreatment({
+      patient_id: testPatientId6,
+      treatment_id: treatment.id,
+      price: 3500.00,
       status: 'completado',
-      user_id: adminId
+      notes: 'Tratamiento completado 3500'
     });
-    assert(completedPt.status === 'completado', 'Tratamiento marcado como completado (Historial Odontológico)');
 
-    // 4. Verificar que se restó el saldo (balance vuelve a 0)
-    const balanceAfterCompletion = await patientService.getCredit(testPatientId);
-    assert(balanceAfterCompletion.balance === 0.00, 'Saldo restado correctamente (-200.00) al concluir el tratamiento', `(Saldo actual: $${balanceAfterCompletion.balance})`);
+    const patState1 = await patientService.getById(testPatientId6);
+    assert(parseFloat(patState1.balance) === 1500.00, 'Balance se actualiza a +$1,500.00 tras completar tratamiento de $3,500');
+    assert(parseFloat(patState1.available_credit) === 5200.00, 'Saldo(Crédito) permanece en $5,200.00 sin usar antes del cobro');
+
+    // Cobrar tratamiento en efectivo / tarjeta (nuevo dinero entrante)
+    const cashPay = await paymentService.processTreatmentPayment({
+      patient_id: testPatientId6,
+      treatment_ids: [ptScenario.id],
+      document_type: 'recibo',
+      payment_method_id: methodId,
+      amount: 3500.00,
+      notes: 'Pago en efectivo de tratamiento 3500'
+    }, adminId);
+
+    const patState2 = await patientService.getById(testPatientId6);
+    assert(parseFloat(patState2.balance) === 5000.00, 'Balance retorna a +$5,000.00 tras pagar el tratamiento en efectivo/tarjeta');
+    assert(parseFloat(patState2.available_credit) === 5200.00, 'Saldo(Crédito) se mantiene en $5,200.00');
 
     // Limpieza del test 6
-    if (payResult?.payment?.id) await query('DELETE FROM payments WHERE id = $1', [payResult.payment.id]);
-    if (payResult?.document?.id) {
-      await query('DELETE FROM invoice_items WHERE invoice_id = $1', [payResult.document.id]);
-      await query('DELETE FROM invoices WHERE id = $1', [payResult.document.id]);
-    }
-    await query('DELETE FROM patient_credits WHERE patient_id = $1', [testPatientId]);
-    await query('DELETE FROM patient_treatments WHERE id = $1', [newPt.id]);
+    await query('DELETE FROM patient_credits WHERE patient_id = $1', [testPatientId6]);
+    await query('DELETE FROM payments WHERE patient_id = $1 OR invoice_id IN (SELECT id FROM invoices WHERE patient_id = $1)', [testPatientId6]);
+    await query('DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE patient_id = $1)', [testPatientId6]);
+    await query('DELETE FROM invoices WHERE patient_id = $1', [testPatientId6]);
+    await query('DELETE FROM patient_treatments WHERE patient_id = $1', [testPatientId6]);
+    await query('DELETE FROM patients WHERE id = $1', [testPatientId6]);
 
     // --------------------------------------------------
     // TEST 7: Días Específicos de Atención (doctor_workdays)
@@ -286,6 +397,9 @@ async function runAllTests() {
     }
 
     if (testQuotationId) {
+      await query('DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE quotation_id = $1)', [testQuotationId]);
+      await query('DELETE FROM payments WHERE invoice_id IN (SELECT id FROM invoices WHERE quotation_id = $1)', [testQuotationId]);
+      await query('DELETE FROM invoices WHERE quotation_id = $1', [testQuotationId]);
       await query('DELETE FROM quotation_items WHERE quotation_id = $1', [testQuotationId]);
       await query('DELETE FROM quotations WHERE id = $1', [testQuotationId]);
       assert(true, 'Presupuesto de prueba limpiado');

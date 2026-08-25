@@ -3,6 +3,7 @@
 // ============================================
 import quotationService from '../../services/quotation.service.js';
 import invoiceService from '../../services/invoice.service.js';
+import paymentService from '../../services/payment.service.js';
 import patientService from '../../services/patient.service.js';
 import treatmentService from '../../services/treatment.service.js';
 import doctorService from '../../services/doctor.service.js';
@@ -149,7 +150,11 @@ export class Quotations {
         <td><strong>${formatCurrency(q.total)}</strong></td>
         <td>
           <span class="badge ${STATUS_BADGES[q.status] || 'badge-secondary'}">${STATUS_LABELS[q.status] || q.status}</span>
-          ${q.invoice_id ? `<span class="badge" style="background-color: var(--primary-100); color: var(--primary-800); font-size: 10px; margin-left: 4px; padding: 2px 4px;">Facturado</span>` : ''}
+          ${q.payment_status === 'pagado'
+            ? `<span class="badge" style="background-color: var(--success-100); color: var(--success-800); font-size: 11px; margin-left: 4px; padding: 2px 6px;">🟢 100% Pagado</span>`
+            : (q.payment_status === 'parcial'
+              ? `<span class="badge" style="background-color: var(--warning-100); color: var(--warning-800); font-size: 11px; margin-left: 4px; padding: 2px 6px;">🟠 Pagado: ${formatCurrency(q.amount_paid)}</span>`
+              : '')}
         </td>
         <td>${formatDate(q.created_at)}</td>
         <td style="text-align: right;">
@@ -166,12 +171,19 @@ export class Quotations {
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
               <button class="btn btn-sm btn-outline view-quote-btn" data-id="${q.id}" title="Ver / Imprimir Cotización">👁 Ver / Imprimir</button>
-              <button class="btn btn-sm btn-manage-quote manage-items-btn" data-id="${q.id}" title="Gestionar Aceptación e Ítems">⚙️ Gestionar Ítems</button>
-              <button class="btn btn-sm btn-warning change-status-btn" data-id="${q.id}" title="Cambiar Estado del Presupuesto">🏷️ Cambiar Estado</button>
+              ${(q.is_closed || q.payment_status === 'pagado') ? `
+                <span class="badge badge-success" style="font-size: 12px; padding: 6px 12px;">🔒 Presupuesto Bloqueado (Cobrado 100%)</span>
+              ` : `
+                <button class="btn btn-sm btn-manage-quote manage-items-btn" data-id="${q.id}" title="Gestionar Aceptación e Ítems">⚙️ Gestionar Ítems</button>
+                <button class="btn btn-sm btn-warning change-status-btn" data-id="${q.id}" title="Cambiar Estado del Presupuesto">🏷️ Cambiar Estado</button>
+                ${(q.status === 'aceptada' || q.status === 'parcial') && (q.remaining_balance === undefined || q.remaining_balance > 0) ? `
+                  <button class="btn btn-sm btn-success pay-quote-btn" data-id="${q.id}" title="Registrar Pago de Presupuesto">💳 Registrar Pago</button>
+                ` : ''}
+                <button class="btn btn-sm btn-primary edit-quote-btn" data-id="${q.id}" title="Editar Presupuesto">✎ Editar</button>
+                <button class="btn btn-sm btn-danger delete-quote-btn" data-id="${q.id}" title="Eliminar Presupuesto">✕ Eliminar</button>
+              `}
               ${(q.status === 'aceptada' || q.status === 'parcial') ? `<button class="btn btn-sm btn-success convert-appointment-btn" data-id="${q.id}" title="Agendar Cita de Tratamientos">📅 Agendar Cita</button>` : ''}
-              ${!q.invoice_id ? `<button class="btn btn-sm btn-info convert-invoice-btn" data-id="${q.id}" title="Generar Factura de Ítems Aceptados">📄 Facturar Ítems</button>` : ''}
-              <button class="btn btn-sm btn-primary edit-quote-btn" data-id="${q.id}" title="Editar Presupuesto">✎ Editar</button>
-              <button class="btn btn-sm btn-danger delete-quote-btn" data-id="${q.id}" title="Eliminar Presupuesto">✕ Eliminar</button>
+              ${!q.invoice_id && !q.is_closed && q.payment_status !== 'pagado' ? `<button class="btn btn-sm btn-info convert-invoice-btn" data-id="${q.id}" title="Generar Factura de Ítems Aceptados">📄 Facturar Ítems</button>` : ''}
             </div>
           </div>
         </td>
@@ -237,17 +249,20 @@ export class Quotations {
         return;
       }
 
-      const actionBtn = e.target.closest('.view-quote-btn, .manage-items-btn, .change-status-btn, .convert-appointment-btn, .convert-invoice-btn, .edit-quote-btn, .delete-quote-btn');
+      const actionBtn = e.target.closest('.view-quote-btn, .manage-items-btn, .change-status-btn, .pay-quote-btn, .convert-appointment-btn, .convert-invoice-btn, .edit-quote-btn, .delete-quote-btn');
       if (actionBtn) {
         const id = actionBtn.getAttribute('data-id');
         if (actionBtn.classList.contains('view-quote-btn')) {
-          this.printQuote(id);
+          this.showViewOptionsModal(id);
         }
         if (actionBtn.classList.contains('manage-items-btn')) {
           this.showManageQuoteModal(id);
         }
         if (actionBtn.classList.contains('change-status-btn')) {
           this.showStatusModal(id);
+        }
+        if (actionBtn.classList.contains('pay-quote-btn')) {
+          this.showQuotationPaymentModal(id);
         }
         if (actionBtn.classList.contains('convert-appointment-btn')) {
           const q = this.quotationsList.find(item => item.id == id);
@@ -323,13 +338,48 @@ export class Quotations {
 
       const items = qData.items || [];
       const acceptedItems = items.filter(i => (i.status || 'pendiente') === 'aceptado');
+      const pendingItems = items.filter(i => (i.status || 'pendiente') === 'pendiente');
+      const unrealizedAccepted = acceptedItems.filter(i => (i.execution_status || 'pendiente') !== 'realizado');
       const acceptedTotal = acceptedItems.reduce((acc, i) => acc + parseFloat(i.total || 0), 0);
       const totalAmount = parseFloat(qData.total || 0);
       const acceptancePercentage = items.length > 0 ? Math.round((acceptedItems.length / items.length) * 100) : 0;
+      const isQuotePaid = qData.payment_status === 'pagado' || (qData.remaining_balance !== undefined && qData.remaining_balance <= 0 && totalAmount > 0);
+      const allItemsDecided = items.length > 0 && pendingItems.length === 0;
+      const allAcceptedRealized = acceptedItems.length > 0 && unrealizedAccepted.length === 0;
+      const isQuoteClosed = qData.is_closed || (allItemsDecided && allAcceptedRealized && isQuotePaid);
 
       const itemsRowsHtml = items.map((item) => {
         const status = item.status || 'pendiente';
+        const execStatus = item.execution_status || 'pendiente';
         const isInvoiced = !!(item.invoice_id || (qData.invoice_id && status === 'aceptado'));
+        const paidAmt = parseFloat(item.amount_paid || 0);
+        const totalAmt = parseFloat(item.total || 0);
+        const remBal = parseFloat(item.remaining_balance !== undefined ? item.remaining_balance : (totalAmt - paidAmt));
+        const payStatus = item.payment_status || (paidAmt >= totalAmt - 0.001 && totalAmt > 0 ? 'pagado' : (paidAmt > 0 ? 'parcial' : 'ninguno'));
+
+        let payBadge = '';
+        if (payStatus === 'pagado') {
+          payBadge = `<span class="badge badge-success" style="background-color: var(--success-100); color: var(--success-800); border: 1px solid var(--success-300); padding: 4px 8px; font-weight: 600;" title="100% Pagado (${formatCurrency(paidAmt)})">🟢 100% Pagado</span>`;
+        } else if (payStatus === 'parcial') {
+          payBadge = `<span class="badge badge-warning" style="background-color: #ffedd5; color: #c2410c; border: 1px solid #fdba74; padding: 4px 8px; font-weight: 600;" title="Cobrado: ${formatCurrency(paidAmt)} | Pendiente: ${formatCurrency(remBal)}">🟠 Parcial (${formatCurrency(paidAmt)} / ${formatCurrency(totalAmt)})</span>`;
+        } else {
+          payBadge = `<span class="badge badge-danger" style="background-color: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; padding: 4px 8px; font-weight: 600;" title="Sin abonos registrados (Debe: ${formatCurrency(totalAmt)})">🔴 Sin Pagar (${formatCurrency(totalAmt)})</span>`;
+        }
+
+        let execBadge = '';
+        if (status === 'aceptado') {
+          if (execStatus === 'realizado') {
+            execBadge = `<span class="badge badge-success" style="background-color: var(--success-100); color: var(--success-800); border: 1px solid var(--success-300); padding: 4px 10px; font-weight: 600;" title="Completado y registrado en Tratamientos Realizados">🟢 Completado</span>`;
+          } else if (execStatus === 'en_proceso') {
+            execBadge = `<span class="badge badge-info" style="background-color: var(--primary-100); color: var(--primary-800); border: 1px solid var(--primary-300); padding: 4px 10px; font-weight: 600;" title="En proceso de ejecución">⚙️ En Proceso</span>`;
+          } else {
+            execBadge = `<span class="badge badge-warning" style="background-color: #ffedd5; color: #c2410c; border: 1px solid #fdba74; padding: 4px 10px; font-weight: 600;" title="Pendiente de ejecución">⏳ Pendiente</span>`;
+          }
+        } else {
+          execBadge = `<span style="color: var(--text-tertiary); font-size: 12px;">—</span>`;
+        }
+
+        const isItemFullyConsolidated = isInvoiced || (status === 'aceptado' && payStatus === 'pagado' && execStatus === 'realizado');
 
         return `
         <tr class="quote-manage-item-row" data-item-id="${item.id}">
@@ -346,30 +396,46 @@ export class Quotations {
               : `<span class="badge ${ITEM_STATUS_BADGES[status]}">${ITEM_STATUS_LABELS[status]}</span>`}
           </td>
           <td style="text-align: center;">
-            ${isInvoiced ? `
-              <div class="status-toggle-segmented" style="opacity: 0.75;" title="Este tratamiento ya fue facturado y está protegido">
-                <button type="button" class="status-toggle-btn active" disabled style="cursor: not-allowed; background: var(--primary-600); color: #fff;">
-                  🔒 Facturado
+            ${execBadge}
+          </td>
+          <td style="text-align: center;">
+            ${payBadge}
+          </td>
+          <td style="text-align: center;">
+            ${isItemFullyConsolidated ? `
+              <div class="status-toggle-segmented" style="opacity: 0.75;" title="Este tratamiento ya está completado y pagado 100%">
+                <button type="button" class="status-toggle-btn active" disabled style="cursor: not-allowed; background: var(--success-700); color: #fff;">
+                  🔒 ${payStatus === 'pagado' ? 'Pagado & Realizado' : 'Facturado'}
                 </button>
               </div>
             ` : `
-              <div class="status-toggle-segmented">
-                <button type="button" class="status-toggle-btn ${status === 'aceptado' ? 'active' : ''} set-item-status-btn" data-item-id="${item.id}" data-status="aceptado" title="Aceptar este tratamiento">
-                  ✓ Aceptar
-                </button>
-                <button type="button" class="status-toggle-btn ${status === 'pendiente' ? 'active' : ''} set-item-status-btn" data-item-id="${item.id}" data-status="pendiente" title="Marcar como pendiente">
-                  ⏳ Pendiente
-                </button>
-                <button type="button" class="status-toggle-btn ${status === 'rechazado' ? 'active' : ''} set-item-status-btn" data-item-id="${item.id}" data-status="rechazado" title="Rechazar este tratamiento">
-                  ✗ Rechazar
-                </button>
+              <div style="display: flex; flex-direction: column; gap: 4px; align-items: center;">
+                <div class="status-toggle-segmented">
+                  <button type="button" class="status-toggle-btn ${status === 'aceptado' ? 'active' : ''} set-item-status-btn" data-item-id="${item.id}" data-status="aceptado" title="Aceptar este tratamiento">
+                    ✓ Aceptar
+                  </button>
+                  <button type="button" class="status-toggle-btn ${status === 'pendiente' ? 'active' : ''} set-item-status-btn" data-item-id="${item.id}" data-status="pendiente" title="Marcar como pendiente">
+                    ⏳ Pendiente
+                  </button>
+                  <button type="button" class="status-toggle-btn ${status === 'rechazado' ? 'active' : ''} set-item-status-btn" data-item-id="${item.id}" data-status="rechazado" title="Rechazar este tratamiento">
+                    ✗ Rechazar
+                  </button>
+                </div>
+                ${status === 'aceptado' ? `
+                  <div class="status-toggle-segmented">
+                    <button type="button" class="status-toggle-btn ${execStatus === 'en_proceso' || execStatus === 'pendiente' ? 'active' : ''} set-item-exec-status-btn" data-item-id="${item.id}" data-exec-status="en_proceso" title="Marcar en proceso de ejecución">
+                      ⚙️ En Proceso
+                    </button>
+                    <button type="button" class="status-toggle-btn ${execStatus === 'realizado' ? 'active' : ''} set-item-exec-status-btn" data-item-id="${item.id}" data-exec-status="realizado" style="${execStatus === 'realizado' ? 'background: var(--success-700); color: #fff;' : ''}" title="Marcar como completado (se tornará VERDE y aparecerá en Tratamientos Realizados)">
+                      ✅ Completado
+                    </button>
+                  </div>
+                ` : ''}
               </div>
             `}
           </td>
         </tr>
       `}).join('');
-
-      const hasInvoicedItems = items.some(i => i.invoice_id || (qData.invoice_id && i.status === 'aceptado'));
 
       return `
         <div class="quote-manage-hero">
@@ -384,9 +450,13 @@ export class Quotations {
               <span class="badge ${STATUS_BADGES[qData.status] || 'badge-secondary'}" style="font-size: 14px; padding: 6px 14px; border-radius: 9999px;">
                 ${STATUS_LABELS[qData.status] || qData.status}
               </span>
-              <button type="button" class="btn btn-sm btn-outline change-status-modal-btn" data-id="${qData.id}" title="Cambiar Estado del Presupuesto">
-                🏷️ Cambiar Estado
-              </button>
+              ${isQuoteClosed
+                ? `<span class="badge badge-success" style="font-size: 14px; padding: 6px 14px; border-radius: 9999px;">🟢 100% Pagado y Cerrado</span>`
+                : (isQuotePaid
+                  ? `<span class="badge" style="background-color: var(--success-100); color: var(--success-800); font-size: 14px; padding: 6px 14px; border-radius: 9999px;">🟢 Monto Aceptado Pagado</span>`
+                  : (qData.payment_status === 'parcial'
+                    ? `<span class="badge" style="background-color: var(--warning-100); color: var(--warning-800); font-size: 14px; padding: 6px 14px; border-radius: 9999px;">🟠 Pagado: ${formatCurrency(qData.amount_paid)}</span>`
+                    : ''))}
             </div>
           </div>
 
@@ -401,27 +471,28 @@ export class Quotations {
           </div>
         </div>
 
-        ${hasInvoicedItems ? `
-          <div style="background-color: var(--primary-50); border: 1px solid var(--primary-200); color: var(--primary-900); padding: 10px 14px; border-radius: var(--radius-md); font-size: 13px; margin-bottom: var(--space-4); display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 16px;">ℹ️</span>
-            <span>Los tratamientos marcados con <strong>🔒 Facturado</strong> ya fueron emitidos en una factura oficial y su estado no puede ser alterado.</span>
+        ${isQuoteClosed ? `
+          <div style="background-color: var(--success-50); border: 1px solid var(--success-200); color: var(--success-900); padding: 10px 14px; border-radius: var(--radius-md); font-size: 13px; margin-bottom: var(--space-4); display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 16px;">🟢</span>
+            <span>Este presupuesto se encuentra <strong>100% Pagado, Realizado y Cerrado</strong>. Todos los tratamientos han sido resueltos y consolidados.</span>
           </div>
-        ` : ''}
+        ` : (pendingItems.length > 0 || unrealizedAccepted.length > 0 ? `
+          <div style="background-color: var(--warning-50); border: 1px solid var(--warning-200); color: var(--warning-900); padding: 10px 14px; border-radius: var(--radius-md); font-size: 13px; margin-bottom: var(--space-4); display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 16px;">⏳</span>
+            <span>Cotización Abierta en Gestión: ${pendingItems.length > 0 ? `• Quedan <strong>${pendingItems.length} tratamiento(s) pendiente(s)</strong> de aceptar o rechazar. ` : ''}${unrealizedAccepted.length > 0 ? `• Quedan <strong>${unrealizedAccepted.length} tratamiento(s) aceptado(s)</strong> pendiente(s) de marcar como Completado. ` : ''}El presupuesto no podrá cerrarse hasta decidir, cobrar y realizar todos sus tratamientos.</span>
+          </div>
+        ` : '')}
 
-        <div style="display: flex; gap: var(--space-3); margin-bottom: var(--space-4); flex-wrap: wrap; align-items: center;">
-          <button id="manage-accept-all-btn" class="btn btn-success btn-md" style="flex: 1; min-width: 200px;">
+        ${!isQuoteClosed ? `
+        <div style="display: flex; justify-content: flex-end; margin-bottom: var(--space-3);">
+          <button id="manage-accept-all-btn" class="btn btn-sm btn-success" style="padding: 6px 14px; font-size: 13px; font-weight: 500;">
             ✅ Aceptar Presupuesto Completo
           </button>
-          <button id="manage-generate-invoice-btn" class="btn btn-primary btn-md" style="flex: 1; min-width: 240px;" ${acceptedItems.length === 0 ? 'disabled' : ''}>
-            📄 Facturar Ítems Aceptados (${acceptedItems.length})
-          </button>
-          <button id="manage-change-status-btn" class="btn btn-outline btn-md" data-id="${qData.id}" style="flex: 1; min-width: 180px;">
-            🏷️ Cambiar Estado
-          </button>
         </div>
+        ` : ''}
 
-        <div class="card" style="margin-bottom: var(--space-4); padding: 0; border: 1px solid var(--border-color); overflow: hidden;">
-          <div class="table-container" style="max-height: 360px; overflow-y: auto;">
+        <div class="card" style="margin-bottom: var(--space-4); padding: 0; border: 1px solid var(--border-color); overflow: hidden; flex: 1; display: flex; flex-direction: column;">
+          <div class="table-container" style="max-height: calc(96vh - 280px); min-height: 420px; overflow-y: auto; flex: 1;">
             <table style="margin: 0; border-radius: 0;">
               <thead>
                 <tr>
@@ -429,12 +500,14 @@ export class Quotations {
                   <th style="text-align: center;">Cant.</th>
                   <th style="text-align: right;">Precio Unit.</th>
                   <th style="text-align: right;">Total</th>
-                  <th style="text-align: center;">Estado</th>
-                  <th style="text-align: center;">Acción Independiente</th>
+                  <th style="text-align: center;">Estado Aceptación</th>
+                  <th style="text-align: center;">Estado Ejecución</th>
+                  <th style="text-align: center;">Estado de Pago</th>
+                  <th style="text-align: center;">Acción / Progreso</th>
                 </tr>
               </thead>
               <tbody>
-                ${itemsRowsHtml || `<tr><td colspan="6" style="text-align: center; padding: var(--space-6); color: var(--text-secondary);">No hay ítems en este presupuesto.</td></tr>`}
+                ${itemsRowsHtml || `<tr><td colspan="8" style="text-align: center; padding: var(--space-6); color: var(--text-secondary);">No hay ítems en este presupuesto.</td></tr>`}
               </tbody>
             </table>
           </div>
@@ -449,6 +522,10 @@ export class Quotations {
             <span style="color: var(--text-secondary); font-size: 13px;">Monto Aceptado Aprobado:</span>
             <strong style="font-size: 20px; color: var(--success-600); margin-left: 8px;">${formatCurrency(acceptedTotal)}</strong>
           </div>
+          <div>
+            <span style="color: var(--text-secondary); font-size: 13px;">Monto Pagado / Cobrado:</span>
+            <strong style="font-size: 20px; color: ${isQuotePaid ? 'var(--success-600)' : 'var(--primary-600)'}; margin-left: 8px;">${formatCurrency(qData.amount_paid || 0)} ${isQuotePaid ? '(100% Pagado)' : ''}</strong>
+          </div>
         </div>
       `;
     };
@@ -456,7 +533,7 @@ export class Quotations {
     Modal.show({
       title: `Gestión Integral — Presupuesto #${q.quote_number || quotationId}`,
       content: renderModalContent(q),
-      size: 'xl',
+      size: 'full',
       showConfirm: false,
       cancelText: 'Cerrar'
     });
@@ -481,6 +558,13 @@ export class Quotations {
         } finally {
           if (acceptAllBtn) acceptAllBtn.disabled = false;
         }
+        return;
+      }
+
+      const payQuoteBtn = e.target.closest('#manage-pay-quote-btn');
+      if (payQuoteBtn) {
+        Modal.closeAll();
+        this.showQuotationPaymentModal(quotationId, onSuccess);
         return;
       }
 
@@ -509,6 +593,26 @@ export class Quotations {
           if (onSuccess) await onSuccess(); else await this.render();
         } catch (err) {
           toast.error(err.message || 'Error al actualizar estado del ítem');
+        }
+        return;
+      }
+
+      const execBtn = e.target.closest('.set-item-exec-status-btn');
+      if (execBtn) {
+        const itemId = execBtn.getAttribute('data-item-id');
+        const execStatus = execBtn.getAttribute('data-exec-status');
+        try {
+          execBtn.disabled = true;
+          await quotationService.updateExecutionStatus(itemId, execStatus);
+          toast.success(execStatus === 'realizado' ? '¡Tratamiento marcado como Completado y enviado a Tratamientos Realizados!' : 'Estado de ejecución actualizado');
+          const updatedQuote = await quotationService.getById(quotationId);
+          const modalBody = overlay.querySelector('.modal-body');
+          if (modalBody) modalBody.innerHTML = renderModalContent(updatedQuote?.data || updatedQuote);
+          if (onSuccess) await onSuccess(); else await this.render();
+        } catch (err) {
+          toast.error(err.message || 'Error al actualizar ejecución del tratamiento');
+        } finally {
+          if (execBtn) execBtn.disabled = false;
         }
         return;
       }
@@ -704,7 +808,7 @@ export class Quotations {
     let treatments = [];
     try {
       [patients, doctors, treatments] = await Promise.all([
-        patientService.getAll({ limit: 200 }),
+        patientService.getAll({ limit: 500 }),
         doctorService.getAll(),
         treatmentService.getAll({ limit: 500, is_active: true }),
       ]);
@@ -712,14 +816,24 @@ export class Quotations {
       // Fallback: show empty selects / lists
     }
     // api.get returns data array directly
-    const patientList = Array.isArray(patients) ? patients : [];
-    const doctorList = Array.isArray(doctors) ? doctors : [];
-    const treatmentList = Array.isArray(treatments) ? treatments : [];
+    const patientList = Array.isArray(patients) ? patients : (patients?.data || patients?.rows || []);
+    const doctorList = Array.isArray(doctors) ? doctors : (doctors?.data || doctors?.rows || []);
+    const treatmentList = Array.isArray(treatments) ? treatments : (treatments?.data || treatments?.rows || []);
 
     const selectedPatientId = q.patient_id || preselectedPatientId;
-    const patientOptions = patientList.map(p =>
-      `<option value="${p.id}" ${p.id == selectedPatientId ? 'selected' : ''}>[${p.custom_id || 'N/A'}] ${p.first_name} ${p.last_name}</option>`
-    ).join('');
+    let selectedPatient = selectedPatientId ? patientList.find(p => p.id == selectedPatientId) : null;
+    if (selectedPatientId && !selectedPatient && (q.patient_first_name || q.patient_name)) {
+      selectedPatient = {
+        id: selectedPatientId,
+        first_name: q.patient_first_name || q.patient_name || '',
+        last_name: q.patient_last_name || '',
+        custom_id: q.patient_custom_id || ''
+      };
+    }
+    const selectedPatientText = selectedPatient
+      ? `[${selectedPatient.custom_id || 'N/A'}] ${selectedPatient.first_name} ${selectedPatient.last_name}`.trim()
+      : '';
+
     const doctorOptions = doctorList.map(d =>
       `<option value="${d.id}" ${d.id == q.doctor_id ? 'selected' : ''}>${d.first_name} ${d.last_name} (${d.specialty || ''})</option>`
     ).join('');
@@ -740,11 +854,13 @@ export class Quotations {
       <form id="quote-form">
         <div class="form-row-responsive">
           <div class="form-group">
-            <label class="form-label">Paciente</label>
-            <select name="patient_id" class="form-select" required>
-              <option value="">Seleccione un paciente...</option>
-              ${patientOptions}
-            </select>
+            <label class="form-label">Paciente <span style="color: var(--danger-500);">*</span></label>
+            <div class="patient-autocomplete-wrapper" style="position: relative;">
+              <input type="text" id="quote-patient-search" class="form-input" placeholder="Buscar paciente por nombre, DNI, teléfono o código..." value="${selectedPatientText}" autocomplete="off" required style="padding-right: 32px;" />
+              <input type="hidden" name="patient_id" id="quote-patient-id" value="${selectedPatientId || ''}" required />
+              <button type="button" id="quote-patient-clear-btn" class="btn-clear-patient" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; font-size: 16px; cursor: pointer; color: var(--color-text-tertiary); display: ${selectedPatientId ? 'block' : 'none'}; line-height: 1; padding: 4px;" title="Limpiar y buscar otro paciente">&times;</button>
+              <ul id="quote-patient-autocomplete-list" class="treatment-autocomplete-list" style="display: none; max-height: 240px; z-index: 1060;"></ul>
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">Doctor</label>
@@ -792,11 +908,19 @@ export class Quotations {
       title: isEdit ? 'Editar Presupuesto' : 'Nuevo Presupuesto',
       content: content,
       confirmText: isEdit ? 'Guardar Cambios' : 'Generar Presupuesto',
-      size: 'lg',
+      size: 'full',
       onConfirm: async (modalBody) => {
         const form = modalBody.querySelector('#quote-form');
         const formData = new FormData(form);
         const raw = Object.fromEntries(formData.entries());
+
+        const patientIdVal = parseInt(raw.patient_id, 10);
+        if (!patientIdVal || isNaN(patientIdVal)) {
+          toast.error('Por favor busque y seleccione un paciente de la lista.');
+          const pInput = modalBody.querySelector('#quote-patient-search');
+          if (pInput) pInput.focus();
+          return false;
+        }
 
         const items = [];
         let itemIndex = 0;
@@ -813,7 +937,7 @@ export class Quotations {
         }
 
         const payload = {
-          patient_id: parseInt(raw.patient_id, 10),
+          patient_id: patientIdVal,
           doctor_id: raw.doctor_id ? parseInt(raw.doctor_id, 10) : undefined,
           quotation_date: raw.quotation_date || undefined,
           valid_until: raw.valid_until || undefined,
@@ -888,10 +1012,14 @@ export class Quotations {
             margin: 4px 0 0 0;
             padding: 0;
             list-style: none;
-            background: var(--bg-primary, #fff);
-            border: 1px solid var(--border-color, #ddd);
-            border-radius: var(--radius, 8px);
+            background: var(--color-surface, #fff);
+            border: 1px solid var(--color-border, #ddd);
+            border-radius: var(--radius-md, 8px);
             box-shadow: 0 8px 24px rgba(0,0,0,.15);
+          }
+          [data-theme='dark'] .treatment-autocomplete-list {
+            background: var(--gray-900, #0f172a);
+            border-color: var(--gray-700, #334155);
           }
           .treatment-autocomplete-list .autocomplete-item {
             display: flex;
@@ -900,7 +1028,7 @@ export class Quotations {
             padding: 10px 14px;
             cursor: pointer;
             font-size: var(--text-sm, 0.875rem);
-            border-bottom: 1px solid var(--border-color, #eee);
+            border-bottom: 1px solid var(--color-border-light, #eee);
             transition: background .15s;
           }
           .treatment-autocomplete-list .autocomplete-item:last-child { border-bottom: none; }
@@ -908,15 +1036,19 @@ export class Quotations {
           .treatment-autocomplete-list .autocomplete-item.active {
             background: var(--primary-50, #eef2ff);
           }
+          [data-theme='dark'] .treatment-autocomplete-list .autocomplete-item:hover,
+          [data-theme='dark'] .treatment-autocomplete-list .autocomplete-item.active {
+            background: var(--gray-800, #1e293b);
+          }
           .treatment-autocomplete-list .treatment-name {
             flex: 1;
             font-weight: 500;
-            color: var(--text-primary, #333);
+            color: var(--color-text, #333);
           }
           .treatment-autocomplete-list .treatment-code {
             font-size: 0.75rem;
-            color: var(--text-secondary, #888);
-            background: var(--bg-secondary, #f5f5f5);
+            color: var(--color-text-secondary, #888);
+            background: var(--color-bg-secondary, #f5f5f5);
             padding: 2px 6px;
             border-radius: 4px;
           }
@@ -927,12 +1059,178 @@ export class Quotations {
           }
           .treatment-autocomplete-list .no-results {
             padding: 12px 14px;
-            color: var(--text-secondary, #999);
+            color: var(--color-text-secondary, #999);
             font-style: italic;
             text-align: center;
           }
+          .patient-item-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            gap: 10px;
+          }
+          .patient-item-main {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+          }
+          .patient-item-name {
+            font-weight: 600;
+            color: var(--color-text);
+            font-size: 13px;
+          }
+          .patient-item-sub {
+            font-size: 11px;
+            color: var(--color-text-secondary);
+          }
+          .patient-item-badge {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: linear-gradient(135deg, rgba(15, 134, 236, 0.12), rgba(15, 134, 236, 0.04));
+            color: var(--primary-600);
+            flex-shrink: 0;
+          }
+          [data-theme='dark'] .patient-item-badge {
+            background: linear-gradient(135deg, rgba(56, 164, 249, 0.16), rgba(56, 164, 249, 0.06));
+            color: var(--primary-400);
+          }
+          .btn-clear-patient:hover {
+            color: var(--error-600) !important;
+          }
         `;
         document.head.appendChild(style);
+      }
+
+      // ---- Patient autocomplete initializer ----
+      const patientSearchInput = document.getElementById('quote-patient-search');
+      const patientIdInput = document.getElementById('quote-patient-id');
+      const patientClearBtn = document.getElementById('quote-patient-clear-btn');
+      const patientDropdown = document.getElementById('quote-patient-autocomplete-list');
+
+      if (patientSearchInput && patientDropdown) {
+        let activePatientIdx = -1;
+
+        const renderPatientMatches = (matches) => {
+          if (!matches || matches.length === 0) {
+            patientDropdown.innerHTML = '<li class="no-results">No se encontraron pacientes</li>';
+            patientDropdown.style.display = 'block';
+            activePatientIdx = -1;
+            return;
+          }
+
+          patientDropdown.innerHTML = matches.map((p, idx) => {
+            const customId = p.custom_id || `PAC-${String(p.id).padStart(5, '0')}`;
+            const subInfo = [
+              p.identification_number ? `DNI/Doc: ${p.identification_number}` : '',
+              p.phone ? `Tel: ${p.phone}` : '',
+              p.email || ''
+            ].filter(Boolean).join(' · ');
+
+            return `
+              <li class="autocomplete-item" data-idx="${idx}">
+                <div class="patient-item-row">
+                  <div class="patient-item-main">
+                    <span class="patient-item-name">${p.first_name} ${p.last_name}</span>
+                    ${subInfo ? `<span class="patient-item-sub">${subInfo}</span>` : ''}
+                  </div>
+                  <span class="patient-item-badge">[${customId}]</span>
+                </div>
+              </li>
+            `;
+          }).join('');
+          patientDropdown.style.display = 'block';
+          activePatientIdx = -1;
+
+          patientDropdown.querySelectorAll('.autocomplete-item').forEach((li, idx) => {
+            li.addEventListener('mousedown', (e) => {
+              e.preventDefault();
+              const p = matches[idx];
+              if (p) {
+                patientIdInput.value = p.id;
+                patientSearchInput.value = `[${p.custom_id || 'PAC-' + p.id}] ${p.first_name} ${p.last_name}`;
+                if (patientClearBtn) patientClearBtn.style.display = 'block';
+                patientDropdown.style.display = 'none';
+              }
+            });
+          });
+        };
+
+        const showPatientResults = async () => {
+          const term = (patientSearchInput.value || '').toLowerCase().trim();
+          if (!term) {
+            // Show recent/top 15 patients
+            renderPatientMatches(patientList.slice(0, 15));
+            return;
+          }
+
+          let matches = patientList.filter(p => {
+            const fullName = `${p.first_name || ''} ${p.last_name || ''}`.toLowerCase();
+            const customId = (p.custom_id || '').toLowerCase();
+            const dni = (p.identification_number || '').toLowerCase();
+            const phone = (p.phone || '').toLowerCase();
+            const email = (p.email || '').toLowerCase();
+            return fullName.includes(term) || customId.includes(term) || dni.includes(term) || phone.includes(term) || email.includes(term);
+          }).slice(0, 15);
+
+          renderPatientMatches(matches);
+        };
+
+        patientSearchInput.addEventListener('input', () => {
+          patientIdInput.value = '';
+          if (patientClearBtn) {
+            patientClearBtn.style.display = patientSearchInput.value.trim() ? 'block' : 'none';
+          }
+          showPatientResults();
+        });
+
+        patientSearchInput.addEventListener('focus', showPatientResults);
+        patientSearchInput.addEventListener('blur', () => {
+          setTimeout(() => {
+            patientDropdown.style.display = 'none';
+            // If user typed custom text without selecting, clear or validate
+            if (!patientIdInput.value && patientSearchInput.value.trim() && selectedPatientText) {
+              if (patientSearchInput.value.trim() === selectedPatientText) {
+                patientIdInput.value = selectedPatientId;
+              }
+            }
+          }, 200);
+        });
+
+        if (patientClearBtn) {
+          patientClearBtn.addEventListener('click', () => {
+            patientSearchInput.value = '';
+            patientIdInput.value = '';
+            patientClearBtn.style.display = 'none';
+            patientSearchInput.focus();
+            showPatientResults();
+          });
+        }
+
+        patientSearchInput.addEventListener('keydown', (e) => {
+          const items = patientDropdown.querySelectorAll('.autocomplete-item');
+          if (!items.length || patientDropdown.style.display === 'none') return;
+
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            activePatientIdx = Math.min(activePatientIdx + 1, items.length - 1);
+            items.forEach((li, i) => li.classList.toggle('active', i === activePatientIdx));
+            items[activePatientIdx]?.scrollIntoView({ block: 'nearest' });
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            activePatientIdx = Math.max(activePatientIdx - 1, 0);
+            items.forEach((li, i) => li.classList.toggle('active', i === activePatientIdx));
+            items[activePatientIdx]?.scrollIntoView({ block: 'nearest' });
+          } else if (e.key === 'Enter' && activePatientIdx >= 0) {
+            e.preventDefault();
+            items[activePatientIdx]?.dispatchEvent(new Event('mousedown'));
+          } else if (e.key === 'Escape') {
+            patientDropdown.style.display = 'none';
+          }
+        });
       }
 
       // ---- Treatment autocomplete initializer ----
@@ -1120,6 +1418,95 @@ export class Quotations {
     });
   }
 
+  async showViewOptionsModal(quotationId, onSuccess = null) {
+    let q = null;
+    let linkedDocs = [];
+    try {
+      q = await quotationService.getById(quotationId);
+      const res = await invoiceService.getAll({ quotation_id: quotationId, limit: 100 });
+      linkedDocs = Array.isArray(res) ? res : (res?.invoices || res?.data || []);
+    } catch (err) {
+      console.error('Error fetching quotation linked docs:', err);
+    }
+
+    if (!q) {
+      toast.error('Presupuesto no encontrado');
+      return;
+    }
+
+    // Si no hay comprobantes vinculados (recibos/facturas), abrir directamente el presupuesto
+    if (linkedDocs.length === 0) {
+      this.printQuote(quotationId);
+      return;
+    }
+
+    Modal.show({
+      title: `📄 Opciones de Visualización — Presupuesto #${q.quote_number}`,
+      content: `
+        <div style="display: flex; flex-direction: column; gap: 14px; padding: 6px 0;">
+          <button id="view-opt-quote-btn" class="btn btn-outline btn-md" style="display: flex; align-items: center; justify-content: space-between; text-align: left; padding: 14px 16px; border: 1px solid var(--primary-300); background: var(--primary-50, #f0f9ff); border-radius: var(--radius-md); cursor: pointer;">
+            <div>
+              <div style="font-weight: 700; font-size: 15px; color: var(--primary-900);">📄 Imprimir Presupuesto #${q.quote_number}</div>
+              <div style="font-size: 12px; color: var(--primary-700); margin-top: 2px;">Ver documento original de la cotización con desglose de tratamientos</div>
+            </div>
+            <span style="font-size: 14px; font-weight: 600; color: var(--primary-700);">🖨️ Ver Presupuesto</span>
+          </button>
+
+          <div>
+            <h4 style="font-size: 14px; margin: 10px 0 8px 0; color: var(--text-primary); font-weight: 600;">
+              🧾 Comprobantes de Pago Vinculados (${linkedDocs.length}):
+            </h4>
+            <div style="display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto;">
+              ${linkedDocs.map(doc => `
+                <button class="btn btn-outline view-opt-doc-btn" data-id="${doc.id}" data-type="${doc.document_type || 'recibo'}" style="display: flex; align-items: center; justify-content: space-between; text-align: left; padding: 12px 14px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: #fff; cursor: pointer;">
+                  <div>
+                    <div style="font-weight: 600; font-size: 14px; color: var(--text-primary);">
+                      ${doc.document_type === 'factura' ? '📄 Factura' : '🧾 Recibo de Pago'} #${doc.invoice_number}
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+                      Abono/Cobro: <strong style="color: var(--success-700);">${formatCurrency(doc.amount_paid || doc.total)}</strong> | Fecha: ${formatDate(doc.created_at)}
+                    </div>
+                  </div>
+                  <span class="badge badge-success" style="font-size: 11px; padding: 4px 8px;">🖨️ Imprimir ${doc.document_type === 'factura' ? 'Factura' : 'Recibo'}</span>
+                </button>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      `,
+      showConfirm: false,
+      cancelText: 'Cerrar',
+    });
+
+    const overlay = document.querySelector('.modal-overlay');
+    if (!overlay) return;
+
+    overlay.addEventListener('click', async (e) => {
+      const quoteBtn = e.target.closest('#view-opt-quote-btn');
+      if (quoteBtn) {
+        Modal.close();
+        this.printQuote(quotationId);
+        return;
+      }
+
+      const docBtn = e.target.closest('.view-opt-doc-btn');
+      if (docBtn) {
+        const docId = docBtn.getAttribute('data-id');
+        const docType = docBtn.getAttribute('data-type');
+        Modal.close();
+        if (docType === 'recibo') {
+          const { Receipts } = await import('../receipts/receipts.js');
+          const receiptsPage = new Receipts(this.container);
+          await receiptsPage.printReceipt(docId);
+        } else {
+          const { Invoices } = await import('../invoices/invoices.js');
+          const invoicesPage = new Invoices(this.container);
+          await invoicesPage.printInvoice(docId);
+        }
+      }
+    });
+  }
+
   async printQuote(id) {
     try {
       const quote = await quotationService.getById(id);
@@ -1211,8 +1598,8 @@ export class Quotations {
 
           <div class="totals">
             <p>Subtotal: ${formatCurrency(quote.subtotal)}</p>
-            <p>Descuento: -${formatCurrency(quote.discount_amount)}</p>
-            <p>IVA (${quote.tax_rate}%): ${formatCurrency(quote.tax_amount)}</p>
+            ${parseFloat(quote.discount_amount || 0) > 0 ? `<p>Descuento: -${formatCurrency(quote.discount_amount)}</p>` : ''}
+            ${parseFloat(quote.tax_amount || 0) > 0 ? `<p>IVA (${quote.tax_rate}%): ${formatCurrency(quote.tax_amount)}</p>` : ''}
             <hr/>
             <h2 style="color: #0f86ec;">TOTAL: ${formatCurrency(quote.total)}</h2>
           </div>
@@ -1235,5 +1622,289 @@ export class Quotations {
     } catch {
       toast.error('Error al generar vista de impresión');
     }
+  }
+
+  async showQuotationPaymentModal(quotationId, onSuccess = null) {
+    let qRaw;
+    try {
+      qRaw = await quotationService.getById(quotationId);
+    } catch (err) {
+      toast.error('Error al obtener datos del presupuesto');
+      return;
+    }
+    const q = qRaw?.data || qRaw;
+    if (!q) {
+      toast.error('Presupuesto no encontrado');
+      return;
+    }
+
+    if (q.payment_status === 'pagado' || (q.remaining_balance !== undefined && q.remaining_balance <= 0)) {
+      toast.info('Este presupuesto ya se encuentra 100% pagado. No hay saldo pendiente por cobrar.');
+      return;
+    }
+
+    const items = q.items || [];
+    let acceptedItems = items.filter(i => (i.status || 'pendiente') === 'aceptado' && (i.payment_status !== 'pagado') && (i.remaining_balance === undefined || i.remaining_balance > 0.001));
+    if (acceptedItems.length === 0 && (q.status === 'aceptada' || q.status === 'parcial')) {
+      acceptedItems = items.filter(i => (i.payment_status !== 'pagado') && (i.remaining_balance === undefined || i.remaining_balance > 0.001));
+    }
+    if (acceptedItems.length === 0) {
+      toast.info('Este presupuesto ya se encuentra 100% pagado.');
+      return;
+    }
+
+    let methods = [];
+    try {
+      methods = await paymentService.getMethods();
+    } catch {
+      toast.error('Error al cargar métodos de pago');
+    }
+    const methodOpts = methods.map(m => `<option value="${m.id}">${m.label || m.name}</option>`).join('');
+
+    const { patientCredit, patientCreditBalance } = await (async () => {
+      try {
+        const res = await patientService.getCredit(q.patient_id);
+        const data = Array.isArray(res) ? res[0] : res;
+        const bal = parseFloat(data?.balance || 0);
+        return { patientCredit: bal > 0, patientCreditBalance: bal };
+      } catch {
+        return { patientCredit: false, patientCreditBalance: 0 };
+      }
+    })();
+
+    const storedTaxRate = parseFloat(q.tax_rate || 0);
+
+    const itemAllocationsCardsHtml = acceptedItems.map(i => {
+      const totalPrice = parseFloat(i.total || 0);
+      const paidAmount = parseFloat(i.amount_paid || 0);
+      const owedAmount = parseFloat(i.remaining_balance !== undefined ? i.remaining_balance : (totalPrice - paidAmount));
+
+      return `
+        <div style="background: #ffffff; border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 10px 14px; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.03);">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+            <div>
+              <strong style="font-size: 13px; color: var(--text-primary);">${i.description}</strong>
+              ${i.tooth_number ? `<span style="font-size: 11px; color: var(--text-secondary); margin-left: 4px;">(Pieza #${i.tooth_number})</span>` : ''}
+            </div>
+            <div style="text-align: right; font-size: 12px;">
+              Total: <strong>${formatCurrency(totalPrice)}</strong> &nbsp;|&nbsp;
+              Pagado: <span style="color: var(--success-700); font-weight: 600;">${formatCurrency(paidAmount)}</span> &nbsp;|&nbsp;
+              Debe: <strong style="color: ${owedAmount > 0 ? 'var(--warning-700)' : 'var(--success-700)'};">${formatCurrency(owedAmount)}</strong>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: flex-end; gap: 8px;">
+            <label style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin: 0;">Monto a Abonar a este tratamiento ($):</label>
+            <input type="number" step="0.01" min="0" max="${owedAmount}" class="form-input quote-item-alloc-input" data-item-id="${i.id}" data-max="${owedAmount}" value="${owedAmount}" style="width: 140px; padding: 4px 8px; font-size: 13px; font-weight: 600; text-align: right;" ${owedAmount <= 0 ? 'disabled readOnly' : ''} />
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const initialTotal = acceptedItems.reduce((acc, i) => {
+      const paidAmount = parseFloat(i.amount_paid || 0);
+      const owedAmount = parseFloat(i.remaining_balance !== undefined ? i.remaining_balance : (parseFloat(i.total || 0) - paidAmount));
+      return acc + Math.max(0, owedAmount);
+    }, 0);
+
+    const taxFieldHtml = storedTaxRate > 0 ? `
+      <div style="margin-bottom: var(--space-3); background: var(--primary-50); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--primary-200); font-size: 13px; color: var(--primary-900);">
+        ℹ️ Este comprobante aplicará un IVA del <strong>${storedTaxRate}%</strong> sobre este pago.
+      </div>
+      <input type="hidden" id="quote-pay-tax-rate" name="tax_rate" value="${storedTaxRate}" />
+    ` : `
+      <div style="margin-bottom: var(--space-3); background: var(--gray-50); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color); font-size: 13px; color: var(--text-secondary);">
+        ℹ️ Este comprobante no lleva IVA (<strong>0%</strong>). El monto íntegro se registrará como neto.
+      </div>
+      <input type="hidden" id="quote-pay-tax-rate" name="tax_rate" value="0" />
+    `;
+
+    const content = `
+      <form id="quote-payment-modal-form">
+        <div style="margin-bottom: var(--space-4); background: var(--gray-50); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+          <div style="font-weight: 600; font-size: 13px; margin-bottom: 8px; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 6px;">
+            Presupuesto #${q.quote_number} &nbsp;|&nbsp; Paciente: <strong>${q.patient_name || 'N/A'}</strong> — Desglose de Abonos por Tratamiento:
+          </div>
+          ${itemAllocationsCardsHtml}
+        </div>
+
+        <div class="form-group" style="margin-bottom: var(--space-4);">
+          <label class="form-label" style="font-weight: 600;">Tipo de Comprobante a Generar para este Pago</label>
+          <div style="display: flex; gap: 16px; margin-top: 6px;">
+            <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; font-weight: 500;">
+              <input type="radio" name="document_type" value="recibo" checked style="transform: scale(1.2);" />
+              🧾 Recibo de Pago (REC)
+            </label>
+            <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; font-weight: 500;">
+              <input type="radio" name="document_type" value="factura" style="transform: scale(1.2);" />
+              📄 Factura Oficial (FAC)
+            </label>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom: var(--space-3);">
+          <label class="form-label" style="font-weight: 600;">Monto Total a Abonar en este Pago ($)</label>
+          <input type="number" step="0.01" id="quote-pay-amount" name="amount" class="form-input" value="${initialTotal}" min="0.01" required />
+          <div id="quote-partial-pay-notice" style="display: none; font-size: 12px; color: var(--warning-700); margin-top: 4px; font-weight: 500;">
+            ⚡ Se registrará un pago parcial de este presupuesto. Quedará un saldo pendiente que podrá abonarse posteriormente.
+          </div>
+        </div>
+
+        <div style="background: var(--primary-50); border: 1px solid var(--primary-200); padding: 14px 18px; border-radius: var(--radius-md); margin-bottom: var(--space-4);">
+          <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: bold; color: var(--primary-900);">
+            <span>TOTAL A PAGAR DE ESTE COMPROBANTE:</span> <span id="quote-summary-total">${formatCurrency(initialTotal)}</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Método de Pago</label>
+          <select name="payment_method_id" class="form-select" required>
+            ${methodOpts}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">No. Referencia / Operación (opcional)</label>
+          <input type="text" name="reference_number" class="form-input" placeholder="Ej: TRANS-98765" />
+        </div>
+
+        ${patientCredit ? `
+        <div style="background: var(--success-50); border: 1px solid var(--success-300); border-radius: var(--radius-md); padding: var(--space-3); margin-bottom: var(--space-3);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <strong style="color: var(--success-800);">🏦 Saldo a Favor Disponible</strong>
+            <span style="font-size: 13px; font-weight: 600; color: var(--success-700);">${formatCurrency(patientCreditBalance)}</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label class="form-label" style="margin: 0; white-space: nowrap; font-size: 13px;">Usar saldo:</label>
+            <input type="number" id="quote-credit-used-input" name="credit_used" class="form-input" step="0.01" min="0" max="${patientCreditBalance}" value="0" style="width: 150px;" />
+            <span style="font-size: 11px; color: var(--text-secondary);">Reduce el efectivo a recibir.</span>
+          </div>
+        </div>
+        ` : ''}
+
+        <div class="form-group">
+          <label class="form-label">Notas (opcional)</label>
+          <textarea name="notes" class="form-input" rows="2"></textarea>
+        </div>
+      </form>
+    `;
+
+    Modal.show({
+      title: 'Registrar Pago y Generar Comprobante',
+      content,
+      size: 'lg',
+      footer: `
+        <button class="btn btn-outline" onclick="Modal.close()">Cancelar</button>
+        <button class="btn btn-success" id="confirm-quote-payment-btn">💳 Confirmar Pago</button>
+      `,
+    });
+
+    const amountInput = document.getElementById('quote-pay-amount');
+    const noticeDiv = document.getElementById('quote-partial-pay-notice');
+
+    const recalc = () => {
+      const P = parseFloat(amountInput?.value || 0);
+      if (document.getElementById('quote-summary-total')) document.getElementById('quote-summary-total').textContent = formatCurrency(P);
+
+      if (noticeDiv) {
+        noticeDiv.style.display = P < initialTotal ? 'block' : 'none';
+      }
+    };
+
+    const syncAllocations = () => {
+      let sum = 0;
+      document.querySelectorAll('.quote-item-alloc-input').forEach(input => {
+        sum += parseFloat(input.value || 0);
+      });
+      if (amountInput) {
+        amountInput.value = sum.toFixed(2);
+      }
+      recalc();
+    };
+
+    document.querySelectorAll('.quote-item-alloc-input').forEach(input => {
+      input.addEventListener('input', syncAllocations);
+    });
+
+    recalc();
+
+    amountInput?.addEventListener('input', recalc);
+
+    document.getElementById('confirm-quote-payment-btn')?.addEventListener('click', async () => {
+      const form = document.getElementById('quote-payment-modal-form');
+      if (!form) return;
+      const formData = new FormData(form);
+
+      const documentType = formData.get('document_type') || 'recibo';
+      const amountVal = parseFloat(formData.get('amount') || 0);
+      const paymentMethodId = parseInt(formData.get('payment_method_id'), 10);
+      const creditUsed = parseFloat(formData.get('credit_used') || 0);
+      const referenceNumber = formData.get('reference_number') || null;
+      const notes = formData.get('notes') || null;
+
+      const itemAllocations = [];
+      document.querySelectorAll('.quote-item-alloc-input').forEach(input => {
+        const itemId = parseInt(input.getAttribute('data-item-id'), 10);
+        const amount = parseFloat(input.value || 0);
+        if (amount > 0) {
+          itemAllocations.push({ id: itemId, amount });
+        }
+      });
+
+      if (itemAllocations.length === 0) {
+        toast.error('Debe ingresar un monto de abono mayor a 0 para al menos un tratamiento.');
+        return;
+      }
+
+      try {
+        const acceptedItemIds = acceptedItems.map(i => i.id);
+        const invoiceRes = await invoiceService.createFromQuotation(quotationId, acceptedItemIds, documentType, itemAllocations);
+        const invObj = invoiceRes?.data || invoiceRes;
+        const targetInvoiceId = invObj?.id;
+        const docNum = invObj?.invoice_number || '';
+
+        if (!targetInvoiceId) {
+          throw new Error('No se pudo generar o asociar el comprobante al presupuesto.');
+        }
+
+        const payPayload = {
+          invoice_id: targetInvoiceId,
+          payment_method_id: paymentMethodId,
+          amount: amountVal,
+          credit_used: creditUsed,
+          reference_number: referenceNumber,
+          notes,
+          payment_date: new Date().toISOString().split('T')[0],
+        };
+
+        const payRes = await paymentService.create(payPayload);
+        const invNum = docNum || payRes?.invoice_number || '';
+        toast.success(`¡Pago registrado exitosamente! Comprobante #${invNum} generado.`);
+        Modal.close();
+
+        // Automatically open the printed receipt or invoice for the payment just made
+        try {
+          if (documentType === 'recibo') {
+            const { Receipts } = await import('../receipts/receipts.js');
+            const receiptsPage = new Receipts(this.container);
+            await receiptsPage.printReceipt(targetInvoiceId);
+          } else {
+            const { Invoices } = await import('../invoices/invoices.js');
+            const invoicesPage = new Invoices(this.container);
+            await invoicesPage.printInvoice(targetInvoiceId);
+          }
+        } catch (printErr) {
+          console.error('Error launching document print view:', printErr);
+        }
+
+        if (onSuccess) {
+          await onSuccess();
+        } else {
+          await this.render();
+          this.mount();
+        }
+      } catch (err) {
+        toast.error(err.message || 'Error al procesar el pago');
+      }
+    });
   }
 }

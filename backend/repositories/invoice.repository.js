@@ -43,6 +43,12 @@ class InvoiceRepository extends BaseRepository {
       paramIndex++;
     }
 
+    if (filters.quotation_id) {
+      conditions.push(`i.quotation_id = $${paramIndex}`);
+      params.push(filters.quotation_id);
+      paramIndex++;
+    }
+
     if (filters.start_date) {
       conditions.push(`i.created_at >= $${paramIndex}`);
       params.push(filters.start_date);
@@ -141,13 +147,67 @@ class InvoiceRepository extends BaseRepository {
     const itemsResult = await query(
       `SELECT ii.*,
               t.name AS treatment_name,
-              t.code AS treatment_code
+              t.code AS treatment_code,
+              qi.total AS original_quotation_item_total,
+              COALESCE(
+                (SELECT SUM(ii_prev.total)
+                 FROM invoice_items ii_prev
+                 JOIN invoices inv_prev ON ii_prev.invoice_id = inv_prev.id
+                 WHERE ii_prev.quotation_item_id = ii.quotation_item_id
+                   AND ii_prev.invoice_id != ii.invoice_id
+                   AND inv_prev.id < ii.invoice_id
+                   AND inv_prev.deleted_at IS NULL
+                   AND inv_prev.status != 'cancelada'),
+                0
+              ) AS previously_paid
        FROM invoice_items ii
        LEFT JOIN treatments t ON ii.treatment_id = t.id
+       LEFT JOIN quotation_items qi ON ii.quotation_item_id = qi.id
        WHERE ${itemConditions.join(' AND ')}
        ORDER BY ii.id ASC`,
       itemParams
     );
+
+    const processedItems = itemsResult.rows.map(item => {
+      const currentTotal = parseFloat(item.total || 0);
+      const prevPaid = parseFloat(item.previously_paid || 0);
+      const origTotal = item.original_quotation_item_total ? parseFloat(item.original_quotation_item_total) : currentTotal;
+      const cumulativePaid = prevPaid + currentTotal;
+      
+      let isPartial = false;
+      let isFinalPaymentOfPartial = false;
+      let pctStr = '';
+      let cleanDesc = item.description || '';
+
+      if (cleanDesc.includes(' (Abono Parcial:')) {
+        cleanDesc = cleanDesc.split(' (Abono Parcial:')[0];
+      } else if (cleanDesc.includes(' (Pago Completo:')) {
+        cleanDesc = cleanDesc.split(' (Pago Completo:')[0];
+      }
+
+      if (origTotal > 0) {
+        const pctRaw = (cumulativePaid / origTotal) * 100;
+        pctStr = (pctRaw % 1 === 0 ? pctRaw.toFixed(0) : pctRaw.toFixed(1)) + '%';
+
+        if (cumulativePaid < origTotal - 0.001) {
+          isPartial = true;
+        } else if (prevPaid > 0) {
+          isFinalPaymentOfPartial = true;
+        }
+      }
+
+      return {
+        ...item,
+        clean_description: cleanDesc,
+        original_total: origTotal,
+        previously_paid: prevPaid,
+        current_payment: currentTotal,
+        cumulative_paid: cumulativePaid,
+        is_partial: isPartial,
+        is_final_payment_of_partial: isFinalPaymentOfPartial,
+        percentage_str: pctStr,
+      };
+    });
 
     const payConditions = ['pay.deleted_at IS NULL'];
     const payParams = [id];
@@ -166,7 +226,7 @@ class InvoiceRepository extends BaseRepository {
 
     return {
       ...invoiceResult.rows[0],
-      items: itemsResult.rows,
+      items: processedItems,
       payments: paymentsResult.rows,
     };
   }
@@ -242,6 +302,11 @@ class InvoiceRepository extends BaseRepository {
       const clinicId = this.getClinicId();
       const dataWithClinic = { ...invoiceData, clinic_id: clinicId };
 
+      if (!dataWithClinic.invoice_number) {
+        const docType = dataWithClinic.document_type || 'factura';
+        dataWithClinic.invoice_number = await this.generateDocumentNumber(docType);
+      }
+
       const invoiceKeys = Object.keys(dataWithClinic);
       const invoiceValues = Object.values(dataWithClinic);
       const invoicePlaceholders = invoiceKeys.map((_, i) => `$${i + 1}`);
@@ -257,13 +322,23 @@ class InvoiceRepository extends BaseRepository {
       const insertedItems = [];
 
       for (const item of items) {
+        const itemTotal = parseFloat(item.total !== undefined ? item.total : (item.subtotal !== undefined ? item.subtotal : (parseFloat(item.quantity || 1) * parseFloat(item.unit_price || 0))));
+        const keys = ['invoice_id', 'treatment_id', 'description', 'quantity', 'unit_price', 'total', 'tooth_number'];
+        const values = [invoice.id, item.treatment_id || null, item.description, item.quantity || 1, item.unit_price || 0, itemTotal, item.tooth_number || null];
+        if (item.quotation_item_id) {
+          keys.push('quotation_item_id');
+          values.push(item.quotation_item_id);
+        }
+        if (clinicId) {
+          keys.push('clinic_id');
+          values.push(clinicId);
+        }
+        const placeholders = keys.map((_, i) => `$${i + 1}`);
         const itemResult = await client.query(
-          `INSERT INTO invoice_items (invoice_id, treatment_id, description, quantity, unit_price, total, tooth_number${clinicId ? ', clinic_id' : ''})
-           VALUES ($1, $2, $3, $4, $5, $6, $7${clinicId ? ', $8' : ''})
+          `INSERT INTO invoice_items (${keys.join(', ')})
+           VALUES (${placeholders.join(', ')})
            RETURNING *`,
-          clinicId
-            ? [invoice.id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.subtotal, item.tooth_number || null, clinicId]
-            : [invoice.id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.subtotal, item.tooth_number || null]
+          values
         );
         insertedItems.push(itemResult.rows[0]);
       }

@@ -23,6 +23,7 @@ router.get('/:id', allRoles, controller.getById);
 router.post('/', staffOnly, validate(createInvoiceRules), auditMiddleware('CREAR_FACTURA', 'invoices'), controller.create);
 router.put('/:id', staffOnly, validate(updateInvoiceRules), auditMiddleware('ACTUALIZAR_FACTURA', 'invoices'), controller.update);
 router.post('/from-quotation/:quotationId', staffOnly, auditMiddleware('FACTURAR_DESDE_COTIZACION', 'invoices'), controller.createFromQuotation);
+router.post('/from-receipt/:receiptId', staffOnly, auditMiddleware('FACTURAR_DESDE_RECIBO', 'invoices'), controller.createFromReceipt);
 router.delete('/:id', staffOnly, auditMiddleware('ELIMINAR_FACTURA', 'invoices'), controller.remove);
 
 export default router;

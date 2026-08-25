@@ -8,6 +8,7 @@ import quotationService from '../../services/quotation.service.js';
 import invoiceService from '../../services/invoice.service.js';
 import paymentService from '../../services/payment.service.js';
 import prescriptionService from '../../services/prescription.service.js';
+import doctorService from '../../services/doctor.service.js';
 import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
 import state from '../../scripts/state.js';
@@ -25,6 +26,7 @@ export class PatientProfile {
     this.clinicalNotes = [];
     this.prescriptions = [];
     this.acceptedTreatments = [];
+    this.paymentsList = [];
     this.activeTab = 'info';
     this.patientCredit = null;
     this.abortController = null;
@@ -51,10 +53,13 @@ export class PatientProfile {
       this.prescriptions = Array.isArray(prescRes) ? prescRes : (prescRes.rows || []);
       const acceptedRes = await quotationService.getAcceptedItemsByPatient(this.patientId);
       this.acceptedTreatments = Array.isArray(acceptedRes) ? acceptedRes : (acceptedRes?.data || []);
+      const payRes = await paymentService.getAll({ patient_id: this.patientId, limit: 999 });
+      this.paymentsList = Array.isArray(payRes) ? payRes : (payRes.data || payRes.rows || []);
       const creditRes = await patientService.getCredit(this.patientId).catch(() => null);
       this.patientCredit = creditRes && creditRes.balance !== undefined ? creditRes : null;
       
       this.renderProfile();
+      this.mount();
     } catch (err) {
       toast.error('Error al cargar expediente del paciente');
       this.container.innerHTML = `<div class="empty-state"><h3>Error al cargar el expediente</h3><p>${err.message}</p></div>`;
@@ -134,85 +139,131 @@ export class PatientProfile {
           </div>
         </div>
       `;
-    } else if (this.activeTab === 'treatments') {
-      let treatmentRows = this.clinicalTreatments.map(t => {
-        const linkedDocs = Array.isArray(t.linked_documents) && t.linked_documents.length > 0
-          ? t.linked_documents
-          : (t.invoice_number ? [{ id: t.invoice_id, invoice_number: t.invoice_number, document_type: t.invoice_number.startsWith('REC') ? 'recibo' : 'factura' }] : []);
+    } else if (this.activeTab === 'payments') {
+      const totalPaid = (this.paymentsList || []).reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+      const totalAdvances = (this.paymentsList || []).filter(p => p.is_advance || !p.invoice_id).reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
 
-        const isPaid = (t.remaining_balance !== undefined ? t.remaining_balance <= 0 : (t.invoice_id && t.invoice_status === 'pagada')) && linkedDocs.length > 0;
-        const pendingPrice = t.remaining_balance !== undefined ? parseFloat(t.remaining_balance) : (t.invoice_balance !== undefined ? parseFloat(t.invoice_balance) : parseFloat(t.price || 0));
-        const paidSoFar = t.total_paid_amount !== undefined ? parseFloat(t.total_paid_amount) : (parseFloat(t.price || 0) - pendingPrice);
+      let paymentRows = (this.paymentsList || []).map(p => {
+        const isAdvance = p.is_advance || !p.invoice_id;
+        const typeBadge = isAdvance
+          ? `<span class="badge badge-success" style="font-size: 11px;">🏷️ Adelantamiento</span>`
+          : `<span class="badge badge-info" style="font-size: 11px;">📄 Pago Comprobante</span>`;
 
-        const docsBadgesHtml = linkedDocs.map(d => `
-          <button type="button" class="btn btn-xs view-profile-document-btn" data-id="${d.id}" style="font-weight: 600; padding: 2px 8px; font-size: 11px; background: var(--primary-100); color: var(--primary-800); border: 1px solid var(--primary-300); border-radius: var(--radius-sm); cursor: pointer; margin-right: 2px; margin-bottom: 2px;" title="Ver Comprobante ${d.invoice_number}">
-            ${(d.document_type === 'recibo' || (d.invoice_number && d.invoice_number.startsWith('REC'))) ? '🧾' : '📄'} #${d.invoice_number}
-          </button>
-        `).join('');
-
-        const invBadge = linkedDocs.length > 0 
-          ? `<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px;">
-               ${docsBadgesHtml}
-               <span class="badge ${isPaid ? 'badge-success' : 'badge-warning'}" style="font-size: 10px;">${isPaid ? 'Pagado' : 'Parcial / Pendiente'}</span>
-             </div>`
-          : `<span class="badge badge-secondary" style="font-size: 11px;">Pendiente Pago</span>`;
-
-        const isFromQuote = t.is_from_quotation || (t.notes && t.notes.includes('Presupuesto #'));
-        const actionButtons = [];
-
-        if (!isPaid) {
-          actionButtons.push(`<button type="button" class="btn btn-sm btn-success pay-single-treatment-btn" data-id="${t.id}" data-price="${pendingPrice}" data-invoice-id="${t.invoice_id || ''}" data-name="${t.treatment_name}" title="Registrar Pago">💳 Pagar (${formatCurrency(pendingPrice)})</button>`);
-        }
-
-        if (!isFromQuote) {
-          actionButtons.push(`<button type="button" class="btn btn-sm btn-outline edit-patient-treatment-btn" data-id="${t.id}" title="Editar Tratamiento">✏️</button>`);
-          actionButtons.push(`<button type="button" class="btn btn-sm btn-danger delete-patient-treatment-btn" data-id="${t.id}" title="Eliminar Tratamiento">🗑️</button>`);
-        }
-
-        const actionHtml = `<div style="display: flex; gap: 4px; justify-content: flex-end; align-items: center;">${actionButtons.join('')}</div>`;
-
-        const notesCell = t.notes && t.notes.trim()
-          ? `<button type="button" class="btn btn-sm btn-outline view-treatment-notes-btn" data-id="${t.id}" style="font-size: 11px; padding: 2px 8px;">📝 Ver Notas</button>`
-          : `<span style="color: var(--text-tertiary); font-size: 12px; italic;">Sin notas</span>`;
-
-        const chkCell = !isPaid
-          ? `<input type="checkbox" class="treatment-select-chk" data-id="${t.id}" data-price="${pendingPrice}" data-invoice-id="${t.invoice_id || ''}" data-name="${t.treatment_name}" style="transform: scale(1.2); cursor: pointer;" />`
-          : `<span style="color: var(--success-600); font-weight: bold;">✓</span>`;
-
-        const basePrice = parseFloat(t.price || 0);
-        const taxedTotal = t.taxed_total !== undefined ? parseFloat(t.taxed_total) : basePrice;
-        const taxRate = parseFloat(t.tax_rate || 0);
-
-        let priceCellHtml = taxRate > 0 
-          ? `<strong>${formatCurrency(taxedTotal)}</strong> <small style="color: var(--text-secondary); font-size: 11px;">(Base: ${formatCurrency(basePrice)} + IVA ${taxRate}%)</small>`
-          : `<strong>${formatCurrency(basePrice)}</strong>`;
-
-        if (paidSoFar > 0 && !isPaid) {
-          priceCellHtml += `<br><span style="font-size: 11px; color: var(--warning-700); font-weight: 600;">(Abonado: ${formatCurrency(paidSoFar)} | Pendiente: ${formatCurrency(pendingPrice)})</span>`;
-        }
+        const invText = p.invoice_id && p.invoice_number
+          ? `<button type="button" class="btn btn-sm btn-outline view-payment-doc-btn" data-id="${p.invoice_id}" title="Ver Comprobante ${p.invoice_number}" style="font-weight: 700;">📄 #${p.invoice_number}</button>`
+          : `<span style="color: var(--text-tertiary); font-size: 12px; font-style: italic;">— (Adelantamiento)</span>`;
 
         return `
-          <tr class="${!isPaid ? 'unpaid-treatment-row' : ''}">
-            <td style="text-align: center;">${chkCell}</td>
-            <td>${t.created_at ? formatDate(t.created_at) : 'N/A'}</td>
-            <td><strong>${t.treatment_name}</strong></td>
-            <td>${t.tooth_number ? `Pieza #${t.tooth_number}` : 'General'}</td>
-            <td>${priceCellHtml}</td>
-            <td><span class="badge ${t.status === 'completado' ? 'badge-success' : 'badge-warning'}">${(t.status || 'completado').toUpperCase()}</span></td>
-            <td>${invBadge}</td>
-            <td>${notesCell}</td>
+          <tr>
+            <td><code style="font-weight: 600;">#${p.id}</code></td>
+            <td>${typeBadge}</td>
+            <td><strong>${invText}</strong></td>
+            <td><span class="badge badge-secondary">${p.payment_method_name || 'Efectivo'}</span></td>
+            <td>${p.reference_number || p.notes || 'Adelantamiento'}</td>
+            <td>${p.payment_date ? formatDate(p.payment_date) : 'N/A'}</td>
+            <td style="color: var(--success-600); font-weight: 700; font-size: 14px;">${formatCurrency(p.amount)}</td>
             <td style="text-align: right;">
-              ${actionHtml}
+              <button class="btn btn-sm btn-danger void-payment-btn" data-id="${p.id}" data-amount="${p.amount}" title="Anular/Cancelar Pago">🚫 Cancelar Pago</button>
             </td>
           </tr>
         `;
       }).join('');
 
-      if (this.clinicalTreatments.length === 0) {
+      if (!this.paymentsList || this.paymentsList.length === 0) {
+        paymentRows = `
+          <tr>
+            <td colspan="8" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
+              No se han registrado pagos ni adelantamientos para este paciente.
+            </td>
+          </tr>
+        `;
+      }
+
+      tabContent = `
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-4); margin-bottom: var(--space-4);">
+          <div class="card" style="padding: var(--space-4); background: linear-gradient(135deg, var(--success-50), var(--success-100)); border-left: 4px solid var(--success-500);">
+            <p style="color: var(--success-700); font-size: var(--text-xs); font-weight: 600; margin: 0 0 4px 0; text-transform: uppercase;">Saldo (Crédito) Sin Usar</p>
+            <p style="font-size: var(--text-2xl); font-weight: 700; color: var(--success-800); margin: 0;">${formatCurrency(Math.max(0, this.patientCredit?.balance !== undefined ? this.patientCredit.balance : (this.patient.available_credit || 0)))}</p>
+          </div>
+          <div class="card" style="padding: var(--space-4); background: linear-gradient(135deg, var(--primary-50), var(--primary-100)); border-left: 4px solid var(--primary-500);">
+            <p style="color: var(--primary-700); font-size: var(--text-xs); font-weight: 600; margin: 0 0 4px 0; text-transform: uppercase;">Total Pagado / Cobrado</p>
+            <p style="font-size: var(--text-2xl); font-weight: 700; color: var(--primary-800); margin: 0;">${formatCurrency(totalPaid)}</p>
+          </div>
+          <div class="card" style="padding: var(--space-4); background: linear-gradient(135deg, var(--warning-50), var(--warning-100)); border-left: 4px solid var(--warning-500);">
+            <p style="color: var(--warning-700); font-size: var(--text-xs); font-weight: 600; margin: 0 0 4px 0; text-transform: uppercase;">Total Adelantamientos</p>
+            <p style="font-size: var(--text-2xl); font-weight: 700; color: var(--warning-800); margin: 0;">${formatCurrency(totalAdvances)}</p>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4); flex-wrap: wrap; gap: var(--space-2);">
+          <div>
+            <h3 style="margin: 0;">Pagos y Adelantamientos</h3>
+            <p style="margin: 4px 0 0 0; font-size: var(--text-xs); color: var(--text-secondary);">
+              Registro de transacciones, adelantos y créditos abonados por el paciente.
+            </p>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button id="tab-add-deposit-btn" class="btn btn-sm btn-success" style="font-weight: 600;">💵 Registrar Adelanto</button>
+            <button id="tab-charge-treatment-btn" class="btn btn-sm btn-primary" style="font-weight: 600;">🦷 Cobrar Tratamiento</button>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>No. Pago</th>
+                <th>Tipo</th>
+                <th>Comprobante</th>
+                <th>Método de Pago</th>
+                <th>Referencia / Concepto</th>
+                <th>Fecha y Hora</th>
+                <th>Monto</th>
+                <th style="text-align: right;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${paymentRows}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } else if (this.activeTab === 'treatments') {
+      const userRole = state.get('user')?.role_name;
+      const canWriteHistory = ['propietario', 'direccion', 'doctor', 'higienista'].includes(userRole);
+
+      let treatmentRows = (this.dentalHistory || []).map(dh => {
+        const doctorName = dh.doctor_name ? `Dr/a. ${dh.doctor_name} ${dh.doctor_lastname || ''}` : 'Sin asignar';
+
+        const actionButtons = [];
+        if (canWriteHistory) {
+          actionButtons.push(`<button type="button" class="btn btn-sm btn-outline edit-dental-history-btn" data-id="${dh.id}" title="Editar entrada del diario">✏️ Editar</button>`);
+          actionButtons.push(`<button type="button" class="btn btn-sm btn-danger delete-dental-history-btn" data-id="${dh.id}" title="Eliminar entrada">🗑️ Eliminar</button>`);
+        }
+
+        const notesContent = dh.notes && dh.notes.trim()
+          ? `<div style="font-size: var(--text-sm); color: var(--text-primary); white-space: pre-wrap;">${dh.notes}</div>`
+          : `<span style="color: var(--text-tertiary); font-size: 12px; font-style: italic;">Sin observaciones adicionales</span>`;
+
+        return `
+          <tr>
+            <td style="white-space: nowrap;"><strong>${dh.created_at ? formatDate(dh.created_at) : 'N/A'}</strong></td>
+            <td>
+              <strong style="color: var(--primary-700); font-size: 14px;">${dh.procedure_name || dh.description || 'Procedimiento Odontológico'}</strong>
+            </td>
+            <td style="white-space: nowrap;">${dh.tooth_number ? `<span class="badge badge-secondary" style="font-size: 11px;">🦷 Pieza #${dh.tooth_number}</span>` : '<span style="color: var(--text-tertiary); font-size: 12px;">General</span>'}</td>
+            <td>${notesContent}</td>
+            <td style="white-space: nowrap;"><strong>${doctorName}</strong></td>
+            ${canWriteHistory ? `<td style="text-align: right; white-space: nowrap;">${actionButtons.join(' ')}</td>` : ''}
+          </tr>
+        `;
+      }).join('');
+
+      if (!this.dentalHistory || this.dentalHistory.length === 0) {
         treatmentRows = `
           <tr>
-            <td colspan="9" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
-              No se han registrado tratamientos en el expediente de este paciente.
+            <td colspan="${canWriteHistory ? 6 : 5}" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
+              No se han registrado entradas en el diario clínico / historial odontológico de este paciente.
             </td>
           </tr>
         `;
@@ -221,29 +272,27 @@ export class PatientProfile {
       tabContent = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4); flex-wrap: wrap; gap: var(--space-2);">
           <div>
-            <h3 style="margin: 0;">Historial Dental de Tratamientos</h3>
+            <h3 style="margin: 0;">Diario / Historial Odontológico</h3>
             <p style="margin: 4px 0 0 0; font-size: var(--text-xs); color: var(--text-secondary);">
-              Seleccione los tratamientos realizados que desea abonar para generar el comprobante.
+              Bitácora clínica de procedimientos realizados y notas de evolución del tratamiento por el profesional.
             </p>
           </div>
-          <div style="display: flex; gap: var(--space-2);">
-            <button id="pay-selected-treatments-btn" class="btn btn-sm btn-success" disabled style="opacity: 0.6;">💳 Pagar Seleccionados (<span id="selected-count">0</span>)</button>
-            <button id="add-treatment-history-btn" class="btn btn-sm btn-primary">+ Agregar Tratamiento</button>
-          </div>
+          ${canWriteHistory ? `
+            <button id="add-treatment-history-btn" class="btn btn-sm btn-primary">
+              + Nueva Entrada Diario
+            </button>
+          ` : ''}
         </div>
         <div class="table-container">
           <table>
             <thead>
               <tr>
-                <th style="width: 40px; text-align: center;"><input type="checkbox" id="select-all-treatments-chk" title="Seleccionar todos los tratamientos pendientes" style="transform: scale(1.2); cursor: pointer;" /></th>
                 <th>Fecha</th>
-                <th>Tratamiento</th>
-                <th>Pieza</th>
-                <th>Precio</th>
-                <th>Estado</th>
-                <th>Comprobante</th>
-                <th>Notas / Origen</th>
-                <th style="text-align: right;">Acciones</th>
+                <th>Procedimiento / Tratamiento</th>
+                <th>Pieza / Diente</th>
+                <th>Notas y Detalles de la Intervención</th>
+                <th>Profesional</th>
+                ${canWriteHistory ? `<th style="text-align: right;">Acciones</th>` : ''}
               </tr>
             </thead>
             <tbody>
@@ -499,7 +548,11 @@ export class PatientProfile {
           <td><strong>${formatCurrency(q.total)}</strong></td>
           <td>
             <span class="badge ${STATUS_BADGES[q.status] || 'badge-secondary'}">${STATUS_LABELS[q.status] || q.status}</span>
-            ${q.invoice_id ? `<span class="badge" style="background-color: var(--primary-100); color: var(--primary-800); font-size: 10px; margin-left: 4px; padding: 2px 4px;">Facturado</span>` : ''}
+            ${q.payment_status === 'pagado'
+              ? `<span class="badge" style="background-color: var(--success-100); color: var(--success-800); font-size: 11px; margin-left: 4px; padding: 2px 6px;">🟢 100% Pagado${(q.status === 'parcial' || (q.accepted_total && q.accepted_total < q.total)) ? ' (Monto Aceptado)' : ''}</span>`
+              : (q.payment_status === 'parcial'
+                ? `<span class="badge" style="background-color: var(--warning-100); color: var(--warning-800); font-size: 11px; margin-left: 4px; padding: 2px 6px;">🟠 Pagado: ${formatCurrency(q.amount_paid)}</span>`
+                : '')}
           </td>
           <td>${q.created_at ? formatDate(q.created_at) : 'N/A'}</td>
           <td style="text-align: right;">
@@ -516,8 +569,13 @@ export class PatientProfile {
               </div>
               <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                 <button class="btn btn-sm btn-outline print-profile-quotation-btn" data-id="${q.id}" title="Ver / Imprimir Cotización">👁 Ver / Imprimir</button>
-                <button class="btn btn-sm btn-manage-quote manage-profile-quotation-btn" data-id="${q.id}" title="Gestionar Aceptación e Ítems">⚙️ Gestionar Ítems</button>
-                <button class="btn btn-sm btn-warning status-profile-quotation-btn" data-id="${q.id}" title="Cambiar Estado del Presupuesto">🏷️ Cambiar Estado</button>
+                ${!q.is_closed ? `
+                  <button class="btn btn-sm btn-manage-quote manage-profile-quotation-btn" data-id="${q.id}" title="Gestionar Aceptación e Ítems">⚙️ Gestionar Ítems</button>
+                  <button class="btn btn-sm btn-warning status-profile-quotation-btn" data-id="${q.id}" title="Cambiar Estado del Presupuesto">🏷️ Cambiar Estado</button>
+                ` : ''}
+                ${((q.status === 'aceptada' || q.status === 'parcial') && (q.remaining_balance === undefined || q.remaining_balance > 0)) ? `
+                  <button class="btn btn-sm btn-success pay-profile-quotation-btn" data-id="${q.id}" title="Registrar Pago del Presupuesto">💳 Registrar Pago</button>
+                ` : ''}
                 ${!q.invoice_id ? `<button class="btn btn-sm btn-info invoice-profile-quotation-btn" data-id="${q.id}" title="Generar Factura de Ítems Aceptados">📄 Facturar Ítems</button>` : ''}
                 <button class="btn btn-sm btn-primary edit-profile-quotation-btn" data-id="${q.id}" title="Editar Presupuesto">✎ Editar</button>
                 <button class="btn btn-sm btn-danger delete-profile-quotation-btn" data-id="${q.id}" title="Eliminar Presupuesto">✕ Eliminar</button>
@@ -561,33 +619,16 @@ export class PatientProfile {
         </div>
       `;
     } else if (this.activeTab === 'accepted-treatments') {
-      const allAccepted = this.acceptedTreatments || [];
-      const totalCount = allAccepted.length;
-      const completedCount = allAccepted.filter(t => t.execution_status === 'realizado').length;
-      const inProgressCount = allAccepted.filter(t => t.execution_status === 'en_proceso').length;
-      const pendingCount = allAccepted.filter(t => (!t.execution_status || t.execution_status === 'pendiente')).length;
+      const allRealized = (this.acceptedTreatments || []).filter(t => t.execution_status === 'realizado');
+      const totalCount = allRealized.length;
       const taxedTotal = (t) => {
         const net = parseFloat(t.total || 0);
         const tax = parseFloat(t.quote_tax_rate || 0);
         return parseFloat((net * (1 + tax / 100)).toFixed(2));
       };
-      const totalFinancialValue = allAccepted.reduce((acc, t) => acc + taxedTotal(t), 0);
-      const completionPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+      const totalFinancialValue = allRealized.reduce((acc, t) => acc + taxedTotal(t), 0);
 
-      const EXEC_BADGES = {
-        pendiente: 'badge-warning',
-        en_proceso: 'badge-info',
-        realizado: 'badge-success'
-      };
-
-      const EXEC_LABELS = {
-        pendiente: '⏳ Pendiente',
-        en_proceso: '⚙️ En Proceso',
-        realizado: '✅ Realizado'
-      };
-
-      let acceptedRows = allAccepted.map(t => {
-        const execStatus = t.execution_status || 'pendiente';
+      let acceptedRows = allRealized.map(t => {
         const itemNet = parseFloat(t.total || 0);
         const itemTaxRate = parseFloat(t.quote_tax_rate || 0);
         const itemVat = parseFloat((itemNet * (itemTaxRate / 100)).toFixed(2));
@@ -600,7 +641,7 @@ export class PatientProfile {
               <strong style="color: var(--text-primary);">${t.description}</strong>
               ${t.tooth_number ? `<span class="badge badge-secondary" style="font-size: 11px; margin-left: 6px; padding: 2px 6px;">🦷 Diente #${t.tooth_number}</span>` : ''}
             </td>
-            <td>${t.doctor_first_name ? `Dr/a. ${t.doctor_first_name} ${t.doctor_last_name || ''}` : '<span style="color: var(--text-secondary); italic">Sin asignar</span>'}</td>
+            <td>${t.doctor_first_name ? `Dr/a. ${t.doctor_first_name} ${t.doctor_last_name || ''}` : '<span style="color: var(--text-secondary); font-style: italic;">Sin asignar</span>'}</td>
             <td>
               <strong style="color: var(--primary-700);">${formatCurrency(itemGross)}</strong>
               <div style="font-size: 11px; color: var(--text-tertiary);">
@@ -608,28 +649,14 @@ export class PatientProfile {
               </div>
             </td>
             <td>
-              <span class="badge ${EXEC_BADGES[execStatus] || 'badge-secondary'}" style="font-weight: 600; padding: 4px 10px;">
-                ${EXEC_LABELS[execStatus] || execStatus}
+              <span class="badge badge-success" style="font-weight: 600; padding: 4px 10px; background-color: var(--success-100); color: var(--success-800); border: 1px solid var(--success-300);" title="Tratamiento realizado y completado">
+                🟢 Completado
               </span>
             </td>
-            <td style="text-align: center;">
-              <div class="status-toggle-segmented">
-                <button type="button" 
-                  class="status-toggle-btn btn-status-pending ${execStatus === 'pendiente' ? 'active' : ''} set-exec-status-btn" 
-                  data-id="${t.id}" data-is-patient-treatment="${t.is_patient_treatment ? 'true' : 'false'}" data-status="pendiente" title="Marcar como pendiente">
-                  ⏳ Pendiente
-                </button>
-                <button type="button" 
-                  class="status-toggle-btn btn-status-in-progress ${execStatus === 'en_proceso' ? 'active' : ''} set-exec-status-btn" 
-                  data-id="${t.id}" data-is-patient-treatment="${t.is_patient_treatment ? 'true' : 'false'}" data-status="en_proceso" title="Marcar en proceso">
-                  ⚙️ En Proceso
-                </button>
-                <button type="button" 
-                  class="status-toggle-btn btn-status-completed ${execStatus === 'realizado' ? 'active' : ''} set-exec-status-btn" 
-                  data-id="${t.id}" data-is-patient-treatment="${t.is_patient_treatment ? 'true' : 'false'}" data-status="realizado" title="Marcar como realizado y añadir al historial odontológico">
-                  ✅ Realizado
-                </button>
-              </div>
+            <td>
+              <button class="btn btn-sm btn-outline-danger cancel-realized-treatment-btn" data-id="${t.id}" data-is-patient-treatment="${t.is_patient_treatment !== false}" data-description="${t.description}" data-amount="${formatCurrency(itemGross)}" title="Cancelar tratamiento y recuperar su monto en el balance del paciente">
+                ❌ Cancelar
+              </button>
             </td>
           </tr>
         `;
@@ -639,7 +666,7 @@ export class PatientProfile {
         acceptedRows = `
           <tr>
             <td colspan="6" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
-              No hay tratamientos aceptados en los presupuestos de este paciente.
+              No hay tratamientos realizados y completados en los presupuestos de este paciente.
             </td>
           </tr>
         `;
@@ -648,54 +675,24 @@ export class PatientProfile {
       tabContent = `
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: var(--space-4); flex-wrap: wrap; gap: var(--space-3);">
           <div>
-            <h3 style="margin: 0;">Tratamientos Aceptados por el Paciente</h3>
+            <h3 style="margin: 0;">Tratamientos Realizados del Paciente</h3>
             <p style="margin: 4px 0 0 0; font-size: var(--text-xs); color: var(--text-secondary);">
-              Tratamientos aprobados en presupuestos. Al cambiar el estado a <strong>Realizado</strong>, se añadirán automáticamente al Historial Odontológico.
+              Tratamientos aceptados y marcados como completados en presupuestos. Sus montos se descuentan del balance del paciente.
             </p>
           </div>
           <span class="badge badge-success" style="font-size: 13px; padding: 6px 12px; font-weight: 600;">
-            ${completedCount} de ${totalCount} Completados (${completionPct}%)
+            ${totalCount} Tratamiento(s) Completado(s)
           </span>
         </div>
 
-        <div class="exec-stats-grid">
-          <div class="exec-stat-card">
-            <div class="exec-stat-icon" style="background-color: var(--primary-50); color: var(--primary-700);">
-              📋
-            </div>
-            <div>
-              <div class="exec-stat-val">${totalCount}</div>
-              <div class="exec-stat-lbl">Total Aceptados</div>
-            </div>
-          </div>
-
+        <div class="exec-stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
           <div class="exec-stat-card">
             <div class="exec-stat-icon" style="background-color: var(--success-50); color: var(--success-700);">
               ✅
             </div>
             <div>
-              <div class="exec-stat-val" style="color: var(--success-600);">${completedCount}</div>
-              <div class="exec-stat-lbl">Realizados (Historial)</div>
-            </div>
-          </div>
-
-          <div class="exec-stat-card">
-            <div class="exec-stat-icon" style="background-color: var(--info-50); color: var(--info-700);">
-              ⚙️
-            </div>
-            <div>
-              <div class="exec-stat-val" style="color: var(--info-600);">${inProgressCount}</div>
-              <div class="exec-stat-lbl">En Proceso</div>
-            </div>
-          </div>
-
-          <div class="exec-stat-card">
-            <div class="exec-stat-icon" style="background-color: var(--warning-50); color: var(--warning-700);">
-              ⏳
-            </div>
-            <div>
-              <div class="exec-stat-val" style="color: var(--warning-600);">${pendingCount}</div>
-              <div class="exec-stat-lbl">Pendientes</div>
+              <div class="exec-stat-val" style="color: var(--success-600);">${totalCount}</div>
+              <div class="exec-stat-lbl">Tratamientos Completados</div>
             </div>
           </div>
 
@@ -705,7 +702,7 @@ export class PatientProfile {
             </div>
             <div>
               <div class="exec-stat-val" style="color: var(--primary-800);">${formatCurrency(totalFinancialValue)}</div>
-              <div class="exec-stat-lbl">Valor Total Aceptado</div>
+              <div class="exec-stat-lbl">Valor Total Realizado</div>
             </div>
           </div>
         </div>
@@ -717,9 +714,9 @@ export class PatientProfile {
                 <th>Presupuesto</th>
                 <th>Tratamiento / Descripción</th>
                 <th>Doctor</th>
-                <th>Monto</th>
-                <th>Estado Ejecución</th>
-                <th style="text-align: center;">Acción de Estado Clínico</th>
+                <th>Monto (Debitado)</th>
+                <th>Estado</th>
+                <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -822,8 +819,11 @@ export class PatientProfile {
             <div style="display: flex; gap: var(--space-2); align-items: center; margin-top: 4px;">
               <span class="badge badge-info" style="font-size: var(--text-sm); font-weight: 600; padding: 2px 8px;">ID: ${pat.custom_id || 'N/A'}</span>
               ${isDoctor ? '' : `
-                <span class="badge ${parseFloat(pat.balance || 0) < 0 ? 'badge-danger' : parseFloat(pat.balance || 0) > 0 ? 'badge-success' : 'badge-info'}" style="font-size: var(--text-sm); font-weight: 600; padding: 2px 8px;">
-                  Saldo: ${formatCurrency(pat.balance || 0)}
+                <span class="badge ${parseFloat(pat.balance || 0) > 0 ? 'badge-success' : parseFloat(pat.balance || 0) < 0 ? 'badge-danger' : 'badge-secondary'}" style="font-size: var(--text-sm); font-weight: 700; padding: 4px 10px;" title="Balance general de la cuenta">
+                  ${parseFloat(pat.balance || 0) > 0 ? `🟢 Balance a Favor: ${formatCurrency(pat.balance)}` : parseFloat(pat.balance || 0) < 0 ? `🔴 Balance Deudor: ${formatCurrency(Math.abs(pat.balance))}` : `Balance: $0.00`}
+                </span>
+                <span class="badge badge-info" style="font-size: var(--text-sm); font-weight: 700; padding: 4px 10px;" title="Saldo (Crédito) adelantado sin aplicar">
+                  💳 Saldo(Crédito): ${formatCurrency(Math.max(0, this.patientCredit?.balance !== undefined ? this.patientCredit.balance : (pat.available_credit || 0)))}
                 </span>
               `}
               <p style="color: var(--text-secondary); margin: 0; font-size: var(--text-sm);">Expediente Clínico #EXP-${pat.id.toString().padStart(5, '0')}</p>
@@ -831,7 +831,9 @@ export class PatientProfile {
           </div>
         </div>
         <div style="display: flex; gap: var(--space-2); flex-wrap: wrap;">
-          <button id="schedule-appointment-btn" class="btn btn-primary">📅 Agendar Cita</button>
+          <button id="btn-add-deposit" class="btn btn-success" style="font-weight: 600;">💵 Registrar Adelanto</button>
+          <button id="btn-charge-treatment" class="btn btn-primary" style="font-weight: 600;">🦷 Cobrar Tratamiento</button>
+          <button id="schedule-appointment-btn" class="btn btn-outline-primary">📅 Agendar Cita</button>
           <button id="edit-patient-profile-btn" class="btn btn-secondary">Editar Datos</button>
           <button id="delete-patient-profile-btn" class="btn btn-danger" title="Eliminar este paciente">🗑️ Eliminar</button>
           <a href="#/patients" class="btn btn-outline">⬅ Volver al Directorio</a>
@@ -840,8 +842,9 @@ export class PatientProfile {
 
       <div class="tabs" style="display: flex; gap: var(--space-2); margin-bottom: var(--space-4); border-bottom: 1px solid var(--border-color); padding-bottom: var(--space-2); flex-wrap: wrap;">
         ${tabLink('info', 'Ficha Técnica')}
+        ${tabLink('payments', 'Pagos y Saldo')}
         ${tabLink('treatments', 'Historial Odontológico')}
-        ${tabLink('accepted-treatments', 'Tratamientos Aceptados')}
+        ${tabLink('accepted-treatments', 'Tratamientos Realizados')}
         ${tabLink('appointments', 'Historial de Citas')}
         ${tabLink('invoices', 'Facturas')}
         ${tabLink('receipts', 'Recibos')}
@@ -871,26 +874,88 @@ export class PatientProfile {
       }, { signal });
     });
 
-    // Agregar tratamiento al historial
-    const addHistoryBtn = this.container.querySelector('#add-treatment-history-btn');
-    if (addHistoryBtn) {
-      addHistoryBtn.addEventListener('click', () => this.showAddTreatmentModal(), { signal });
-    }
+    // Registrar Adelanto / Depósito
+    const depositBtns = [
+      this.container.querySelector('#btn-add-deposit'),
+      this.container.querySelector('#tab-add-deposit-btn')
+    ];
+    depositBtns.forEach(btn => {
+      if (btn) {
+        btn.addEventListener('click', () => this.showRegisterDepositModal(), { signal });
+      }
+    });
 
-    // Editar tratamiento del historial
-    this.container.querySelectorAll('.edit-patient-treatment-btn').forEach(btn => {
+    // Cobrar Tratamiento
+    const chargeBtns = [
+      this.container.querySelector('#btn-charge-treatment'),
+      this.container.querySelector('#tab-charge-treatment-btn')
+    ];
+    chargeBtns.forEach(btn => {
+      if (btn) {
+        btn.addEventListener('click', () => this.showChargeTreatmentModal(), { signal });
+      }
+    });
+
+    // Anular pago / adelantamiento
+    this.container.querySelectorAll('.void-payment-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        const id = Number(btn.dataset.id);
-        const treatment = (this.clinicalTreatments || []).find(t => t.id === id);
-        if (treatment) this.showEditTreatmentModal(treatment);
+        const id = btn.getAttribute('data-id');
+        const amount = btn.getAttribute('data-amount');
+        this.showVoidPaymentModal(id, amount);
       }, { signal });
     });
 
-    // Eliminar tratamiento del historial
-    this.container.querySelectorAll('.delete-patient-treatment-btn').forEach(btn => {
+    // Ver comprobante/recibo/factura vinculado al pago
+    this.container.querySelectorAll('.view-payment-doc-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const invoiceId = btn.getAttribute('data-id');
+        if (invoiceId) {
+          this.viewDocument(invoiceId);
+        }
+      }, { signal });
+    });
+
+    // Agregar entrada al Historial Odontológico (Diario Clínico)
+    const addHistoryBtn = this.container.querySelector('#add-treatment-history-btn');
+    if (addHistoryBtn) {
+      addHistoryBtn.addEventListener('click', () => this.showAddDentalHistoryModal(), { signal });
+    }
+
+    // Editar entrada del Historial Odontológico
+    this.container.querySelectorAll('.edit-dental-history-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const id = Number(btn.dataset.id);
-        this.confirmDeleteTreatment(id);
+        const item = (this.dentalHistory || []).find(d => d.id === id);
+        if (item) this.showEditDentalHistoryModal(item);
+      }, { signal });
+    });
+
+    // Eliminar entrada del Historial Odontológico
+    this.container.querySelectorAll('.delete-dental-history-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = Number(btn.dataset.id);
+        this.showDeleteDentalHistoryModal(id);
+      }, { signal });
+    });
+
+    // Cancelar tratamiento realizado del paciente y recuperar balance
+    this.container.querySelectorAll('.cancel-realized-treatment-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-id');
+        const isPatientTreatment = btn.getAttribute('data-is-patient-treatment') !== 'false';
+        const description = btn.getAttribute('data-description');
+        const amountStr = btn.getAttribute('data-amount');
+
+        if (confirm(`¿Está seguro de que desea cancelar el tratamiento realizado "${description}"?\n\nEl monto de ${amountStr} se devolverá y recuperará automáticamente en el balance del paciente.`)) {
+          try {
+            await treatmentService.cancelRealizedTreatment(id, isPatientTreatment);
+            toast.success(`Tratamiento "${description}" cancelado. El saldo de ${amountStr} ha sido recuperado en la cuenta.`);
+            await this.loadPatientData();
+          } catch (err) {
+            toast.error(err.message || 'Error al cancelar el tratamiento realizado');
+          }
+        }
       }, { signal });
     });
 
@@ -1178,7 +1243,7 @@ export class PatientProfile {
     this.container.querySelectorAll('.print-profile-quotation-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const { Quotations } = await import('../quotations/quotations.js');
-        new Quotations(this.container).printQuote(btn.dataset.id);
+        new Quotations(this.container).showViewOptionsModal(btn.dataset.id, refreshProfile);
       }, { signal });
     });
 
@@ -1193,6 +1258,13 @@ export class PatientProfile {
       btn.addEventListener('click', async () => {
         const { Quotations } = await import('../quotations/quotations.js');
         new Quotations(this.container).showStatusModal(btn.dataset.id, refreshProfile);
+      }, { signal });
+    });
+
+    this.container.querySelectorAll('.pay-profile-quotation-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const { Quotations } = await import('../quotations/quotations.js');
+        new Quotations(this.container).showQuotationPaymentModal(btn.dataset.id, refreshProfile);
       }, { signal });
     });
 
@@ -1505,198 +1577,134 @@ export class PatientProfile {
 
   async showAddTreatmentModal() {
     let treatments = [];
+    let doctors = [];
     try {
-      treatments = await treatmentService.getAll();
-    } catch (err) {
-      toast.error('Error al cargar catálogo de tratamientos');
-      return;
+      const [resTreats, resDocs] = await Promise.all([
+        treatmentService.getAll().catch(() => []),
+        doctorService.getAll().catch(() => [])
+      ]);
+      treatments = Array.isArray(resTreats) ? resTreats : (resTreats.data || []);
+      doctors = Array.isArray(resDocs) ? resDocs : (resDocs.data || []);
+    } catch {
+      toast.error('Error al cargar datos requeridos');
     }
 
-    const modalDefaultTax = parseFloat(state.get('clinicInfo')?.tax_rate || 0) || 16;
-
+    const todayStr = new Date().toISOString().split('T')[0];
     const activeTreatments = treatments.filter(t => t.is_active);
 
-    const options = activeTreatments
-      .map(t => `<option value="${t.id}" data-price="${t.default_price}">${t.name} (${t.code}) - ${formatCurrency(t.default_price)}</option>`)
+    const treatmentOptions = activeTreatments
+      .map(t => `<option value="${t.id}" data-name="${t.name}">${t.name} (${t.code})</option>`)
+      .join('');
+
+    const doctorOptions = doctors
+      .map(d => `<option value="${d.id}">Dr/a. ${d.first_name || ''} ${d.last_name || ''}</option>`)
       .join('');
 
     const content = `
       <form id="add-treatment-history-form">
-        <div class="form-group">
-          <label class="form-label">Tratamiento <span style="color: var(--danger-500);">*</span></label>
-          <select name="treatment_id" id="treatment-select" class="form-select" required>
-            <option value="">Seleccione un tratamiento...</option>
-            ${options}
-          </select>
-        </div>
-
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
           <div class="form-group">
-            <label class="form-label">Precio Base <small style="font-weight: 400;">(sin IVA, editable)</small></label>
-            <input type="number" id="base-price" class="form-input" value="0.00" step="0.01" min="0" required />
+            <label class="form-label">Fecha del Procedimiento <span style="color: var(--danger-500);">*</span></label>
+            <input type="date" name="end_date" class="form-input" value="${todayStr}" required />
           </div>
           <div class="form-group">
-            <label class="form-label">Diente / Pieza (Opcional)</label>
-            <input type="number" name="tooth_number" class="form-input" placeholder="Ej: 18" min="1" max="32" />
-          </div>
-        </div>
-
-        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3); align-items: end;">
-          <div class="form-group">
-            <label class="form-label">Tipo Descuento</label>
-            <select id="discount-type" class="form-select">
-              <option value="percentage">% Porcentaje</option>
-              <option value="fixed">$ Monto Fijo</option>
+            <label class="form-label">Doctor / Profesional <span style="color: var(--danger-500);">*</span></label>
+            <select name="doctor_id" class="form-select">
+              <option value="">Seleccionar Profesional...</option>
+              ${doctorOptions}
             </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Descuento</label>
-            <input type="number" id="discount-value" class="form-input" value="0" min="0" step="0.01" placeholder="0" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Impuesto (%)</label>
-            <input type="number" name="tax_rate" id="tax-rate" class="form-input" value="${modalDefaultTax}" min="0" step="0.5" placeholder="${modalDefaultTax}" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Precio Final</label>
-            <input type="number" name="price" id="final-price" class="form-input" value="0.00" step="0.01" required min="0" style="font-weight: 600; color: var(--primary-700, #4f46e5);" />
           </div>
         </div>
 
         <div class="form-group" style="margin-top: var(--space-3);">
-          <label class="form-label">Notas Clínicas</label>
-          <textarea name="notes" class="form-textarea" rows="3" placeholder="Notas sobre el tratamiento realizado..."></textarea>
+          <label class="form-label">Procedimiento / Tratamiento Realizado <span style="color: var(--danger-500);">*</span></label>
+          <select name="treatment_id" id="treatment-select" class="form-select" style="margin-bottom: 6px;">
+            <option value="">Seleccionar catálogo...</option>
+            ${treatmentOptions}
+          </select>
+          <input type="text" name="custom_treatment_name" class="form-input" placeholder="O escriba el procedimiento directamente (Ej: Profilaxis dental y aplicación de flúor)..." />
+        </div>
+
+        <div class="form-group" style="margin-top: var(--space-3);">
+          <label class="form-label">Diente / Pieza (Opcional)</label>
+          <input type="number" name="tooth_number" class="form-input" placeholder="Ej: 18 (o dejar en blanco para tratamiento general)" min="1" max="32" />
+        </div>
+
+        <div class="form-group" style="margin-top: var(--space-3);">
+          <label class="form-label">Notas Clínicas y Detalles de la Intervención <span style="color: var(--danger-500);">*</span></label>
+          <textarea name="notes" class="form-textarea" rows="4" placeholder="Describa el procedimiento realizado, hallazgos, observaciones del tratamiento..." required></textarea>
         </div>
       </form>`;
 
     Modal.show({
-      title: 'Registrar Tratamiento Clínico',
+      title: '📖 Nueva Entrada - Diario Odontológico',
       content: content,
-      confirmText: 'Registrar',
+      confirmText: 'Guardar Entrada',
       onConfirm: async (modalBody) => {
         const form = modalBody.querySelector('#add-treatment-history-form');
         const formData = new FormData(form);
         const data = Object.fromEntries(formData.entries());
         data.patient_id = Number(this.patientId);
         data.status = 'completado';
-        data.treatment_id = Number(data.treatment_id);
-        const finalPrice = parseFloat(data.price || 0);
-        const taxRateVal = parseFloat(data.tax_rate !== undefined && data.tax_rate !== '' ? data.tax_rate : 0);
-        // El precio guardado en el historial es el precio BASE (sin IVA); el IVA se aplica al facturar/pagar.
-        data.price = taxRateVal > 0 ? parseFloat((finalPrice / (1 + taxRateVal / 100)).toFixed(2)) : finalPrice;
-        data.tax_rate = taxRateVal;
+        data.price = 0;
+        data.tax_rate = 0;
+
+        if (data.treatment_id) {
+          data.treatment_id = Number(data.treatment_id);
+        } else {
+          delete data.treatment_id;
+        }
+
+        if (data.custom_treatment_name && data.custom_treatment_name.trim()) {
+          data.description = data.custom_treatment_name.trim();
+        }
+
         if (data.tooth_number) data.tooth_number = Number(data.tooth_number);
+        else delete data.tooth_number;
+
+        if (data.doctor_id) data.doctor_id = Number(data.doctor_id);
+        else delete data.doctor_id;
 
         try {
           await treatmentService.addPatientTreatment(data);
-          toast.success('Tratamiento registrado con éxito');
+          toast.success('Entrada guardada en el Diario Odontológico');
           await this.render();
           this.mount();
           return true;
         } catch (err) {
-          toast.error(err.message || 'Error al guardar tratamiento');
+          toast.error(err.message || 'Error al guardar entrada en el diario');
           return false;
         }
       }
     });
-
-    // Wire up dynamic price loading and discount/tax calculation
-    const modalForm = document.querySelector('#add-treatment-history-form');
-    if (modalForm) {
-      const treatmentSelect = modalForm.querySelector('#treatment-select');
-      const basePriceInput = modalForm.querySelector('#base-price');
-      const discountTypeSelect = modalForm.querySelector('#discount-type');
-      const discountValueInput = modalForm.querySelector('#discount-value');
-      const taxRateInput = modalForm.querySelector('#tax-rate');
-      const finalPriceInput = modalForm.querySelector('#final-price');
-
-      const recalculate = (origin = 'discount') => {
-        const basePrice = parseFloat(basePriceInput.value) || 0;
-        const discVal = parseFloat(discountValueInput.value) || 0;
-        const discType = discountTypeSelect.value;
-        const taxRate = parseFloat(taxRateInput.value) || 0;
-
-        if (origin === 'discount' || origin === 'tax') {
-          let discountAmount = 0;
-          if (discType === 'percentage') {
-            discountAmount = basePrice * (discVal / 100);
-          } else {
-            discountAmount = discVal;
-          }
-          const discountedSubtotal = Math.max(0, basePrice - discountAmount);
-          const taxAmount = discountedSubtotal * (taxRate / 100);
-          const finalPrice = discountedSubtotal + taxAmount;
-          finalPriceInput.value = finalPrice.toFixed(2);
-        } else if (origin === 'final') {
-          const finalPrice = parseFloat(finalPriceInput.value) || 0;
-          // Calculate net subtotal before tax
-          const netSubtotal = taxRate > 0 ? finalPrice / (1 + taxRate / 100) : finalPrice;
-          const discountAmount = Math.max(0, basePrice - netSubtotal);
-          if (discType === 'percentage') {
-            const pct = basePrice > 0 ? (discountAmount / basePrice) * 100 : 0;
-            discountValueInput.value = pct.toFixed(1);
-          } else {
-            discountValueInput.value = discountAmount.toFixed(2);
-          }
-        }
-      };
-
-      treatmentSelect.addEventListener('change', () => {
-        const selectedOption = treatmentSelect.options[treatmentSelect.selectedIndex];
-        const rawPrice = selectedOption ? parseFloat(selectedOption.dataset.price || 0) : 0;
-        basePriceInput.value = rawPrice.toFixed(2);
-        recalculate('discount');
-      });
-
-      discountTypeSelect.addEventListener('change', () => recalculate('discount'));
-      discountValueInput.addEventListener('input', () => recalculate('discount'));
-      taxRateInput.addEventListener('input', () => recalculate('tax'));
-      basePriceInput.addEventListener('input', () => recalculate('discount'));
-      finalPriceInput.addEventListener('input', () => recalculate('final'));
-    }
   }
 
   showEditTreatmentModal(treatment) {
     const content = `
       <form id="edit-treatment-history-form">
         <div class="form-group">
-          <label class="form-label">Tratamiento</label>
-          <input type="text" class="form-input" value="${treatment.treatment_name || ''}" readonly style="background-color: var(--gray-100, #f3f4f6); font-weight: 500;" />
-        </div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
-          <div class="form-group">
-            <label class="form-label">Precio ($)</label>
-            <input type="number" name="price" class="form-input" value="${parseFloat(treatment.price || 0).toFixed(2)}" step="0.01" min="0" required />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Diente / Pieza (Opcional)</label>
-            <input type="number" name="tooth_number" class="form-input" value="${treatment.tooth_number || ''}" placeholder="Ej: 18" min="1" max="32" />
-          </div>
+          <label class="form-label">Procedimiento / Tratamiento</label>
+          <input type="text" name="treatment_name" class="form-input" value="${treatment.treatment_name || treatment.description || ''}" required />
         </div>
         <div class="form-group" style="margin-top: var(--space-3);">
-          <label class="form-label">Estado</label>
-          <select name="status" class="form-select">
-            <option value="completado" ${treatment.status === 'completado' ? 'selected' : ''}>Completado</option>
-            <option value="en_progreso" ${treatment.status === 'en_progreso' ? 'selected' : ''}>En Progreso</option>
-            <option value="pendiente" ${treatment.status === 'pendiente' ? 'selected' : ''}>Pendiente</option>
-            <option value="cancelado" ${treatment.status === 'cancelado' ? 'selected' : ''}>Cancelado</option>
-          </select>
+          <label class="form-label">Diente / Pieza (Opcional)</label>
+          <input type="number" name="tooth_number" class="form-input" value="${treatment.tooth_number || ''}" placeholder="Ej: 18" min="1" max="32" />
         </div>
         <div class="form-group" style="margin-top: var(--space-3);">
-          <label class="form-label">Notas Clínicas</label>
-          <textarea name="notes" class="form-textarea" rows="3">${treatment.notes || ''}</textarea>
+          <label class="form-label">Notas Clínicas y Detalles de la Intervención</label>
+          <textarea name="notes" class="form-textarea" rows="4">${treatment.notes || ''}</textarea>
         </div>
       </form>`;
 
     Modal.show({
-      title: 'Editar Tratamiento del Historial',
+      title: '📖 Editar Entrada - Diario Odontológico',
       content,
       confirmText: 'Guardar Cambios',
       onConfirm: async (modalBody) => {
         const form = modalBody.querySelector('#edit-treatment-history-form');
         const formData = new FormData(form);
         const data = Object.fromEntries(formData.entries());
-        data.price = parseFloat(data.price || 0);
+        data.price = 0;
         if (data.tooth_number) data.tooth_number = Number(data.tooth_number);
         else data.tooth_number = null;
 
@@ -2440,5 +2448,504 @@ export class PatientProfile {
     } catch (err) {
       toast.error('Error al abrir el comprobante');
     }
+  }
+
+  async showRegisterDepositModal() {
+    let methods = [];
+    try {
+      methods = await paymentService.getMethods().catch(() => []);
+    } catch {
+      toast.error('Error al cargar métodos de pago');
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const nonSaldoMethods = (methods || []).filter(m => m.id !== 'saldo_credito' && m.id !== 5);
+    const methodOptions = nonSaldoMethods.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+
+    const content = `
+      <form id="profile-deposit-modal-form">
+        <div style="background-color: var(--success-50, #f0fdf4); border: 1px solid var(--success-200, #bbf7d0); padding: var(--space-3); border-radius: var(--radius-md); margin-bottom: var(--space-3);">
+          <p style="margin: 0; font-size: var(--text-xs); color: var(--success-800, #166534); font-weight: 600;">
+            💵 Este abono se guardará como un depósito a favor del paciente. Aumentará su <strong>Saldo (Crédito) Disponible</strong> para ser usado como forma de pago en futuros tratamientos.
+          </p>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Monto a Depositar ($) <span style="color: var(--danger-500);">*</span></label>
+            <input type="number" name="amount" id="modal-deposit-amount" class="form-input" placeholder="0.00" step="0.01" min="0.01" required style="font-size: 18px; font-weight: 700; color: var(--success-700);" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Método de Pago <span style="color: var(--danger-500);">*</span></label>
+            <select name="payment_method_id" class="form-select" required>
+              <option value="">Seleccionar método...</option>
+              ${methodOptions}
+            </select>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Fecha del Adelanto <span style="color: var(--danger-500);">*</span></label>
+            <input type="date" name="payment_date" class="form-input" value="${todayStr}" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">No. Referencia / Operación (Opcional)</label>
+            <input type="text" name="reference_number" class="form-input" placeholder="Ej: REF-98765" />
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-top: var(--space-3);">
+          <label class="form-label">Notas / Concepto</label>
+          <textarea name="notes" class="form-textarea" rows="2" placeholder="Adelantamiento de tratamiento...">Adelantamiento de tratamiento</textarea>
+        </div>
+      </form>`;
+
+    Modal.show({
+      title: '💵 Registrar Adelanto / Depósito (Suma a Saldo Crédito)',
+      content: content,
+      confirmText: 'Registrar Adelanto',
+      onConfirm: async (modalBody) => {
+        const form = modalBody.querySelector('#profile-deposit-modal-form');
+        const formData = new FormData(form);
+        const data = Object.fromEntries(formData.entries());
+        const patientId = Number(this.patientId);
+        const paymentMethodId = Number(data.payment_method_id);
+        const amount = parseFloat(data.amount);
+        const paymentDate = data.payment_date;
+        const referenceNumber = data.reference_number || null;
+        const notes = data.notes || 'Adelantamiento de tratamiento';
+
+        try {
+          await paymentService.create({
+            patient_id: patientId,
+            payment_method_id: paymentMethodId,
+            amount: amount,
+            reference_number: referenceNumber,
+            notes: notes,
+            payment_date: paymentDate
+          });
+          toast.success(`¡Adelantamiento de ${formatCurrency(amount)} registrado con éxito!`);
+          setTimeout(() => {
+            window.location.reload();
+          }, 500);
+          return true;
+        } catch (err) {
+          toast.error(err.message || 'Error al registrar el adelantamiento');
+          return false;
+        }
+      }
+    });
+  }
+
+  async showChargeTreatmentModal() {
+    let methods = [];
+    let catalogTreatments = [];
+    let doctors = [];
+    try {
+      [methods, catalogTreatments, doctors] = await Promise.all([
+        paymentService.getMethods().catch(() => []),
+        treatmentService.getAll({ limit: 500, is_active: true }).catch(() => []),
+        doctorService.getAll().catch(() => [])
+      ]);
+    } catch {
+      toast.error('Error al cargar datos para cobrar el tratamiento');
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const pendingTreatments = (this.clinicalTreatments || []).filter(t => {
+      const isPaid = t.invoice_status === 'pagada' || (t.remaining_balance !== undefined && parseFloat(t.remaining_balance) <= 0.001);
+      return !isPaid;
+    });
+
+    const unlinkedAccepted = (this.acceptedTreatments || []).filter(at => {
+      if (at.is_patient_treatment) return false;
+      const isPaid = at.payment_status === 'pagado' || (at.remaining_balance !== undefined && parseFloat(at.remaining_balance) <= 0.001) || at.execution_status === 'realizado';
+      return !isPaid;
+    });
+
+    const catalogList = Array.isArray(catalogTreatments) ? catalogTreatments : (catalogTreatments?.data || catalogTreatments?.rows || []);
+    const doctorList = Array.isArray(doctors) ? doctors : (doctors?.data || doctors?.rows || []);
+
+    const availCredit = Math.max(0, this.patientCredit?.balance !== undefined ? this.patientCredit.balance : (this.patient.available_credit || 0));
+
+    const methodOptions = (methods || []).map(m => {
+      if (m.id === 'saldo_credito' || m.id === 5) {
+        return `<option value="${m.id}">💳 Saldo (Crédito) — Disponible: ${formatCurrency(availCredit)}</option>`;
+      }
+      return `<option value="${m.id}">${m.name}</option>`;
+    }).join('');
+
+    const doctorOptions = doctorList.map(d => `<option value="${d.id}">Dr/a. ${d.first_name} ${d.last_name || ''}</option>`).join('');
+
+    let treatmentSelectOptions = `<option value="">-- Seleccionar Tratamiento --</option>`;
+
+    if (pendingTreatments.length > 0 || unlinkedAccepted.length > 0) {
+      treatmentSelectOptions += `<optgroup label="🦷 Tratamientos Pendientes y de Presupuestos">`;
+      
+      pendingTreatments.forEach(t => {
+        const name = t.treatment_name || t.name || t.description || 'Tratamiento';
+        const tooth = t.tooth_number ? ` (Diente #${t.tooth_number})` : '';
+        const pendingAmount = t.remaining_balance !== undefined ? parseFloat(t.remaining_balance) : parseFloat(t.price || 0);
+        const priceStr = formatCurrency(pendingAmount);
+        treatmentSelectOptions += `<option value="treatment_${t.id}" data-price="${pendingAmount}" data-name="${name}" data-tooth="${t.tooth_number || ''}" data-doctor="${t.doctor_id || ''}">${name}${tooth} — ${priceStr}</option>`;
+      });
+
+      unlinkedAccepted.forEach(at => {
+        const name = at.description || at.catalog_treatment_name || 'Tratamiento Presupuestado';
+        const tooth = at.tooth_number ? ` (Diente #${at.tooth_number})` : '';
+        const tag = at.quote_number ? ` [Presupuesto #${at.quote_number}]` : '';
+        const pendingAmount = at.remaining_balance !== undefined ? parseFloat(at.remaining_balance) : parseFloat(at.total || at.unit_price || 0);
+        const priceStr = formatCurrency(pendingAmount);
+        treatmentSelectOptions += `<option value="quoteitem_${at.id}" data-price="${pendingAmount}" data-name="${name}" data-tooth="${at.tooth_number || ''}" data-doctor="${at.doctor_id || ''}">${name}${tooth}${tag} — ${priceStr}</option>`;
+      });
+
+      treatmentSelectOptions += `</optgroup>`;
+    }
+
+    if (catalogList.length > 0) {
+      treatmentSelectOptions += `<optgroup label="📋 Catálogo General de Tratamientos">`;
+      treatmentSelectOptions += catalogList.map(ct => {
+        const price = formatCurrency(ct.default_price || 0);
+        return `<option value="catalog_${ct.id}" data-price="${ct.default_price || 0}" data-name="${ct.name}">${ct.name} — ${price}</option>`;
+      }).join('');
+      treatmentSelectOptions += `</optgroup>`;
+    }
+
+    const content = `
+      <form id="profile-charge-treatment-modal-form">
+        <div class="form-group">
+          <label class="form-label">Seleccionar Tratamiento a Cobrar <span style="color: var(--danger-500);">*</span></label>
+          <select name="treatment_selection" id="modal-charge-treatment-select" class="form-select" required>
+            ${treatmentSelectOptions}
+          </select>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Precio / Monto ($) <span style="color: var(--danger-500);">*</span></label>
+            <input type="number" name="amount" id="modal-charge-amount" class="form-input" placeholder="0.00" step="0.01" min="0.01" required style="font-size: 18px; font-weight: 700; color: var(--primary-700);" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Doctor Asignado</label>
+            <select name="doctor_id" id="modal-charge-doctor" class="form-select">
+              <option value="">-- Sin asignar --</option>
+              ${doctorOptions}
+            </select>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Pieza / Diente # (Opcional)</label>
+            <input type="text" name="tooth_number" id="modal-charge-tooth" class="form-input" placeholder="Ej: 18, 21, Superior..." />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Método de Pago <span style="color: var(--danger-500);">*</span></label>
+            <select name="payment_method_id" id="modal-charge-method" class="form-select" required>
+              <option value="">Seleccionar método de pago...</option>
+              ${methodOptions}
+            </select>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Comprobante a Generar</label>
+            <select name="document_type" class="form-select">
+              <option value="recibo" selected>Recibo (#REC)</option>
+              <option value="factura">Factura Oficial (#FACT)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Fecha del Pago <span style="color: var(--danger-500);">*</span></label>
+            <input type="date" name="payment_date" class="form-input" value="${todayStr}" required />
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-top: var(--space-3);">
+          <label class="form-label">Notas / Observaciones</label>
+          <input type="text" name="notes" id="modal-charge-notes" class="form-input" placeholder="Pago de tratamiento realizado..." />
+        </div>
+      </form>`;
+
+    Modal.show({
+      title: '🦷 Cobrar Tratamiento (Enviar a Tratamientos Realizados)',
+      content: content,
+      confirmText: 'Cobrar y Registrar',
+      onConfirm: async (modalBody) => {
+        const form = modalBody.querySelector('#profile-charge-treatment-modal-form');
+        const formData = new FormData(form);
+        const data = Object.fromEntries(formData.entries());
+        const targetVal = data.treatment_selection || '';
+        const patientId = Number(this.patientId);
+        const paymentMethodId = data.payment_method_id === 'saldo_credito' ? 'saldo_credito' : Number(data.payment_method_id);
+        const amount = parseFloat(data.amount);
+        const doctorId = data.doctor_id ? Number(data.doctor_id) : null;
+        const toothNumber = data.tooth_number || null;
+        const documentType = data.document_type || 'recibo';
+        const paymentDate = data.payment_date;
+        const notes = data.notes || 'Cobro de tratamiento realizado';
+
+        // Validar Saldo (Crédito) si fue seleccionado
+        if (paymentMethodId === 'saldo_credito' || paymentMethodId === 5) {
+          if (availCredit <= 0) {
+            toast.error('El paciente no tiene Saldo (Crédito) disponible. Por favor seleccione otro método de pago (Efectivo, Tarjeta, etc.).');
+            return false;
+          }
+          if (amount > availCredit) {
+            toast.error(`El paciente solo tiene ${formatCurrency(availCredit)} disponible en Saldo (Crédito).`);
+            return false;
+          }
+        }
+
+        try {
+          let ptId = null;
+          if (targetVal.startsWith('catalog_')) {
+            const catalogId = Number(targetVal.replace('catalog_', ''));
+            const newPt = await treatmentService.addPatientTreatment({
+              patient_id: patientId,
+              treatment_id: catalogId,
+              doctor_id: doctorId,
+              tooth_number: toothNumber,
+              price: amount,
+              status: 'completado',
+              notes: notes
+            });
+            ptId = newPt.id;
+          } else if (targetVal.startsWith('quoteitem_')) {
+            const quoteItemId = Number(targetVal.replace('quoteitem_', ''));
+            const itemData = (this.acceptedTreatments || []).find(at => at.id === quoteItemId);
+            const newPt = await treatmentService.addPatientTreatment({
+              patient_id: patientId,
+              treatment_id: itemData?.treatment_id || null,
+              doctor_id: doctorId || itemData?.doctor_id || null,
+              tooth_number: toothNumber || itemData?.tooth_number || null,
+              price: amount,
+              status: 'completado',
+              notes: notes || `Proveniente de Presupuesto #${itemData?.quote_number || ''}`
+            });
+            ptId = newPt.id;
+          } else if (targetVal.startsWith('treatment_')) {
+            ptId = Number(targetVal.replace('treatment_', ''));
+            await treatmentService.updatePatientTreatment(ptId, {
+              status: 'completado',
+              price: amount,
+              doctor_id: doctorId,
+              tooth_number: toothNumber,
+              notes: notes
+            });
+          }
+
+          if (ptId) {
+            await paymentService.processTreatmentPayment({
+              patient_id: patientId,
+              treatment_ids: [ptId],
+              document_type: documentType,
+              payment_method_id: paymentMethodId,
+              amount: amount,
+              notes: notes,
+              payment_date: paymentDate
+            });
+            toast.success('¡Tratamiento registrado en Tratamientos Realizados y cobrado con éxito!');
+            setTimeout(() => {
+              window.location.reload();
+            }, 500);
+            return true;
+          }
+          return false;
+        } catch (err) {
+          toast.error(err.message || 'Error al procesar el cobro del tratamiento');
+          return false;
+        }
+      }
+    });
+
+    // Auto-completar monto, diente, doctor y notas al seleccionar tratamiento
+    setTimeout(() => {
+      const selectElem = document.getElementById('modal-charge-treatment-select');
+      const amountElem = document.getElementById('modal-charge-amount');
+      const toothElem = document.getElementById('modal-charge-tooth');
+      const doctorElem = document.getElementById('modal-charge-doctor');
+      const notesElem = document.getElementById('modal-charge-notes');
+
+      if (selectElem) {
+        selectElem.addEventListener('change', () => {
+          const selectedOption = selectElem.options[selectElem.selectedIndex];
+          if (selectedOption && selectedOption.dataset) {
+            const price = selectedOption.dataset.price;
+            const name = selectedOption.dataset.name;
+            const tooth = selectedOption.dataset.tooth;
+            const doctor = selectedOption.dataset.doctor;
+
+            if (price && amountElem) amountElem.value = parseFloat(price).toFixed(2);
+            if (name && notesElem) notesElem.value = `Cobro de tratamiento: ${name}`;
+            if (tooth && toothElem) toothElem.value = tooth;
+            if (doctor && doctorElem) doctorElem.value = doctor;
+          }
+        });
+      }
+    }, 100);
+  }
+
+  showVoidPaymentModal(paymentId, amount) {
+    Modal.confirm(
+      'Anular Pago / Adelantamiento',
+      `¿Está seguro de anular el pago #${paymentId} por un valor de ${formatCurrency(amount)}? Esta acción actualizará el saldo del paciente.`,
+      async () => {
+        try {
+          await paymentService.remove(paymentId);
+          toast.success('Pago anulado exitosamente.');
+          await this.render();
+          this.mount();
+          return true;
+        } catch (err) {
+          toast.error(err.message || 'Error al anular el pago');
+          return false;
+        }
+      }
+    );
+  }
+
+  async showAddDentalHistoryModal() {
+    let doctors = [];
+    try {
+      doctors = await doctorService.getAll().catch(() => []);
+    } catch {}
+
+    const doctorList = Array.isArray(doctors) ? doctors : (doctors?.data || doctors?.rows || []);
+    const doctorOptions = doctorList.map(d => `<option value="${d.id}">Dr/a. ${d.first_name} ${d.last_name || ''}</option>`).join('');
+
+    const content = `
+      <form id="add-dental-history-form">
+        <div class="form-group">
+          <label class="form-label">Procedimiento / Tratamiento Realizado <span style="color: var(--danger-500);">*</span></label>
+          <input type="text" name="procedure_name" class="form-input" placeholder="Ej: Curación de caries, Limpieza profunda, Endodoncia..." required />
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Pieza / Diente # (Opcional)</label>
+            <input type="text" name="tooth_number" class="form-input" placeholder="Ej: 18, 21, Molar..." />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Doctor / Profesional Responsable</label>
+            <select name="doctor_id" class="form-select">
+              <option value="">-- Seleccionar Doctor --</option>
+              ${doctorOptions}
+            </select>
+          </div>
+        </div>
+        <div class="form-group" style="margin-top: var(--space-3);">
+          <label class="form-label">Notas y Evolución Clínica</label>
+          <textarea name="notes" class="form-textarea" rows="3" placeholder="Detalles de la intervención clínica, anestesia usada, evolución del paciente..."></textarea>
+        </div>
+      </form>
+    `;
+
+    Modal.show({
+      title: '📋 Nueva Entrada — Diario / Historial Odontológico',
+      content: content,
+      confirmText: 'Guardar Entrada',
+      onConfirm: async (modalBody) => {
+        const form = modalBody.querySelector('#add-dental-history-form');
+        const formData = new FormData(form);
+        const data = Object.fromEntries(formData.entries());
+
+        try {
+          await patientService.addDentalHistory(this.patientId, {
+            procedure_name: data.procedure_name,
+            tooth_number: data.tooth_number || null,
+            doctor_id: data.doctor_id ? Number(data.doctor_id) : null,
+            notes: data.notes || null
+          });
+          toast.success('¡Entrada agregada al Historial Odontológico exitosamente!');
+          await this.loadPatientData();
+          return true;
+        } catch (err) {
+          toast.error(err.message || 'Error al guardar la entrada en el diario clínico');
+          return false;
+        }
+      }
+    });
+  }
+
+  async showEditDentalHistoryModal(item) {
+    let doctors = [];
+    try {
+      doctors = await doctorService.getAll().catch(() => []);
+    } catch {}
+
+    const doctorList = Array.isArray(doctors) ? doctors : (doctors?.data || doctors?.rows || []);
+    const doctorOptions = doctorList.map(d => `<option value="${d.id}" ${Number(d.id) === Number(item.doctor_id) ? 'selected' : ''}>Dr/a. ${d.first_name} ${d.last_name || ''}</option>`).join('');
+
+    const content = `
+      <form id="edit-dental-history-form">
+        <div class="form-group">
+          <label class="form-label">Procedimiento / Tratamiento Realizado <span style="color: var(--danger-500);">*</span></label>
+          <input type="text" name="procedure_name" class="form-input" value="${item.procedure_name || item.description || ''}" required />
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Pieza / Diente # (Opcional)</label>
+            <input type="text" name="tooth_number" class="form-input" value="${item.tooth_number || ''}" placeholder="Ej: 18, 21..." />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Doctor / Profesional Responsable</label>
+            <select name="doctor_id" class="form-select">
+              <option value="">-- Seleccionar Doctor --</option>
+              ${doctorOptions}
+            </select>
+          </div>
+        </div>
+        <div class="form-group" style="margin-top: var(--space-3);">
+          <label class="form-label">Notas y Evolución Clínica</label>
+          <textarea name="notes" class="form-textarea" rows="3">${item.notes || ''}</textarea>
+        </div>
+      </form>
+    `;
+
+    Modal.show({
+      title: '✏️ Editar Entrada — Diario / Historial Odontológico',
+      content: content,
+      confirmText: 'Guardar Cambios',
+      onConfirm: async (modalBody) => {
+        const form = modalBody.querySelector('#edit-dental-history-form');
+        const formData = new FormData(form);
+        const data = Object.fromEntries(formData.entries());
+
+        try {
+          await patientService.updateDentalHistory(item.id, {
+            procedure_name: data.procedure_name,
+            tooth_number: data.tooth_number || null,
+            doctor_id: data.doctor_id ? Number(data.doctor_id) : null,
+            notes: data.notes || null
+          });
+          toast.success('¡Entrada actualizada exitosamente!');
+          await this.loadPatientData();
+          return true;
+        } catch (err) {
+          toast.error(err.message || 'Error al actualizar la entrada');
+          return false;
+        }
+      }
+    });
+  }
+
+  showDeleteDentalHistoryModal(historyId) {
+    Modal.confirm(
+      'Eliminar Entrada de Historial Odontológico',
+      '¿Está seguro de eliminar esta entrada del diario clínico? Esta acción no se puede deshacer.',
+      async () => {
+        try {
+          await patientService.deleteDentalHistory(historyId);
+          toast.success('Entrada del historial eliminada.');
+          await this.loadPatientData();
+          return true;
+        } catch (err) {
+          toast.error(err.message || 'Error al eliminar la entrada');
+          return false;
+        }
+      }
+    );
   }
 }

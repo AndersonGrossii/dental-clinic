@@ -24,8 +24,12 @@ class InvoiceService {
     return await api.delete(`/invoices/${id}`);
   }
 
-  async createFromQuotation(quotationId, itemIds = null) {
-    return await api.post(`/invoices/from-quotation/${quotationId}`, { itemIds });
+  async createFromQuotation(quotationId, itemIds = null, documentType = 'recibo', itemAllocations = null) {
+    return await api.post(`/invoices/from-quotation/${quotationId}`, { itemIds, document_type: documentType, item_allocations: itemAllocations });
+  }
+
+  async createFromReceipt(receiptId, data = {}) {
+    return await api.post(`/invoices/from-receipt/${receiptId}`, data);
   }
 
   async getStats() {

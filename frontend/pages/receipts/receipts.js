@@ -60,6 +60,11 @@ export class Receipts {
               </div>
               <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                 <button class="btn btn-sm btn-outline print-receipt-btn" data-id="${rec.id}">🖨️ Ver / Imprimir Recibo</button>
+                ${rec.receipt_id ? `
+                  <button class="btn btn-sm btn-info view-linked-invoice-btn" data-id="${rec.receipt_id}">📄 Factura Vinc. #${rec.receipt_id}</button>
+                ` : `
+                  <button class="btn btn-sm btn-primary generate-invoice-from-receipt-btn" data-id="${rec.id}">📄 Generar Factura Oficial</button>
+                `}
                 ${parseFloat(rec.balance || 0) > 0 ? `<button class="btn btn-sm btn-success pay-receipt-btn" data-id="${rec.id}">💳 Registrar Pago Restante</button>` : ''}
                 <button class="btn btn-sm btn-danger delete-receipt-btn" data-id="${rec.id}">✕ Anular Recibo</button>
               </div>
@@ -130,6 +135,21 @@ export class Receipts {
       const payBtn = e.target.closest('.pay-receipt-btn');
       if (payBtn) {
         this.showRegisterPaymentModal(payBtn.getAttribute('data-id'));
+        return;
+      }
+
+      const genInvBtn = e.target.closest('.generate-invoice-from-receipt-btn');
+      if (genInvBtn) {
+        this.showCreateInvoiceFromReceiptModal(genInvBtn.getAttribute('data-id'));
+        return;
+      }
+
+      const viewInvBtn = e.target.closest('.view-linked-invoice-btn');
+      if (viewInvBtn) {
+        const invId = viewInvBtn.getAttribute('data-id');
+        import('../invoices/invoices.js').then(({ Invoices }) => {
+          new Invoices(this.container).printInvoice(invId);
+        });
         return;
       }
 
@@ -212,20 +232,47 @@ export class Receipts {
             <thead>
               <tr>
                 <th>Descripción del Servicio / Concepto</th>
-                <th>Precio Unitario</th>
-                <th>Cant.</th>
-                <th>Total</th>
+                <th style="text-align: right;">Precio Unitario</th>
+                <th style="text-align: center;">Cant.</th>
+                <th style="text-align: right;">Total</th>
               </tr>
             </thead>
             <tbody>
-              ${(rec.items || []).map(item => `
-                <tr>
-                  <td>${item.description}</td>
-                  <td>${formatCurrency(item.unit_price)}</td>
-                  <td>${item.quantity}</td>
-                  <td><strong>${formatCurrency(item.total)}</strong></td>
-                </tr>
-              `).join('')}
+              ${(rec.items || []).map(item => {
+                const isPart = item.is_partial || (item.description && item.description.includes('Abono Parcial'));
+                const isFinalComp = item.is_final_payment_of_partial;
+                const prevP = parseFloat(item.previously_paid || 0);
+                let displayDesc = item.clean_description || item.description;
+                let badgeHtml = '';
+                
+                if (isPart) {
+                  const pct = item.percentage_str || (item.description.match(/- ([\d.]+%)/)?.[1] || '');
+                  const prevStr = prevP > 0 ? ` + ${formatCurrency(prevP)} anteriores` : '';
+                  badgeHtml = `
+                    <div style="font-size: 11px; color: #c2410c; font-weight: 600; margin-top: 3px; background: #fff7ed; border: 1px solid #fdba74; padding: 2px 6px; border-radius: 4px; display: inline-block;">
+                      ⚡ Abono Parcial${pct ? ` (${pct})` : ''}: ${formatCurrency(item.total)} abonados hoy${prevStr} (de ${formatCurrency(item.original_total)})
+                    </div>
+                  `;
+                } else if (isFinalComp) {
+                  badgeHtml = `
+                    <div style="font-size: 11px; color: #15803d; font-weight: 600; margin-top: 3px; background: #f0fdf4; border: 1px solid #86efac; padding: 2px 6px; border-radius: 4px; display: inline-block;">
+                      ✅ Pago Final / Completo (100%): ${formatCurrency(item.total)} abonados hoy + ${formatCurrency(prevP)} anteriores (Total: ${formatCurrency(item.original_total)})
+                    </div>
+                  `;
+                }
+
+                return `
+                  <tr>
+                    <td>
+                      <div><strong>${displayDesc}</strong></div>
+                      ${badgeHtml}
+                    </td>
+                    <td style="text-align: right;">${formatCurrency(item.unit_price)}</td>
+                    <td style="text-align: center;">${item.quantity}</td>
+                    <td style="text-align: right;"><strong>${formatCurrency(item.total)}</strong></td>
+                  </tr>
+                `;
+              }).join('')}
             </tbody>
           </table>
 
@@ -331,6 +378,232 @@ export class Receipts {
     } catch (err) {
       toast.error('Error al preparar registro de pago');
     }
+  }
+
+  async showCreateInvoiceFromReceiptModal(receiptId) {
+    let rec = null;
+    try {
+      rec = await invoiceService.getById(receiptId);
+    } catch (err) {
+      toast.error('Error al cargar datos del recibo');
+      return;
+    }
+    if (!rec) return;
+
+    const totalPaid = parseFloat(rec.amount_paid || rec.total || 0);
+
+    const initialItems = (rec.items || []).map(i => ({
+      description: i.clean_description || i.description || 'Tratamiento Odontológico',
+      quantity: parseInt(i.quantity || 1, 10),
+      unit_price: parseFloat(i.unit_price || i.total || 0),
+      total: parseFloat(i.total || 0)
+    }));
+
+    if (initialItems.length === 0) {
+      initialItems.push({
+        description: `Cobro según Recibo #${rec.invoice_number}`,
+        quantity: 1,
+        unit_price: totalPaid,
+        total: totalPaid
+      });
+    }
+
+    const renderItemRows = (itemsList) => {
+      return itemsList.map((item, idx) => `
+        <tr class="inv-item-row" data-index="${idx}">
+          <td style="padding: 6px 8px;">
+            <input type="text" class="form-input inv-item-desc" value="${(item.description || '').replace(/"/g, '&quot;')}" style="font-size: 13px; width: 100%;" required />
+          </td>
+          <td style="padding: 6px 8px; width: 70px; text-align: center;">
+            <input type="number" min="1" step="1" class="form-input inv-item-qty" value="${item.quantity}" style="font-size: 13px; text-align: center;" required />
+          </td>
+          <td style="padding: 6px 8px; width: 120px; text-align: right;">
+            <input type="number" min="0" step="0.01" class="form-input inv-item-price" value="${item.unit_price}" style="font-size: 13px; text-align: right;" required />
+          </td>
+          <td style="padding: 6px 8px; width: 120px; text-align: right; font-weight: 600;">
+            <span class="inv-item-total-span">${formatCurrency(item.total)}</span>
+          </td>
+          <td style="padding: 6px 8px; width: 40px; text-align: center;">
+            <button type="button" class="btn btn-sm btn-ghost remove-inv-item-btn" style="color: var(--danger-600); padding: 2px 6px;">✕</button>
+          </td>
+        </tr>
+      `).join('');
+    };
+
+    Modal.show({
+      title: `📄 Generar Factura Oficial — desde Recibo #${rec.invoice_number}`,
+      content: `
+        <form id="create-invoice-from-receipt-form">
+          <div style="background: var(--primary-50); border: 1px solid var(--primary-200); padding: 12px 16px; border-radius: var(--radius-md); margin-bottom: var(--space-4); font-size: 13px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span>👤 Paciente: <strong>${rec.patient_name || 'N/A'}</strong></span>
+              <span>🧾 Recibo Originario: <strong>#${rec.invoice_number}</strong></span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span>👨‍⚕️ Especialista: <strong>Dr/a. ${rec.doctor_name || 'Sin asignar'}</strong></span>
+              <span>💰 Monto Cobrado en Recibo: <strong style="color: var(--success-700); font-size: 14px;">${formatCurrency(totalPaid)}</strong></span>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: var(--space-3);">
+            <label class="form-label" style="font-weight: 600;">Fecha de Emisión de la Factura</label>
+            <input type="date" name="invoice_date" class="form-input" value="${new Date().toISOString().split('T')[0]}" required />
+          </div>
+
+          <div class="form-group" style="margin-bottom: var(--space-4);">
+            <label class="form-label" style="font-weight: 600;">Conceptos / Desglose de la Factura Oficial (Personalizable)</label>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">
+              Puede personalizar la descripción, cantidades y precios unitarios que aparecerán en la factura oficial.
+            </div>
+            <div class="table-container" style="border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; margin-bottom: 8px;">
+              <table style="margin: 0; width: 100%;">
+                <thead>
+                  <tr style="background: var(--gray-100);">
+                    <th>Descripción / Concepto</th>
+                    <th style="text-align: center; width: 70px;">Cant.</th>
+                    <th style="text-align: right; width: 120px;">Precio Unit.</th>
+                    <th style="text-align: right; width: 120px;">Total</th>
+                    <th style="width: 40px;"></th>
+                  </tr>
+                </thead>
+                <tbody id="inv-custom-items-tbody">
+                  ${renderItemRows(initialItems)}
+                </tbody>
+              </table>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <button type="button" id="add-inv-custom-item-btn" class="btn btn-sm btn-outline">
+                ➕ Agregar Nuevo Concepto
+              </button>
+              <div style="font-size: 14px; font-weight: 600; color: var(--text-primary);">
+                Total Factura: <span id="custom-inv-total-span" style="color: var(--primary-700); font-size: 16px; font-weight: 700;">${formatCurrency(totalPaid)}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Notas Adicionales / Referencia</label>
+            <input type="text" name="notes" class="form-input" placeholder="Ej: Factura correspondiente a recibo ${rec.invoice_number}" value="Factura oficial vinculada al Recibo #${rec.invoice_number}" />
+          </div>
+        </form>
+      `,
+      confirmText: '📄 Emitir Factura Oficial',
+      cancelText: 'Cancelar',
+      onConfirm: async () => {
+        const form = document.getElementById('create-invoice-from-receipt-form');
+        if (!form) return false;
+
+        const formData = new FormData(form);
+        const invoiceDate = formData.get('invoice_date');
+        const notes = formData.get('notes');
+
+        const items = [];
+        document.querySelectorAll('#inv-custom-items-tbody .inv-item-row').forEach(row => {
+          const desc = row.querySelector('.inv-item-desc')?.value?.trim();
+          const qty = parseInt(row.querySelector('.inv-item-qty')?.value || 1, 10);
+          const price = parseFloat(row.querySelector('.inv-item-price')?.value || 0);
+          if (desc && price >= 0) {
+            items.push({
+              description: desc,
+              quantity: qty,
+              unit_price: price,
+              total: qty * price
+            });
+          }
+        });
+
+        if (items.length === 0) {
+          toast.error('Debe incluir al menos un concepto en la factura.');
+          return false;
+        }
+
+        try {
+          const created = await invoiceService.createFromReceipt(receiptId, {
+            items,
+            notes,
+            invoice_date: invoiceDate
+          });
+          const invObj = created?.data || created;
+          toast.success(`¡Factura oficial #${invObj.invoice_number} creada exitosamente!`);
+
+          const { Invoices } = await import('../invoices/invoices.js');
+          const invoicesPage = new Invoices(this.container);
+          await invoicesPage.printInvoice(invObj.id);
+
+          await this.render();
+          this.mount();
+          return true;
+        } catch (err) {
+          toast.error(err.message || 'Error al emitir la factura');
+          return false;
+        }
+      }
+    });
+
+    const overlay = document.querySelector('.modal-overlay');
+    if (!overlay) return;
+
+    const updateTotals = () => {
+      let grandTotal = 0;
+      overlay.querySelectorAll('#inv-custom-items-tbody .inv-item-row').forEach(row => {
+        const qty = parseFloat(row.querySelector('.inv-item-qty')?.value || 0);
+        const price = parseFloat(row.querySelector('.inv-item-price')?.value || 0);
+        const total = qty * price;
+        const totalSpan = row.querySelector('.inv-item-total-span');
+        if (totalSpan) totalSpan.textContent = formatCurrency(total);
+        grandTotal += total;
+      });
+      const grandTotalSpan = overlay.querySelector('#custom-inv-total-span');
+      if (grandTotalSpan) grandTotalSpan.textContent = formatCurrency(grandTotal);
+    };
+
+    overlay.addEventListener('input', (e) => {
+      if (e.target.matches('.inv-item-qty, .inv-item-price')) {
+        updateTotals();
+      }
+    });
+
+    overlay.addEventListener('click', (e) => {
+      const addBtn = e.target.closest('#add-inv-custom-item-btn');
+      if (addBtn) {
+        const tbody = overlay.querySelector('#inv-custom-items-tbody');
+        if (tbody) {
+          const newIdx = tbody.children.length;
+          const newRow = document.createElement('tr');
+          newRow.className = 'inv-item-row';
+          newRow.setAttribute('data-index', newIdx);
+          newRow.innerHTML = `
+            <td style="padding: 6px 8px;">
+              <input type="text" class="form-input inv-item-desc" placeholder="Descripción del concepto" style="font-size: 13px; width: 100%;" required />
+            </td>
+            <td style="padding: 6px 8px; width: 70px; text-align: center;">
+              <input type="number" min="1" step="1" class="form-input inv-item-qty" value="1" style="font-size: 13px; text-align: center;" required />
+            </td>
+            <td style="padding: 6px 8px; width: 120px; text-align: right;">
+              <input type="number" min="0" step="0.01" class="form-input inv-item-price" value="0.00" style="font-size: 13px; text-align: right;" required />
+            </td>
+            <td style="padding: 6px 8px; width: 120px; text-align: right; font-weight: 600;">
+              <span class="inv-item-total-span">€0.00</span>
+            </td>
+            <td style="padding: 6px 8px; width: 40px; text-align: center;">
+              <button type="button" class="btn btn-sm btn-ghost remove-inv-item-btn" style="color: var(--danger-600); padding: 2px 6px;">✕</button>
+            </td>
+          `;
+          tbody.appendChild(newRow);
+        }
+        return;
+      }
+
+      const removeBtn = e.target.closest('.remove-inv-item-btn');
+      if (removeBtn) {
+        const row = removeBtn.closest('.inv-item-row');
+        if (row) {
+          row.remove();
+          updateTotals();
+        }
+      }
+    });
   }
 
   async confirmDeleteReceipt(id) {

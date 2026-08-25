@@ -1,6 +1,7 @@
 // ============================================
 // Servicio de Tratamientos — Lógica de negocio
 // ============================================
+import { transaction, query } from '../database/pool.js';
 import treatmentRepository from '../repositories/treatment.repository.js';
 import invoiceRepository from '../repositories/invoice.repository.js';
 import patientCreditRepository from '../repositories/patient_credit.repository.js';
@@ -269,10 +270,6 @@ class TreatmentService {
       throw new AppError('Registro de tratamiento del paciente no encontrado.', 404);
     }
 
-    if (existing.is_from_quotation || (existing.notes && existing.notes.includes('Presupuesto #'))) {
-      throw new AppError('Los tratamientos derivados de un presupuesto deben gestionarse desde la pestaña de Tratamientos Aceptados.', 400);
-    }
-
     const updateData = {};
     const allowedFields = ['tooth_number', 'price', 'status', 'notes', 'start_date', 'end_date'];
     for (const field of allowedFields) {
@@ -287,20 +284,7 @@ class TreatmentService {
 
     const updated = await treatmentRepository.updatePatientTreatment(id, updateData);
 
-    // Si cambió a estado completado, registrar débito en patient_credits para subtraer del saldo
-    if (data.status === 'completado' && existing.status !== 'completado') {
-      const completionPrice = parseFloat(data.price !== undefined ? data.price : existing.price);
-      await patientCreditRepository.insert({
-        patient_id: existing.patient_id,
-        clinic_id: existing.clinic_id || 1,
-        type: 'debit',
-        amount: completionPrice,
-        source: 'payment_apply',
-        invoice_id: existing.invoice_id || null,
-        notes: `Consumo por tratamiento concluido: ${existing.treatment_name || 'Tratamiento'}`,
-        created_by: data.created_by || null
-      });
-    }
+
 
     // Si cambió el precio o las notas y tiene una factura asociada sin pagos, actualizar los items e importes de la factura
     if (data.price !== undefined && existing.invoice_id && parseFloat(existing.invoice_amount_paid || 0) <= 0) {
@@ -334,37 +318,73 @@ class TreatmentService {
   }
 
   /**
-   * Elimina un registro de tratamiento del paciente.
-   * Si tiene una factura asociada sin pagos registrados, elimina también dicha factura.
+   * Cancela/revierte un tratamiento realizado del historial del paciente (sea directo o de presupuesto)
+   * y recupera el saldo (balance) del paciente.
+   * @param {number} id - ID del registro (patient_treatments.id o quotation_items.id)
+   * @param {boolean} isPatientTreatment - Indica si pertenece a patient_treatments
+   * @param {number} userId - ID del usuario
+   * @returns {Promise<boolean>}
+   */
+  async cancelRealizedTreatment(id, isPatientTreatment = true, userId = null) {
+    return transaction(async (client) => {
+      if (isPatientTreatment) {
+        const ptRes = await client.query(`SELECT * FROM patient_treatments WHERE id = $1 AND deleted_at IS NULL`, [id]);
+        if (ptRes.rows.length === 0) {
+          throw new AppError('Registro de tratamiento realizado no encontrado.', 404);
+        }
+        const pt = ptRes.rows[0];
+
+        // 1. Soft-delete del tratamiento realizado
+        await client.query(`UPDATE patient_treatments SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1`, [id]);
+
+        // 2. Si proviene de un presupuesto, revertir el ítem a 'pendiente'
+        await client.query(
+          `UPDATE quotation_items SET execution_status = 'pendiente', patient_treatment_id = NULL WHERE patient_treatment_id = $1`,
+          [id]
+        );
+
+        // 3. Si tiene factura o pagos con débito de crédito aplicados, revertir ese consumo en patient_credits
+        if (pt.invoice_id) {
+          await client.query(
+            `UPDATE patient_credits SET deleted_at = NOW() WHERE invoice_id = $1 AND type = 'debit' AND deleted_at IS NULL`,
+            [pt.invoice_id]
+          );
+        }
+      } else {
+        // Es un ítem directo de quotation_items
+        const qiRes = await client.query(`SELECT * FROM quotation_items WHERE id = $1 AND deleted_at IS NULL`, [id]);
+        if (qiRes.rows.length === 0) {
+          throw new AppError('Ítem de presupuesto realizado no encontrado.', 404);
+        }
+        const qi = qiRes.rows[0];
+
+        if (qi.patient_treatment_id) {
+          await client.query(`UPDATE patient_treatments SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1`, [qi.patient_treatment_id]);
+        }
+        await client.query(
+          `UPDATE quotation_items SET execution_status = 'pendiente', patient_treatment_id = NULL WHERE id = $1`,
+          [id]
+        );
+
+        if (qi.invoice_id) {
+          await client.query(
+            `UPDATE patient_credits SET deleted_at = NOW() WHERE invoice_id = $1 AND type = 'debit' AND deleted_at IS NULL`,
+            [qi.invoice_id]
+          );
+        }
+      }
+      return true;
+    });
+  }
+
+  /**
+   * Elimina/cancela un registro de tratamiento del paciente.
+   * Recupera automáticamente el balance del paciente.
    * @param {number} id - ID del registro patient_treatments
    * @returns {Promise<boolean>}
    */
-  async deletePatientTreatment(id) {
-    const existing = await treatmentRepository.findPatientTreatmentById(id);
-    if (!existing) {
-      throw new AppError('Registro de tratamiento del paciente no encontrado.', 404);
-    }
-
-    if (existing.is_from_quotation || (existing.notes && existing.notes.includes('Presupuesto #'))) {
-      throw new AppError('Los tratamientos derivados de un presupuesto deben gestionarse desde la pestaña de Tratamientos Aceptados.', 400);
-    }
-
-    // Si tiene una factura vinculada sin pagos registrados, eliminarla automáticamente
-    if (existing.invoice_id) {
-      const invoice = await invoiceRepository.findByIdWithItems(existing.invoice_id);
-      if (invoice) {
-        const hasPayments = (invoice.payments && invoice.payments.length > 0) || parseFloat(invoice.amount_paid || 0) > 0;
-        if (!hasPayments) {
-          await invoiceRepository.softDelete(existing.invoice_id);
-        }
-      }
-    }
-
-    const deleted = await treatmentRepository.deletePatientTreatment(id);
-    if (!deleted) {
-      throw new AppError('No se pudo eliminar el tratamiento del paciente.', 500);
-    }
-    return true;
+  async deletePatientTreatment(id, userId = null) {
+    return this.cancelRealizedTreatment(id, true, userId);
   }
 }
 

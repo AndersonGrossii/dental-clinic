@@ -280,3 +280,33 @@ export const createNote = async (req, res, next) => {
     next(error);
   }
 };
+
+export const addDentalHistory = async (req, res, next) => {
+  try {
+    const patientId = parseInt(req.params.id, 10);
+    const item = await patientService.addDentalHistory(patientId, req.body);
+    return ApiResponse.created(res, item, 'Entrada de historial odontológico creada exitosamente.');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateDentalHistory = async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.historyId, 10);
+    const item = await patientService.updateDentalHistory(id, req.body);
+    return ApiResponse.success(res, item, 'Entrada de historial actualizada exitosamente.');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteDentalHistory = async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.historyId, 10);
+    await patientService.deleteDentalHistory(id);
+    return ApiResponse.success(res, null, 'Entrada de historial eliminada exitosamente.');
+  } catch (error) {
+    next(error);
+  }
+};

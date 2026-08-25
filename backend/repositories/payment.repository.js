@@ -53,6 +53,12 @@ class PaymentRepository extends BaseRepository {
       paramIndex++;
     }
 
+    if (filters.patient_id) {
+      conditions.push(`COALESCE(pay.patient_id, i.patient_id) = $${paramIndex}`);
+      params.push(filters.patient_id);
+      paramIndex++;
+    }
+
     if (filters.payment_method_id) {
       conditions.push(`pay.payment_method_id = $${paramIndex}`);
       params.push(filters.payment_method_id);
@@ -85,8 +91,8 @@ class PaymentRepository extends BaseRepository {
     const countResult = await query(
       `SELECT COUNT(*) AS total
        FROM payments pay
-       INNER JOIN invoices i ON pay.invoice_id = i.id
-       INNER JOIN patients p ON i.patient_id = p.id
+       LEFT JOIN invoices i ON pay.invoice_id = i.id
+       LEFT JOIN patients p ON COALESCE(pay.patient_id, i.patient_id) = p.id
        LEFT JOIN payment_methods pm ON pay.payment_method_id = pm.id
        ${whereClause}`,
       params
@@ -102,8 +108,8 @@ class PaymentRepository extends BaseRepository {
               p.dni AS patient_dni,
               pm.name AS payment_method_name
        FROM payments pay
-       INNER JOIN invoices i ON pay.invoice_id = i.id
-       INNER JOIN patients p ON i.patient_id = p.id
+       LEFT JOIN invoices i ON pay.invoice_id = i.id
+       LEFT JOIN patients p ON COALESCE(pay.patient_id, i.patient_id) = p.id
        LEFT JOIN payment_methods pm ON pay.payment_method_id = pm.id
        ${whereClause}
        ORDER BY ${safeSortBy} ${safeSortOrder}

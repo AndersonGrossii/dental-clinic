@@ -125,8 +125,19 @@ export const updatePatientTreatment = async (req, res, next) => {
 export const deletePatientTreatment = async (req, res, next) => {
   try {
     const { id } = req.params;
-    await treatmentService.deletePatientTreatment(id);
-    return ApiResponse.success(res, null, 'Tratamiento eliminado del historial del paciente');
+    await treatmentService.deletePatientTreatment(id, req.user?.id);
+    return ApiResponse.success(res, null, 'Tratamiento eliminado del historial del paciente y saldo recuperado');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const cancelRealizedTreatment = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { is_patient_treatment } = req.body;
+    await treatmentService.cancelRealizedTreatment(id, is_patient_treatment !== false, req.user?.id);
+    return ApiResponse.success(res, null, 'Tratamiento cancelado y saldo recuperado exitosamente');
   } catch (error) {
     next(error);
   }

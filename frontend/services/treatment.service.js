@@ -47,6 +47,10 @@ class TreatmentService {
   async deletePatientTreatment(id) {
     return await api.delete(`/treatments/patient/${id}`);
   }
+
+  async cancelRealizedTreatment(id, isPatientTreatment = true) {
+    return await api.post(`/treatments/patient/${id}/cancel-realized`, { is_patient_treatment: isPatientTreatment });
+  }
 }
 
 const treatmentService = new TreatmentService();

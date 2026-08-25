@@ -123,9 +123,12 @@ class QuotationService {
   }
 
   async changeStatus(id, status) {
-    const existing = await quotationRepository.findById(id);
+    const existing = await quotationRepository.findByIdWithItems(id);
     if (!existing) {
       throw new AppError('Cotización no encontrada.', 404);
+    }
+    if (existing.is_closed) {
+      throw new AppError('No se puede cambiar el estado de un presupuesto 100% pagado, realizado y cerrado.', 400);
     }
 
     if (status === 'aceptada') {
@@ -152,23 +155,33 @@ class QuotationService {
     if (item.invoice_id) {
       throw new AppError('Este tratamiento ya ha sido facturado y su estado no puede ser modificado.', 400);
     }
+    const quotation = await quotationRepository.findByIdWithItems(item.quotation_id);
+    if (quotation && quotation.is_closed) {
+      throw new AppError('No se pueden modificar los ítems de un presupuesto 100% pagado, realizado y cerrado.', 400);
+    }
     const updatedItem = await quotationRepository.updateItemStatus(itemId, status);
     return updatedItem;
   }
 
   async acceptAllItems(quotationId) {
-    const existing = await quotationRepository.findById(quotationId);
+    const existing = await quotationRepository.findByIdWithItems(quotationId);
     if (!existing) {
       throw new AppError('Cotización no encontrada.', 404);
+    }
+    if (existing.is_closed) {
+      throw new AppError('No se puede modificar un presupuesto 100% pagado, realizado y cerrado.', 400);
     }
     await quotationRepository.acceptAllItems(quotationId);
     return this.getById(quotationId);
   }
 
   async updateItemsStatusBulk(quotationId, itemsStatusList) {
-    const existing = await quotationRepository.findById(quotationId);
+    const existing = await quotationRepository.findByIdWithItems(quotationId);
     if (!existing) {
       throw new AppError('Cotización no encontrada.', 404);
+    }
+    if (existing.is_closed) {
+      throw new AppError('No se puede modificar un presupuesto 100% pagado, realizado y cerrado.', 400);
     }
     await quotationRepository.updateItemsStatusBulk(quotationId, itemsStatusList);
     return this.getById(quotationId);

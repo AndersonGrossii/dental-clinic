@@ -100,7 +100,6 @@ export class Invoices {
                 <th>Paciente</th>
                 <th>Montante Total</th>
                 <th>Montante Pagado</th>
-                <th>Saldo Restante</th>
                 <th>Estado</th>
                 <th>Fecha Emisión</th>
                 <th style="text-align: right;">Acciones</th>
@@ -634,7 +633,7 @@ export class Invoices {
     const content = `
       <form id="invoice-quote-form">
         <div class="form-group">
-          <label class="form-label">Seleccione el Presupuesto Aceptado <span style="color: var(--danger-500);">*</span></label>
+          <label class="form-label">Seleccione el Presupuesto / Tratamiento Realizado <span style="color: var(--danger-500);">*</span></label>
           <select name="quotation_id" class="form-select" required>
             <option value="">Seleccione un presupuesto...</option>
             ${options}
@@ -852,20 +851,47 @@ export class Invoices {
             <thead>
               <tr>
                 <th>Descripción del Servicio</th>
-                <th>Precio Unitario</th>
-                <th>Cant.</th>
-                <th>Total</th>
+                <th style="text-align: right;">Precio Unitario</th>
+                <th style="text-align: center;">Cant.</th>
+                <th style="text-align: right;">Total</th>
               </tr>
             </thead>
             <tbody>
-              ${invoice.items.map(item => `
-                <tr>
-                  <td>${item.description}</td>
-                  <td>${formatCurrency(item.unit_price)}</td>
-                  <td>${item.quantity}</td>
-                  <td><strong>${formatCurrency(item.total)}</strong></td>
-                </tr>
-              `).join('')}
+              ${(invoice.items || []).map(item => {
+                const isPart = item.is_partial || (item.description && item.description.includes('Abono Parcial'));
+                const isFinalComp = item.is_final_payment_of_partial;
+                const prevP = parseFloat(item.previously_paid || 0);
+                let displayDesc = item.clean_description || item.description;
+                let badgeHtml = '';
+                
+                if (isPart) {
+                  const pct = item.percentage_str || (item.description.match(/- ([\d.]+%)/)?.[1] || '');
+                  const prevStr = prevP > 0 ? ` + ${formatCurrency(prevP)} anteriores` : '';
+                  badgeHtml = `
+                    <div style="font-size: 11px; color: #c2410c; font-weight: 600; margin-top: 3px; background: #fff7ed; border: 1px solid #fdba74; padding: 2px 6px; border-radius: 4px; display: inline-block;">
+                      ⚡ Abono Parcial${pct ? ` (${pct})` : ''}: ${formatCurrency(item.total)} abonados hoy${prevStr} (de ${formatCurrency(item.original_total)})
+                    </div>
+                  `;
+                } else if (isFinalComp) {
+                  badgeHtml = `
+                    <div style="font-size: 11px; color: #15803d; font-weight: 600; margin-top: 3px; background: #f0fdf4; border: 1px solid #86efac; padding: 2px 6px; border-radius: 4px; display: inline-block;">
+                      ✅ Pago Final / Completo (100%): ${formatCurrency(item.total)} abonados hoy + ${formatCurrency(prevP)} anteriores (Total: ${formatCurrency(item.original_total)})
+                    </div>
+                  `;
+                }
+
+                return `
+                  <tr>
+                    <td>
+                      <div><strong>${displayDesc}</strong></div>
+                      ${badgeHtml}
+                    </td>
+                    <td style="text-align: right;">${formatCurrency(item.unit_price)}</td>
+                    <td style="text-align: center;">${item.quantity}</td>
+                    <td style="text-align: right;"><strong>${formatCurrency(item.total)}</strong></td>
+                  </tr>
+                `;
+              }).join('')}
             </tbody>
           </table>
 
@@ -1113,10 +1139,6 @@ export class Invoices {
               <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--success-600); margin-top: 2px;">
                 <span>Pagado:</span>
                 <strong>${formatCurrency(invoice.amount_paid || 0)}</strong>
-              </div>
-              <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; color: var(--danger-600);">
-                <span>Saldo Restante:</span>
-                <strong id="calc-balance">${formatCurrency(invoice.balance || 0)}</strong>
               </div>
             </div>
           </div>

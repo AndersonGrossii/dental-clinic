@@ -66,19 +66,84 @@ class QuotationRepository extends BaseRepository {
               CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
               p.dni AS patient_dni,
               CONCAT(u.first_name, ' ', u.last_name) AS doctor_name,
-              inv.id AS invoice_id
+              inv.id AS invoice_id,
+              COALESCE(
+                (SELECT COUNT(*) FROM quotation_items qi WHERE qi.quotation_id = q.id),
+                0
+              ) AS items_count,
+              COALESCE(
+                (SELECT COUNT(*) FROM quotation_items qi WHERE qi.quotation_id = q.id AND qi.status = 'pendiente'),
+                0
+              ) AS pending_items_count,
+              COALESCE(
+                (SELECT COUNT(*) FROM quotation_items qi WHERE qi.quotation_id = q.id AND qi.status = 'aceptado' AND (qi.execution_status IS NULL OR qi.execution_status != 'realizado')),
+                0
+              ) AS unrealized_accepted_count,
+              COALESCE(
+                (SELECT SUM(qi.total)
+                 FROM quotation_items qi
+                 WHERE qi.quotation_id = q.id AND qi.status = 'aceptado'),
+                0
+              ) AS accepted_total,
+              COALESCE(
+                (SELECT SUM(inv2.amount_paid)
+                 FROM invoices inv2
+                 WHERE inv2.quotation_id = q.id
+                   AND inv2.deleted_at IS NULL
+                   AND inv2.status != 'cancelada'),
+                (SELECT SUM(ii.total * (CASE WHEN inv2.total > 0 THEN (inv2.amount_paid / inv2.total) ELSE 0 END))
+                 FROM invoice_items ii
+                 JOIN invoices inv2 ON ii.invoice_id = inv2.id
+                 JOIN quotation_items qi ON ii.quotation_item_id = qi.id
+                 WHERE qi.quotation_id = q.id
+                   AND inv2.deleted_at IS NULL
+                   AND inv2.status != 'cancelada'),
+                0
+              ) AS amount_paid
        FROM quotations q
        INNER JOIN patients p ON q.patient_id = p.id
        LEFT JOIN doctors d ON q.doctor_id = d.id
        LEFT JOIN users u ON d.user_id = u.id
-       LEFT JOIN invoices inv ON inv.quotation_id = q.id AND inv.deleted_at IS NULL
+       LEFT JOIN (
+         SELECT quotation_id, MAX(id) AS id
+         FROM invoices
+         WHERE deleted_at IS NULL
+         GROUP BY quotation_id
+       ) inv ON inv.quotation_id = q.id
        ${whereClause}
        ORDER BY ${safeSortBy} ${safeSortOrder}
        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
       [...params, limit, offset]
     );
 
-    return { rows: dataResult.rows, total };
+    const rows = dataResult.rows.map(row => {
+      const qTotal = parseFloat(row.total || 0);
+      const qAccepted = parseFloat(row.accepted_total || 0);
+      const targetTotal = (qAccepted > 0 && (row.status === 'parcial' || row.status === 'aceptada')) ? qAccepted : qTotal;
+      const qPaid = parseFloat(row.amount_paid || 0);
+      const remainingBalance = Math.max(0, parseFloat((targetTotal - qPaid).toFixed(2)));
+      let paymentStatus = 'ninguno';
+      if (qPaid >= targetTotal - 0.001 && targetTotal > 0) {
+        paymentStatus = 'pagado';
+      } else if (qPaid > 0) {
+        paymentStatus = 'parcial';
+      }
+      const itemsCount = parseInt(row.items_count || 0, 10);
+      const pendingItemsCount = parseInt(row.pending_items_count || 0, 10);
+      const unrealizedAcceptedCount = parseInt(row.unrealized_accepted_count || 0, 10);
+      const isClosed = itemsCount > 0 && pendingItemsCount === 0 && unrealizedAcceptedCount === 0 && paymentStatus === 'pagado';
+
+      return {
+        ...row,
+        accepted_total: qAccepted > 0 ? qAccepted : qTotal,
+        amount_paid: qPaid,
+        remaining_balance: remainingBalance,
+        payment_status: paymentStatus,
+        is_closed: isClosed,
+      };
+    });
+
+    return { rows, total };
   }
 
   async findByIdWithItems(id) {
@@ -105,24 +170,81 @@ class QuotationRepository extends BaseRepository {
 
     if (quotationResult.rows.length === 0) return null;
 
-    const itemConditions = ['qi.quotation_id = $1'];
-    const itemParams = [id];
-    scopeClinic(itemConditions, itemParams, 'qi');
-
     const itemsResult = await query(
       `SELECT qi.*,
-              t.name AS treatment_name,
-              t.code AS treatment_code
+              COALESCE(
+                (SELECT SUM(ii.total * (CASE WHEN inv2.total > 0 THEN (inv2.amount_paid / inv2.total) ELSE 0 END))
+                 FROM invoice_items ii
+                 JOIN invoices inv2 ON ii.invoice_id = inv2.id
+                 WHERE (ii.quotation_item_id = qi.id 
+                     OR (ii.patient_treatment_id IS NOT NULL AND ii.patient_treatment_id = qi.patient_treatment_id))
+                   AND inv2.deleted_at IS NULL
+                   AND inv2.status != 'cancelada'),
+                0
+              ) AS amount_paid,
+              COALESCE(qi.invoice_id, inv.id) AS invoice_id,
+              COALESCE(inv.invoice_number, '') AS invoice_number,
+              t.name AS catalog_treatment_name
        FROM quotation_items qi
+       LEFT JOIN (
+         SELECT COALESCE(ii.quotation_item_id, 0) AS quotation_item_id, MAX(i.id) AS id, MAX(i.invoice_number) AS invoice_number
+         FROM invoice_items ii
+         JOIN invoices i ON ii.invoice_id = i.id
+         WHERE i.deleted_at IS NULL
+         GROUP BY ii.quotation_item_id
+       ) inv ON inv.quotation_item_id = qi.id
        LEFT JOIN treatments t ON qi.treatment_id = t.id
-       WHERE ${itemConditions.join(' AND ')}
+       WHERE qi.quotation_id = $1
        ORDER BY qi.id ASC`,
-      itemParams
+      [id]
     );
+
+    const processedItems = itemsResult.rows.map(item => {
+      const itemTotal = parseFloat(item.total || 0);
+      const amountPaid = parseFloat(item.amount_paid || 0);
+      const remainingBalance = Math.max(0, parseFloat((itemTotal - amountPaid).toFixed(2)));
+      let paymentStatus = 'ninguno';
+      if (amountPaid >= itemTotal - 0.001 && itemTotal > 0) {
+        paymentStatus = 'pagado';
+      } else if (amountPaid > 0) {
+        paymentStatus = 'parcial';
+      }
+      return {
+        ...item,
+        amount_paid: amountPaid,
+        remaining_balance: remainingBalance,
+        payment_status: paymentStatus,
+      };
+    });
+
+    const qTotal = parseFloat(quotationResult.rows[0].total || 0);
+    const acceptedItems = processedItems.filter(i => i.status === 'aceptado');
+    const qAccepted = acceptedItems.length > 0
+      ? parseFloat(acceptedItems.reduce((acc, i) => acc + parseFloat(i.total || 0), 0).toFixed(2))
+      : 0;
+    const targetTotal = (qAccepted > 0 && (quotationResult.rows[0].status === 'parcial' || quotationResult.rows[0].status === 'aceptada')) ? qAccepted : qTotal;
+
+    const totalPaid = parseFloat(processedItems.reduce((acc, i) => acc + i.amount_paid, 0).toFixed(2));
+    const remainingBalance = Math.max(0, parseFloat((targetTotal - totalPaid).toFixed(2)));
+    let paymentStatus = 'ninguno';
+    if (totalPaid >= targetTotal - 0.001 && targetTotal > 0) {
+      paymentStatus = 'pagado';
+    } else if (totalPaid > 0) {
+      paymentStatus = 'parcial';
+    }
+
+    const allItemsDecided = processedItems.length > 0 && processedItems.every(i => i.status === 'aceptado' || i.status === 'rechazado');
+    const allAcceptedRealized = acceptedItems.length > 0 && acceptedItems.every(i => i.execution_status === 'realizado');
+    const isClosed = allItemsDecided && allAcceptedRealized && (paymentStatus === 'pagado');
 
     return {
       ...quotationResult.rows[0],
-      items: itemsResult.rows,
+      accepted_total: qAccepted > 0 ? qAccepted : qTotal,
+      amount_paid: totalPaid,
+      remaining_balance: remainingBalance,
+      payment_status: paymentStatus,
+      is_closed: isClosed,
+      items: processedItems,
     };
   }
 
@@ -316,13 +438,43 @@ class QuotationRepository extends BaseRepository {
     async getAcceptedItemsByPatient(patientId) {
     const queryStr = `
       SELECT 
+        pt.id,
+        COALESCE(t.name, 'Tratamiento') AS description,
+        1 AS quantity,
+        pt.price AS unit_price,
+        pt.price AS total,
+        pt.tooth_number,
+        'realizado' AS execution_status,
+        pt.created_at,
+        COALESCE(i.invoice_number, q.quote_number, 'Cobro Directo') AS quote_number,
+        COALESCE(pt.doctor_id, q.doctor_id) AS doctor_id,
+        pt.clinic_id,
+        COALESCE(pt.tax_rate, 0) AS quote_tax_rate,
+        d.first_name AS doctor_first_name,
+        d.last_name AS doctor_last_name,
+        t.name AS catalog_treatment_name,
+        true AS is_patient_treatment
+      FROM patient_treatments pt
+      LEFT JOIN treatments t ON pt.treatment_id = t.id
+      LEFT JOIN invoices i ON pt.invoice_id = i.id
+      LEFT JOIN quotation_items qi ON qi.patient_treatment_id = pt.id
+      LEFT JOIN quotations q ON qi.quotation_id = q.id
+      LEFT JOIN doctors doc ON COALESCE(pt.doctor_id, q.doctor_id) = doc.id
+      LEFT JOIN users d ON doc.user_id = d.id
+      WHERE pt.patient_id = $1
+        AND pt.status = 'completado'
+        AND pt.deleted_at IS NULL
+
+      UNION ALL
+
+      SELECT 
         qi.id,
         qi.description,
         qi.quantity,
         qi.unit_price,
         qi.total,
         qi.tooth_number,
-        qi.execution_status,
+        'realizado' AS execution_status,
         qi.created_at,
         q.quote_number,
         q.doctor_id,
@@ -339,40 +491,9 @@ class QuotationRepository extends BaseRepository {
       LEFT JOIN treatments t ON qi.treatment_id = t.id
       WHERE q.patient_id = $1
         AND (qi.status = 'aceptado' OR q.status = 'aceptada')
-        AND COALESCE(qi.execution_status, 'pendiente') != 'realizado'
+        AND qi.execution_status = 'realizado'
+        AND qi.patient_treatment_id IS NULL
         AND q.deleted_at IS NULL
-
-      UNION ALL
-
-      SELECT 
-        pt.id,
-        COALESCE(t.name, 'Tratamiento') AS description,
-        1 AS quantity,
-        pt.price AS unit_price,
-        pt.price AS total,
-        pt.tooth_number,
-        CASE 
-          WHEN pt.status = 'completado' THEN 'realizado'
-          WHEN pt.status = 'en_progreso' THEN 'en_proceso'
-          ELSE 'pendiente'
-        END AS execution_status,
-        pt.created_at,
-        COALESCE(i.invoice_number, 'Cobro Directo') AS quote_number,
-        pt.doctor_id,
-        pt.clinic_id,
-        COALESCE(pt.tax_rate, 0) AS quote_tax_rate,
-        d.first_name AS doctor_first_name,
-        d.last_name AS doctor_last_name,
-        t.name AS catalog_treatment_name,
-        true AS is_patient_treatment
-      FROM patient_treatments pt
-      LEFT JOIN treatments t ON pt.treatment_id = t.id
-      LEFT JOIN invoices i ON pt.invoice_id = i.id
-      LEFT JOIN doctors doc ON pt.doctor_id = doc.id
-      LEFT JOIN users d ON doc.user_id = d.id
-      WHERE pt.patient_id = $1
-        AND pt.status IN ('pendiente', 'en_progreso')
-        AND pt.deleted_at IS NULL
 
       ORDER BY created_at DESC
     `;
@@ -444,12 +565,14 @@ class QuotationRepository extends BaseRepository {
           }
         }
       } else if (executionStatus === 'realizado') {
+        const assignedDoctorId = item.quote_doctor_id || item.doctor_id || null;
+
         if (patientTreatmentId) {
           // Si ya existía un ID de tratamiento previamente soft-deleted, restaurarlo
           const quoteTaxRate = parseFloat(item.quote_tax_rate || 0);
           await client.query(
-            `UPDATE patient_treatments SET deleted_at = NULL, tax_rate = $2, updated_at = NOW() WHERE id = $1`,
-            [patientTreatmentId, quoteTaxRate]
+            `UPDATE patient_treatments SET deleted_at = NULL, doctor_id = COALESCE(doctor_id, $2), tax_rate = $3, updated_at = NOW() WHERE id = $1`,
+            [patientTreatmentId, assignedDoctorId, quoteTaxRate]
           );
         } else {
           let treatmentId = item.treatment_id;
@@ -492,28 +615,26 @@ class QuotationRepository extends BaseRepository {
                  ($1, $2, $3, $4, $5, $6, 'completado', $7, $8, NOW(), $9${item.clinic_id ? ', $10' : ''})
                RETURNING id`,
               item.clinic_id
-                ? [item.patient_id, treatmentId, item.doctor_id || null, item.tooth_number || null, item.total, quoteTaxRate, notesText, item.invoice_id || null, userId || null, item.clinic_id]
-                : [item.patient_id, treatmentId, item.doctor_id || null, item.tooth_number || null, item.total, quoteTaxRate, notesText, item.invoice_id || null, userId || null]
+                ? [item.patient_id, treatmentId, assignedDoctorId, item.tooth_number || null, item.total, quoteTaxRate, notesText, item.invoice_id || null, userId || null, item.clinic_id]
+                : [item.patient_id, treatmentId, assignedDoctorId, item.tooth_number || null, item.total, quoteTaxRate, notesText, item.invoice_id || null, userId || null]
             );
             patientTreatmentId = ptRes.rows[0].id;
 
-            // Registrar débito en patient_credits por la conclusión del tratamiento del presupuesto
-            await client.query(
-              `INSERT INTO patient_credits (patient_id, clinic_id, type, amount, source, invoice_id, notes, created_by)
-               VALUES ($1, $2, 'debit', $3, 'payment_apply', $4, $5, $6)`,
-              [item.patient_id, item.clinic_id || 1, item.total, item.invoice_id || null, `Consumo por tratamiento concluido de Presupuesto #${item.quote_number}`, userId || null]
-            );
           }
         }
       }
 
+      const newStatus = (executionStatus === 'realizado' && (item.status === 'pendiente' || !item.status)) ? 'aceptado' : item.status;
+
       const updatedItemRes = await client.query(
         `UPDATE quotation_items 
-         SET execution_status = $1, patient_treatment_id = $2 
-         WHERE id = $3 
+         SET execution_status = $1, status = $2, patient_treatment_id = $3 
+         WHERE id = $4 
          RETURNING *`,
-        [executionStatus, patientTreatmentId, itemId]
+        [executionStatus, newStatus, patientTreatmentId, itemId]
       );
+
+      await this.recalculateQuotationStatus(item.quotation_id, client);
 
       return updatedItemRes.rows[0];
     });

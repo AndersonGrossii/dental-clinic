@@ -10,7 +10,13 @@ export const createPaymentRules = [
   {
     field: 'invoice_id',
     label: 'Factura',
-    required: true,
+    required: false,
+    type: 'number',
+  },
+  {
+    field: 'patient_id',
+    label: 'Paciente',
+    required: false,
     type: 'number',
   },
   {

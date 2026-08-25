@@ -127,4 +127,13 @@ router.post('/:id/notes', roleMiddleware('propietario', 'direccion', 'doctor', '
  */
 router.get('/:id/prescriptions', allRoles, prescriptionController.getByPatient);
 
+/**
+ * @route   POST /api/v1/patients/:id/dental-history
+ * @desc    Crear entrada en historial odontológico / diario clínico
+ * @access  Propietario, Dirección, Doctor, Higienista
+ */
+router.post('/:id/dental-history', roleMiddleware('propietario', 'direccion', 'doctor', 'higienista'), patientController.addDentalHistory);
+router.put('/dental-history/:historyId', roleMiddleware('propietario', 'direccion', 'doctor', 'higienista'), patientController.updateDentalHistory);
+router.delete('/dental-history/:historyId', roleMiddleware('propietario', 'direccion', 'doctor', 'higienista'), patientController.deleteDentalHistory);
+
 export default router;

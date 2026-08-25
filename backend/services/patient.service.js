@@ -418,6 +418,28 @@ class PatientService {
       data.type || 'clinica'
     );
   }
+
+  async addDentalHistory(patientId, data) {
+    const patient = await patientRepository.findById(patientId);
+    if (!patient) {
+      throw new AppError('Paciente no encontrado.', 404);
+    }
+    return await patientRepository.addDentalHistory({
+      patient_id: patientId,
+      doctor_id: data.doctor_id || null,
+      tooth_number: data.tooth_number || null,
+      procedure_name: data.procedure_name || data.name || 'Procedimiento Odontológico',
+      notes: data.notes || null
+    });
+  }
+
+  async updateDentalHistory(id, data) {
+    return await patientRepository.updateDentalHistory(id, data);
+  }
+
+  async deleteDentalHistory(id) {
+    return await patientRepository.deleteDentalHistory(id);
+  }
 }
 
 export default new PatientService();

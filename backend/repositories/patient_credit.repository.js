@@ -102,7 +102,7 @@ class PatientCreditRepository extends BaseRepository {
        WHERE ${conditions.join(' AND ')}`,
       params
     );
-    return parseFloat(result.rows[0].balance);
+    return Math.max(0, parseFloat(result.rows[0].balance || 0));
   }
 
   /**

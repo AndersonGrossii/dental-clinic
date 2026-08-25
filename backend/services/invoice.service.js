@@ -406,24 +406,73 @@ class InvoiceService {
    * @returns {Promise<object>} Factura creada
    * @throws {AppError} Si la cotización no existe o no está aceptada
    */
-  async createFromQuotation(quotationId, userId, selectedItemIds = null) {
+  async createFromQuotation(quotationId, userId, selectedItemIds = null, documentType = 'factura', itemAllocations = null) {
     const quotation = await quotationRepository.findByIdWithItems(quotationId);
     if (!quotation) {
       throw new AppError('Cotización no encontrada.', 404);
     }
 
-    let itemsToBill = quotation.items || [];
-    if (Array.isArray(selectedItemIds) && selectedItemIds.length > 0) {
+    const allItems = quotation.items || [];
+    let itemsToBill = [];
+    const itemAllocMap = new Map();
+
+    if (Array.isArray(itemAllocations) && itemAllocations.length > 0) {
+      itemAllocations.forEach(alloc => {
+        if (alloc && alloc.id !== undefined && alloc.amount !== undefined) {
+          itemAllocMap.set(String(alloc.id), parseFloat(alloc.amount || 0));
+        }
+      });
+    } else if (itemAllocations && typeof itemAllocations === 'object') {
+      Object.entries(itemAllocations).forEach(([id, amt]) => {
+        itemAllocMap.set(String(id), parseFloat(amt || 0));
+      });
+    }
+
+    if (itemAllocMap.size > 0) {
+      itemsToBill = allItems.filter(item => itemAllocMap.has(String(item.id)) && itemAllocMap.get(String(item.id)) > 0);
+    } else if (Array.isArray(selectedItemIds) && selectedItemIds.length > 0) {
       const idSet = new Set(selectedItemIds.map(id => String(id)));
-      itemsToBill = quotation.items.filter(item => idSet.has(String(item.id)));
+      itemsToBill = allItems.filter(item => idSet.has(String(item.id)));
+    } else {
+      itemsToBill = allItems.filter(item => (item.status || 'pendiente') === 'aceptado');
+      if (itemsToBill.length === 0 && (quotation.status === 'aceptada' || quotation.status === 'parcial')) {
+        itemsToBill = allItems;
+      }
     }
 
     if (itemsToBill.length === 0) {
       throw new AppError('Debe seleccionar al menos un ítem válido para facturar.', 400);
     }
 
-    // Calcular subtotales y totales para los ítems seleccionados
-    const subtotal = parseFloat(itemsToBill.reduce((acc, item) => acc + parseFloat(item.total || 0), 0).toFixed(2));
+    const items = itemsToBill.map((item) => {
+      const allocatedAmount = itemAllocMap.has(String(item.id))
+        ? itemAllocMap.get(String(item.id))
+        : parseFloat(item.total || 0);
+
+      const fullPrice = parseFloat(item.total || 0);
+      const isPartial = allocatedAmount < fullPrice - 0.001;
+      const pctRaw = fullPrice > 0 ? (allocatedAmount / fullPrice) * 100 : 100;
+      const pctStr = pctRaw % 1 === 0 ? pctRaw.toFixed(0) : pctRaw.toFixed(1);
+
+      let desc = item.description;
+      if (isPartial) {
+        desc += ` (Abono Parcial: ${allocatedAmount.toFixed(2)}€ / ${fullPrice.toFixed(2)}€ - ${pctStr}%)`;
+      } else if (fullPrice > 0) {
+        desc += ` (Pago Completo: 100%)`;
+      }
+
+      return {
+        treatment_id: item.treatment_id,
+        description: desc,
+        quantity: 1,
+        unit_price: allocatedAmount,
+        subtotal: allocatedAmount,
+        tooth_number: item.tooth_number || null,
+        quotation_item_id: item.id,
+      };
+    });
+
+    const subtotal = parseFloat(items.reduce((acc, item) => acc + item.subtotal, 0).toFixed(2));
     const taxRate = parseFloat(quotation.tax_rate || 0);
     const discountPct = parseFloat(quotation.discount_percentage || 0);
     const discountAmount = parseFloat((subtotal * (discountPct / 100)).toFixed(2));
@@ -431,11 +480,15 @@ class InvoiceService {
     const taxAmount = parseFloat((taxableAmount * (taxRate / 100)).toFixed(2));
     const total = parseFloat((taxableAmount + taxAmount).toFixed(2));
 
-    const invoiceNumber = await invoiceRepository.generateNumber();
+    const docType = documentType === 'recibo' ? 'recibo' : 'factura';
+    const invoiceNumber = docType === 'recibo'
+      ? await invoiceRepository.generateReceiptNumber()
+      : await invoiceRepository.generateNumber();
 
-    const isPartial = itemsToBill.length < (quotation.items || []).length;
+    const isPartial = itemsToBill.length < allItems.length;
     const invoiceData = {
       invoice_number: invoiceNumber,
+      document_type: docType,
       quotation_id: quotation.id,
       patient_id: quotation.patient_id,
       doctor_id: quotation.doctor_id,
@@ -452,22 +505,10 @@ class InvoiceService {
       created_by: userId,
     };
 
-    const items = itemsToBill.map((item) => ({
-      treatment_id: item.treatment_id,
-      description: item.description,
-      quantity: item.quantity,
-      unit_price: item.unit_price,
-      subtotal: item.total,
-    }));
-
-    // Actualizar estado de cotización a 'aceptada' si estaba en borrador/enviada
-    if (quotation.status !== 'aceptada') {
-      await quotationRepository.update(quotation.id, { status: 'aceptada' });
-    }
+    await quotationRepository.recalculateQuotationStatus(quotation.id);
 
     const createdInvoice = await invoiceRepository.createWithItems(invoiceData, items);
 
-    // Marcar ítems de la cotización como facturados (vinculados al ID de factura)
     const billedItemIds = itemsToBill.map(i => i.id);
     if (billedItemIds.length > 0) {
       await quotationRepository.markItemsInvoiced(billedItemIds, createdInvoice.id);
@@ -493,6 +534,71 @@ class InvoiceService {
    * Obtiene estadísticas generales de facturación.
    * @returns {Promise<object>} Conteo de pendientes, ingresos totales, etc.
    */
+  async createFromReceipt(receiptId, userId, customData = {}) {
+    const receipt = await invoiceRepository.findByIdWithItems(receiptId);
+    if (!receipt) {
+      throw new AppError('Recibo de pago no encontrado.', 404);
+    }
+
+    const { items = [], notes = null, invoice_date = null } = customData;
+
+    // Custom items provided by user or default from receipt items
+    const invoiceItems = (Array.isArray(items) && items.length > 0)
+      ? items.map(item => ({
+          description: item.description || 'Tratamiento Odontológico',
+          quantity: parseInt(item.quantity || 1, 10),
+          unit_price: parseFloat(item.unit_price || 0),
+          total: parseFloat(item.total || (parseFloat(item.quantity || 1) * parseFloat(item.unit_price || 0))),
+          treatment_id: item.treatment_id || null,
+        }))
+      : (receipt.items || []).map(item => ({
+          description: item.clean_description || item.description,
+          quantity: parseInt(item.quantity || 1, 10),
+          unit_price: parseFloat(item.unit_price || item.total || 0),
+          total: parseFloat(item.total || 0),
+          treatment_id: item.treatment_id || null,
+          quotation_item_id: item.quotation_item_id || null,
+        }));
+
+    if (invoiceItems.length === 0) {
+      invoiceItems.push({
+        description: `Cobro según Recibo #${receipt.invoice_number}`,
+        quantity: 1,
+        unit_price: parseFloat(receipt.amount_paid || receipt.total || 0),
+        total: parseFloat(receipt.amount_paid || receipt.total || 0),
+      });
+    }
+
+    const subtotal = invoiceItems.reduce((sum, item) => sum + item.total, 0);
+
+    const invoiceData = {
+      patient_id: receipt.patient_id,
+      doctor_id: receipt.doctor_id,
+      clinic_id: receipt.clinic_id,
+      quotation_id: receipt.quotation_id || null,
+      receipt_id: receipt.id,
+      document_type: 'factura',
+      subtotal,
+      tax_rate: 0,
+      tax_amount: 0,
+      discount_percentage: 0,
+      discount_amount: 0,
+      total: subtotal,
+      amount_paid: subtotal,
+      balance: 0,
+      status: 'pagada',
+      notes: notes || `Factura oficial vinculada al Recibo #${receipt.invoice_number}`,
+      created_by: userId,
+    };
+
+    const createdInvoice = await invoiceRepository.createWithItems(invoiceData, invoiceItems);
+
+    // Link receipt to this invoice
+    await invoiceRepository.update(receipt.id, { receipt_id: createdInvoice.id });
+
+    return createdInvoice;
+  }
+
   getClinicCondition(alias = '') {
     const store = als.getStore();
     if (!store || !store.clinicId) return '';

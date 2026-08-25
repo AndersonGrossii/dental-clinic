@@ -59,6 +59,7 @@ export const toPatientDTO = (row) => {
       totalDebit: parseFloat(row.total_debit) || 0,
       totalCredit: parseFloat(row.total_credit) || 0,
       balance: parseFloat(row.balance) || 0,
+      availableCredit: parseFloat(row.available_credit) || 0,
     },
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -85,6 +86,7 @@ export const toPatientDTO = (row) => {
     total_debit: parseFloat(row.total_debit) || 0,
     total_credit: parseFloat(row.total_credit) || 0,
     balance: parseFloat(row.balance) || 0,
+    available_credit: parseFloat(row.available_credit) || 0,
   };
 };
 
@@ -126,5 +128,6 @@ export const toPatientListDTO = (row) => {
     total_debit: parseFloat(row.total_debit) || 0,
     total_credit: parseFloat(row.total_credit) || 0,
     balance: parseFloat(row.balance) || 0,
+    available_credit: parseFloat(row.available_credit) || 0,
   };
 };

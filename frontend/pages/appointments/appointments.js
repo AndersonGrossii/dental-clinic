@@ -521,7 +521,7 @@ export class Appointments {
     const todayStr = this.toDateStr(new Date());
     const dayNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
-    const slotDuration = 30;
+    const slotDuration = 15;
     const slots = [];
     for (let m = 540; m < 1200; m += slotDuration) {
       slots.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
@@ -652,7 +652,7 @@ export class Appointments {
     const isWeekendDay = this.currentDate.getDay() === 0 || this.currentDate.getDay() === 6;
     const dow = this.currentDate.getDay();
 
-    const slotDuration = 30;
+    const slotDuration = 15;
     const slots = [];
     for (let m = 540; m < 1200; m += slotDuration) {
       slots.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);

@@ -43,6 +43,18 @@ class PatientService {
   async createNote(id, data) {
     return await api.post(`/patients/${id}/notes`, data);
   }
+
+  async addDentalHistory(id, data) {
+    return await api.post(`/patients/${id}/dental-history`, data);
+  }
+
+  async updateDentalHistory(historyId, data) {
+    return await api.put(`/patients/dental-history/${historyId}`, data);
+  }
+
+  async deleteDentalHistory(historyId) {
+    return await api.delete(`/patients/dental-history/${historyId}`);
+  }
 }
 
 const patientService = new PatientService();

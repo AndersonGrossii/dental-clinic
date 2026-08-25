@@ -124,9 +124,13 @@ class PaymentService {
 
       const totalGrossRemaining = treatmentGrossPrices.reduce((sum, t) => sum + t.gross_remaining, 0);
 
+      // Verificar si el método de pago seleccionado es Saldo (Crédito)
+      const pmRes = await client.query(`SELECT name FROM payment_methods WHERE id = $1`, [payment_method_id]);
+      const isSaldoCredito = pmRes.rows[0]?.name === 'saldo_credito';
+
       // Monto efectivo (caja) + monto cubierto con saldo a favor del paciente
-      const cashAmount = parseFloat(amount !== undefined && amount !== null ? amount : totalGrossRemaining);
-      const creditWanted = parseFloat(credit_used || 0);
+      const cashAmount = isSaldoCredito ? 0 : parseFloat(amount !== undefined && amount !== null ? amount : totalGrossRemaining);
+      const creditWanted = isSaldoCredito ? parseFloat(amount !== undefined && amount !== null ? amount : totalGrossRemaining) : parseFloat(credit_used || 0);
 
       if (isNaN(cashAmount) || cashAmount < 0) {
         throw new AppError('El monto a pagar no es válido.', 400);
@@ -230,12 +234,12 @@ class PaymentService {
           [patient_id, clinicId || 1, creditApplied, createdDoc.id, createdPayment.id, 'Uso de saldo a favor en pago de tratamiento', userId]
         );
       }
-      if (cashAmount > 0) {
-        // Crédito: el monto pagado queda registrado como crédito en cuenta (balance)
+      if (cashSurplus > 0) {
+        // Crédito: sobrepago registrado como saldo a favor
         await client.query(
           `INSERT INTO patient_credits (patient_id, clinic_id, type, amount, source, invoice_id, payment_id, notes, created_by)
            VALUES ($1, $2, 'credit', $3, 'overpayment', $4, $5, $6, $7)`,
-          [patient_id, clinicId || 1, cashAmount, createdDoc.id, createdPayment.id, `Pago de comprobante #${createdDoc.invoice_number} registrado en saldo a favor`, userId]
+          [patient_id, clinicId || 1, cashSurplus, createdDoc.id, createdPayment.id, `Sobrepago de comprobante #${createdDoc.invoice_number} registrado en saldo a favor`, userId]
         );
       }
 
@@ -245,11 +249,66 @@ class PaymentService {
         [createdDoc.id, treatment_ids]
       );
 
-      // 8. Vincular ítems de cotización si corresponde
+      // 8. Buscar y asociar quotation_items a los tratamientos pagados
       await client.query(
-        `UPDATE quotation_items SET invoice_id = $1 WHERE patient_treatment_id = ANY($2::int[])`,
+        `UPDATE quotation_items 
+         SET invoice_id = $1, status = 'aceptado', execution_status = 'realizado' 
+         WHERE patient_treatment_id = ANY($2::int[])`,
         [createdDoc.id, treatment_ids]
       );
+
+      for (const pt of treatments) {
+        if (pt.notes && (pt.notes.includes('Presupuesto #') || pt.notes.includes('COT-'))) {
+          const match = pt.notes.match(/COT-\d+/i) || pt.notes.match(/Presupuesto #([^\s,]+)/i);
+          if (match) {
+            const quoteRef = match[1] || match[0];
+            await client.query(
+              `UPDATE quotation_items qi
+               SET patient_treatment_id = $1, invoice_id = $2, status = 'aceptado', execution_status = 'realizado'
+               FROM quotations q
+               WHERE qi.quotation_id = q.id 
+                 AND (q.quote_number ILIKE $3 OR q.quote_number ILIKE $4)
+                 AND (qi.patient_treatment_id IS NULL OR qi.patient_treatment_id = $1)
+                 AND (qi.treatment_id = $5 OR LOWER(qi.description) = LOWER($6))`,
+              [pt.id, createdDoc.id, `%${quoteRef}%`, quoteRef, pt.treatment_id || null, pt.treatment_name || '']
+            );
+          }
+        }
+      }
+
+      // 9. Vincular la cotización al comprobante y recalcular el estado del presupuesto
+      const linkedQuotesRes = await client.query(
+        `SELECT DISTINCT q.id AS quotation_id
+         FROM quotation_items qi
+         JOIN quotations q ON qi.quotation_id = q.id
+         WHERE qi.patient_treatment_id = ANY($1::int[]) OR qi.invoice_id = $2`,
+        [treatment_ids, createdDoc.id]
+      );
+
+      if (linkedQuotesRes.rows.length > 0) {
+        const primaryQuoteId = linkedQuotesRes.rows[0].quotation_id;
+        await client.query(
+          `UPDATE invoices SET quotation_id = $1 WHERE id = $2`,
+          [primaryQuoteId, createdDoc.id]
+        );
+
+        for (const row of linkedQuotesRes.rows) {
+          const qId = row.quotation_id;
+          const itemsResult = await client.query(
+            `SELECT status, execution_status FROM quotation_items WHERE quotation_id = $1`,
+            [qId]
+          );
+          if (itemsResult.rows.length > 0) {
+            const allDone = itemsResult.rows.every(r => r.status === 'aceptado' && r.execution_status === 'realizado');
+            const someDone = itemsResult.rows.some(r => r.status === 'aceptado' || r.execution_status === 'realizado');
+            const newStatus = allDone ? 'aceptada' : someDone ? 'parcial' : 'enviada';
+            await client.query(
+              `UPDATE quotations SET status = $1, updated_at = NOW() WHERE id = $2`,
+              [newStatus, qId]
+            );
+          }
+        }
+      }
 
       return {
         payment: createdPayment,
@@ -266,17 +325,83 @@ class PaymentService {
    * usar saldo a favor disponible del paciente (credit_used).
    */
   async create(paymentData, userId) {
-    const { invoice_id, payment_method_id, amount, credit_used, reference_number, notes, payment_date } = paymentData;
+    const { patient_id, invoice_id, payment_method_id, amount, credit_used, reference_number, notes, payment_date } = paymentData;
 
-    if (!invoice_id || !payment_method_id) {
-      throw new AppError('Datos de pago inválidos o incompletos', 400);
+    if (!payment_method_id) {
+      throw new AppError('Método de pago es requerido', 400);
     }
 
     const cashAmount = parseFloat(amount);
     const creditWanted = parseFloat(credit_used || 0);
+
     if (isNaN(cashAmount) || cashAmount < 0) {
       throw new AppError('El monto del pago no es válido.', 400);
     }
+
+    if (!invoice_id) {
+      if (!patient_id) {
+        throw new AppError('Paciente requerido para registrar adelanto de pago', 400);
+      }
+      if (cashAmount <= 0) {
+        throw new AppError('El monto del adelantamiento debe ser mayor a 0.', 400);
+      }
+      return await transaction(async (client) => {
+        const store = als.getStore();
+        const clinicId = store?.clinicId;
+        const customDate = payment_date ? new Date(payment_date) : new Date();
+        const paymentNotes = notes && notes.trim() ? notes.trim() : 'Adelantamiento de tratamiento';
+
+        // Generar número de recibo de adelantamiento
+        const documentNumber = await invoiceRepository.generateDocumentNumber('recibo');
+
+        const invRes = await client.query(
+          `INSERT INTO invoices
+             (invoice_number, document_type, patient_id, subtotal, tax_rate, tax_amount, discount_amount, discount_percentage, total, amount_paid, balance, status, notes, created_by${clinicId ? ', clinic_id' : ''})
+           VALUES
+             ($1, 'recibo', $2, $3, 0, 0, 0, 0, $3, $3, 0, 'pagada', $4, $5${clinicId ? ', $6' : ''})
+           RETURNING *`,
+          clinicId
+            ? [documentNumber, patient_id, cashAmount, paymentNotes, userId, clinicId]
+            : [documentNumber, patient_id, cashAmount, paymentNotes, userId]
+        );
+        const createdReceipt = invRes.rows[0];
+
+        // Crear item descriptivo en el recibo
+        await client.query(
+          `INSERT INTO invoice_items
+             (invoice_id, description, quantity, unit_price, total${clinicId ? ', clinic_id' : ''})
+           VALUES
+             ($1, $2, 1, $3, $3${clinicId ? ', $4' : ''})`,
+          clinicId
+            ? [createdReceipt.id, paymentNotes, cashAmount, clinicId]
+            : [createdReceipt.id, paymentNotes, cashAmount]
+        );
+
+        // Registrar el pago en payments vinculado al recibo generado
+        const paymentResult = await client.query(
+          `INSERT INTO payments (patient_id, invoice_id, payment_method_id, amount, credit_used, reference_number, notes, is_advance, payment_date, created_by${clinicId ? ', clinic_id' : ''})
+           VALUES ($1, $2, $3, $4, 0, $5, $6, TRUE, $7, $8${clinicId ? ', $9' : ''})
+           RETURNING *`,
+          clinicId
+            ? [patient_id, createdReceipt.id, payment_method_id, cashAmount, reference_number || null, paymentNotes, customDate, userId, clinicId]
+            : [patient_id, createdReceipt.id, payment_method_id, cashAmount, reference_number || null, paymentNotes, customDate, userId]
+        );
+        const payment = paymentResult.rows[0];
+
+        // Registrar entrada en patient_credits (Saldo a Favor)
+        await client.query(
+          `INSERT INTO patient_credits (patient_id, clinic_id, type, amount, source, invoice_id, payment_id, reference, notes, created_by)
+           VALUES ($1, $2, 'credit', $3, 'overpayment', $4, $5, $6, $7, $8)`,
+          [patient_id, clinicId || 1, cashAmount, createdReceipt.id, payment.id, reference_number || null, paymentNotes, userId]
+        );
+
+        return {
+          payment,
+          document: createdReceipt
+        };
+      });
+    }
+
     if (isNaN(creditWanted) || creditWanted < 0) {
       throw new AppError('La cantidad de saldo a favor a usar no es válida.', 400);
     }
@@ -302,7 +427,13 @@ class PaymentService {
         throw new AppError('El documento ya se encuentra totalmente pagado', 400);
       }
 
+      // Verificar si el método de pago seleccionado es Saldo (Crédito)
+      const pmRes = await client.query(`SELECT name FROM payment_methods WHERE id = $1`, [payment_method_id]);
+      const isSaldoCredito = pmRes.rows[0]?.name === 'saldo_credito';
+
       const balance = parseFloat(invoice.balance);
+      const cashAmount = isSaldoCredito ? 0 : parseFloat(amount || 0);
+      const creditWanted = isSaldoCredito ? parseFloat(amount || balance) : parseFloat(credit_used || 0);
 
       if (creditWanted > 0) {
         const creditBalanceRes = await client.query(
@@ -328,12 +459,12 @@ class PaymentService {
       const customDate = payment_date ? new Date(payment_date) : new Date();
 
       const paymentResult = await client.query(
-        `INSERT INTO payments (invoice_id, payment_method_id, amount, credit_used, reference_number, notes, payment_date, created_by${clinicId ? ', clinic_id' : ''})
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8${clinicId ? ', $9' : ''})
+        `INSERT INTO payments (patient_id, invoice_id, payment_method_id, amount, credit_used, reference_number, notes, payment_date, created_by${clinicId ? ', clinic_id' : ''})
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9${clinicId ? ', $10' : ''})
          RETURNING *`,
         clinicId
-          ? [invoice_id, payment_method_id, paymentAmount, creditApplied, reference_number || null, notes || null, customDate, userId, clinicId]
-          : [invoice_id, payment_method_id, paymentAmount, creditApplied, reference_number || null, notes || null, customDate, userId]
+          ? [invoice.patient_id, invoice_id, payment_method_id, paymentAmount, creditApplied, reference_number || null, notes || null, customDate, userId, clinicId]
+          : [invoice.patient_id, invoice_id, payment_method_id, paymentAmount, creditApplied, reference_number || null, notes || null, customDate, userId]
       );
       const payment = paymentResult.rows[0];
 

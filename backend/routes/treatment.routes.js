@@ -28,6 +28,7 @@ router.get('/patient/:patientId', allRoles, controller.getPatientTreatments);
 router.post('/patient', allRoles, validate(createPatientTreatmentRules), auditMiddleware('REGISTRAR_TRATAMIENTO_PACIENTE', 'patient_treatments'), controller.addPatientTreatment);
 router.put('/patient/:id', allRoles, validate(updatePatientTreatmentRules), auditMiddleware('ACTUALIZAR_TRATAMIENTO_PACIENTE', 'patient_treatments'), controller.updatePatientTreatment);
 router.delete('/patient/:id', allRoles, auditMiddleware('ELIMINAR_TRATAMIENTO_PACIENTE', 'patient_treatments'), controller.deletePatientTreatment);
+router.post('/patient/:id/cancel-realized', allRoles, auditMiddleware('CANCELAR_TRATAMIENTO_REALIZADO', 'patient_treatments'), controller.cancelRealizedTreatment);
 
 // Categorías de tratamientos - DEBEN IR ANTES DE /:id
 router.get('/categories', allRoles, controller.getCategories);

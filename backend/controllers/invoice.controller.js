@@ -8,14 +8,14 @@ import { parsePagination } from '../utils/pagination.js';
 export const getAll = async (req, res, next) => {
   try {
     const { page, limit, sortBy, sortOrder } = parsePagination(req.query);
-    const { patient_id, status, document_type, date_from, date_to, search } = req.query;
+    const { patient_id, quotation_id, status, document_type, date_from, date_to, search } = req.query;
 
     const { invoices, pagination } = await invoiceService.getAll({
       page,
       limit,
       sortBy,
       sortOrder,
-      filters: { patient_id, status, document_type, date_from, date_to, search },
+      filters: { patient_id, quotation_id, status, document_type, date_from, date_to, search },
     });
 
     return ApiResponse.paginated(res, invoices, pagination, 'Facturas obtenidas exitosamente');
@@ -67,11 +67,13 @@ export const remove = async (req, res, next) => {
 export const createFromQuotation = async (req, res, next) => {
   try {
     const { quotationId } = req.params;
-    const { itemIds, item_ids } = req.body || {};
+    const { itemIds, item_ids, document_type, documentType, item_allocations, itemAllocations } = req.body || {};
     const selectedItemIds = itemIds || item_ids || null;
+    const docType = document_type || documentType || 'factura';
+    const allocations = item_allocations || itemAllocations || null;
     const userId = req.user.id;
-    const invoice = await invoiceService.createFromQuotation(quotationId, userId, selectedItemIds);
-    return ApiResponse.created(res, invoice, 'Factura generada desde cotización exitosamente');
+    const invoice = await invoiceService.createFromQuotation(quotationId, userId, selectedItemIds, docType, allocations);
+    return ApiResponse.created(res, invoice, 'Documento generado desde cotización exitosamente');
   } catch (error) {
     next(error);
   }
@@ -81,6 +83,16 @@ export const getStats = async (req, res, next) => {
   try {
     const stats = await invoiceService.getStats();
     return ApiResponse.success(res, stats, 'Estadísticas de facturas obtenidas');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const createFromReceipt = async (req, res, next) => {
+  try {
+    const { receiptId } = req.params;
+    const invoice = await invoiceService.createFromReceipt(receiptId, req.user.id, req.body);
+    return ApiResponse.created(res, invoice, 'Factura oficial generada desde recibo exitosamente');
   } catch (error) {
     next(error);
   }

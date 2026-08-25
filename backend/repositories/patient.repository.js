@@ -58,22 +58,31 @@ class PatientRepository extends BaseRepository {
       `SELECT p.*,
               COALESCE(dbt.total_debit, 0)  AS total_debit,
               COALESCE(crd.total_credit, 0) AS total_credit,
-              COALESCE(crd.total_credit, 0) - COALESCE(dbt.total_debit, 0) AS balance
+              COALESCE(crd.total_credit, 0) - COALESCE(dbt.total_debit, 0) AS balance,
+              GREATEST(0, COALESCE(pc.available_credit, 0)) AS available_credit
        FROM patients p
        LEFT JOIN (
          SELECT pt.patient_id,
-                SUM(pt.price * (1 + COALESCE(pt.tax_rate, 0) / 100.0)) AS total_debit
+                SUM(pt.price) AS total_debit
          FROM patient_treatments pt
          WHERE pt.status = 'completado' AND pt.deleted_at IS NULL
          GROUP BY pt.patient_id
        ) dbt ON dbt.patient_id = p.id
        LEFT JOIN (
-         SELECT patient_id,
-                SUM(amount_paid) AS total_credit
-         FROM invoices
-         WHERE status != 'cancelada' AND deleted_at IS NULL
-         GROUP BY patient_id
+         SELECT COALESCE(pay.patient_id, i.patient_id) AS patient_id,
+                SUM(pay.amount - COALESCE(pay.credit_used, 0)) AS total_credit
+         FROM payments pay
+         LEFT JOIN invoices i ON pay.invoice_id = i.id
+         WHERE pay.deleted_at IS NULL
+         GROUP BY COALESCE(pay.patient_id, i.patient_id)
        ) crd ON crd.patient_id = p.id
+       LEFT JOIN (
+         SELECT patient_id,
+                GREATEST(0, SUM(CASE WHEN type = 'credit' THEN amount ELSE -amount END)) AS available_credit
+         FROM patient_credits
+         WHERE deleted_at IS NULL
+         GROUP BY patient_id
+       ) pc ON pc.patient_id = p.id
        ${whereClause}
        ORDER BY ${safeSortBy} ${safeSortOrder}
        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
@@ -118,26 +127,34 @@ class PatientRepository extends BaseRepository {
     const total = parseInt(countResult.rows[0].total, 10);
 
     const dataResult = await query(
-      `SELECT p.id, p.first_name, p.last_name, p.dni, p.phone, p.mobile, p.email,
-              p.birth_date, p.gender, p.is_active, p.photo_url, p.created_at, p.custom_id,
+      `SELECT p.*,
               COALESCE(dbt.total_debit, 0)  AS total_debit,
               COALESCE(crd.total_credit, 0) AS total_credit,
-              COALESCE(crd.total_credit, 0) - COALESCE(dbt.total_debit, 0) AS balance
+              COALESCE(crd.total_credit, 0) - COALESCE(dbt.total_debit, 0) AS balance,
+              GREATEST(0, COALESCE(pc.available_credit, 0)) AS available_credit
        FROM patients p
        LEFT JOIN (
          SELECT pt.patient_id,
-                SUM(pt.price * (1 + COALESCE(pt.tax_rate, 0) / 100.0)) AS total_debit
+                SUM(pt.price) AS total_debit
          FROM patient_treatments pt
          WHERE pt.status = 'completado' AND pt.deleted_at IS NULL
          GROUP BY pt.patient_id
        ) dbt ON dbt.patient_id = p.id
        LEFT JOIN (
-         SELECT patient_id,
-                SUM(amount_paid) AS total_credit
-         FROM invoices
-         WHERE status != 'cancelada' AND deleted_at IS NULL
-         GROUP BY patient_id
+         SELECT COALESCE(pay.patient_id, i.patient_id) AS patient_id,
+                SUM(pay.amount - COALESCE(pay.credit_used, 0)) AS total_credit
+         FROM payments pay
+         LEFT JOIN invoices i ON pay.invoice_id = i.id
+         WHERE pay.deleted_at IS NULL
+         GROUP BY COALESCE(pay.patient_id, i.patient_id)
        ) crd ON crd.patient_id = p.id
+       LEFT JOIN (
+         SELECT patient_id,
+                GREATEST(0, SUM(CASE WHEN type = 'credit' THEN amount ELSE -amount END)) AS available_credit
+         FROM patient_credits
+         WHERE deleted_at IS NULL
+         GROUP BY patient_id
+       ) pc ON pc.patient_id = p.id
        ${whereClause}
        ORDER BY p.last_name ASC, p.first_name ASC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
@@ -167,6 +184,7 @@ class PatientRepository extends BaseRepository {
               COALESCE(dbt.total_debit, 0)  AS total_debit,
               COALESCE(crd.total_credit, 0) AS total_credit,
               COALESCE(crd.total_credit, 0) - COALESCE(dbt.total_debit, 0) AS balance,
+              GREATEST(0, COALESCE(pc.available_credit, 0)) AS available_credit,
               u.first_name AS created_by_name, u.last_name AS created_by_lastname
        FROM patients p
        LEFT JOIN (
@@ -193,20 +211,28 @@ class PatientRepository extends BaseRepository {
          WHERE deleted_at IS NULL
          GROUP BY patient_id
        ) pi ON pi.patient_id = p.id
+        LEFT JOIN (
+          SELECT pt.patient_id,
+                 SUM(pt.price) AS total_debit
+          FROM patient_treatments pt
+          WHERE pt.status = 'completado' AND pt.deleted_at IS NULL
+          GROUP BY pt.patient_id
+        ) dbt ON dbt.patient_id = p.id
        LEFT JOIN (
-         SELECT pt.patient_id,
-                SUM(pt.price * (1 + COALESCE(pt.tax_rate, 0) / 100.0)) AS total_debit
-         FROM patient_treatments pt
-         WHERE pt.status = 'completado' AND pt.deleted_at IS NULL
-         GROUP BY pt.patient_id
-       ) dbt ON dbt.patient_id = p.id
+         SELECT COALESCE(pay.patient_id, i.patient_id) AS patient_id,
+                SUM(pay.amount - COALESCE(pay.credit_used, 0)) AS total_credit
+         FROM payments pay
+         LEFT JOIN invoices i ON pay.invoice_id = i.id
+         WHERE pay.deleted_at IS NULL
+         GROUP BY COALESCE(pay.patient_id, i.patient_id)
+       ) crd ON crd.patient_id = p.id
        LEFT JOIN (
          SELECT patient_id,
-                SUM(amount_paid) AS total_credit
-         FROM invoices
-         WHERE status != 'cancelada' AND deleted_at IS NULL
+                GREATEST(0, SUM(CASE WHEN type = 'credit' THEN amount ELSE -amount END)) AS available_credit
+         FROM patient_credits
+         WHERE deleted_at IS NULL
          GROUP BY patient_id
-       ) crd ON crd.patient_id = p.id
+       ) pc ON pc.patient_id = p.id
        LEFT JOIN users u ON u.id = p.created_by
        ${whereClause}`,
       params
@@ -293,6 +319,65 @@ class PatientRepository extends BaseRepository {
       params
     );
     return result.rows;
+  }
+
+  /**
+   * Agrega una entrada al historial dental (diario clínico).
+   */
+  async addDentalHistory({ patient_id, doctor_id, tooth_number, procedure_name, notes }) {
+    const clinicId = this.getClinicId();
+    const result = await query(
+      `INSERT INTO dental_history (patient_id, doctor_id, tooth_number, procedure_name, notes${clinicId ? ', clinic_id' : ''})
+       VALUES ($1, $2, $3, $4, $5${clinicId ? ', $6' : ''})
+       RETURNING *`,
+      clinicId
+        ? [patient_id, doctor_id || null, tooth_number || null, procedure_name, notes || null, clinicId]
+        : [patient_id, doctor_id || null, tooth_number || null, procedure_name, notes || null]
+    );
+    return result.rows[0];
+  }
+
+  /**
+   * Actualiza una entrada del historial dental.
+   */
+  async updateDentalHistory(id, { tooth_number, procedure_name, notes, doctor_id }) {
+    const clinicId = this.getClinicId();
+    const conditions = ['id = $1', 'deleted_at IS NULL'];
+    const params = [id];
+    if (clinicId) {
+      conditions.push(`clinic_id = $${params.length + 1}`);
+      params.push(clinicId);
+    }
+    const result = await query(
+      `UPDATE dental_history
+       SET tooth_number = COALESCE($2, tooth_number),
+           procedure_name = COALESCE($3, procedure_name),
+           notes = COALESCE($4, notes),
+           doctor_id = COALESCE($5, doctor_id),
+           updated_at = NOW()
+       WHERE ${conditions.join(' AND ')}
+       RETURNING *`,
+      [id, tooth_number, procedure_name, notes, doctor_id]
+    );
+    return result.rows[0];
+  }
+
+  /**
+   * Elimina una entrada del historial dental (soft delete).
+   */
+  async deleteDentalHistory(id) {
+    const clinicId = this.getClinicId();
+    const conditions = ['id = $1'];
+    const params = [id];
+    if (clinicId) {
+      conditions.push(`clinic_id = $${params.length + 1}`);
+      params.push(clinicId);
+    }
+    await query(
+      `UPDATE dental_history SET deleted_at = NOW() WHERE ${conditions.join(' AND ')}`,
+      params
+    );
+    return true;
   }
 
   /**

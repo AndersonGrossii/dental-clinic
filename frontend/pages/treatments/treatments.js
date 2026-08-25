@@ -102,6 +102,7 @@ export class Treatments {
             <button class="btn btn-sm ${t.is_active ? 'btn-outline' : 'btn-primary'} toggle-active-btn" data-id="${t.id}" data-active="${t.is_active}">
               ${t.is_active ? 'Desactivar' : 'Activar'}
             </button>
+            <button class="btn btn-sm btn-danger delete-treatment-btn" data-id="${t.id}" data-name="${t.name}">Eliminar</button>
           </div>
         </td>
       </tr>
@@ -129,13 +130,17 @@ export class Treatments {
     }
 
     this.containerClickListener = async (e) => {
-      if (e.target.classList.contains('edit-treatment-btn')) {
-        const id = e.target.getAttribute('data-id');
+      const editBtn = e.target.closest('.edit-treatment-btn');
+      if (editBtn) {
+        const id = editBtn.getAttribute('data-id');
         this.showTreatmentModal(id);
+        return;
       }
-      if (e.target.classList.contains('toggle-active-btn')) {
-        const id = e.target.getAttribute('data-id');
-        const isActive = e.target.getAttribute('data-active') === 'true';
+
+      const toggleBtn = e.target.closest('.toggle-active-btn');
+      if (toggleBtn) {
+        const id = toggleBtn.getAttribute('data-id');
+        const isActive = toggleBtn.getAttribute('data-active') === 'true';
         try {
           await treatmentService.update(id, { is_active: !isActive });
           toast.success(`Tratamiento ${!isActive ? 'activado' : 'desactivado'} con éxito`);
@@ -144,6 +149,29 @@ export class Treatments {
         } catch (err) {
           toast.error(err.message || 'Error al cambiar estado del tratamiento');
         }
+        return;
+      }
+
+      const deleteBtn = e.target.closest('.delete-treatment-btn');
+      if (deleteBtn) {
+        const id = deleteBtn.getAttribute('data-id');
+        const name = deleteBtn.getAttribute('data-name') || 'este tratamiento';
+        Modal.confirm(
+          'Eliminar Tratamiento',
+          `¿Está seguro de que desea eliminar el tratamiento "${name}"?`,
+          async () => {
+            try {
+              await treatmentService.remove(id);
+              toast.success('Tratamiento eliminado exitosamente');
+              await this.loadData();
+              this.renderView();
+              return true;
+            } catch (err) {
+              toast.error(err.message || 'Error al eliminar el tratamiento');
+              return false;
+            }
+          }
+        );
       }
     };
 

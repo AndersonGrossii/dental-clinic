@@ -80,9 +80,8 @@ export class Payments {
       <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
         <div>
           <h1 class="page-title">Gestión de Pagos</h1>
-          <p style="color: var(--text-secondary);">Registro consolidado de transacciones y cobros</p>
+          <p style="color: var(--text-secondary);">Historial y registro de transacciones. Los cobros se realizan directamente desde presupuestos/facturas.</p>
         </div>
-        <button id="register-payment-btn" class="btn btn-primary">+ Registrar Pago</button>
       </div>
 
       <!-- Metric Cards -->
@@ -181,7 +180,7 @@ export class Payments {
         <td>${pay.reference_number || '—'}</td>
         <td>${formatDateTime(pay.payment_date)}</td>
         <td>
-          <button class="btn btn-sm btn-danger void-payment-btn" data-id="${pay.id}" data-amount="${pay.amount}" data-invoice="${pay.invoice_number || ''}">Anular</button>
+          <button class="btn btn-sm btn-danger void-payment-btn" data-id="${pay.id}" data-amount="${pay.amount}" data-invoice="${pay.invoice_number || ''}" title="Cancelar este pago y restaurar el saldo">🚫 Cancelar Pago</button>
         </td>
       </tr>
     `).join('');
@@ -276,13 +275,7 @@ export class Payments {
       });
     }
 
-    // Registrar pago
-    const registerBtn = this.container.querySelector('#register-payment-btn');
-    if (registerBtn) {
-      registerBtn.addEventListener('click', () => this.showRegisterPaymentModal());
-    }
-
-    // Anular pago (event delegation)
+    // Anular/Cancelar pago (event delegation)
     this.handleVoidClick = (e) => {
       if (e.target.classList.contains('void-payment-btn')) {
         const id = e.target.getAttribute('data-id');
