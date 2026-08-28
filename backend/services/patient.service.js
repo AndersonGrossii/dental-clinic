@@ -428,7 +428,9 @@ class PatientService {
       patient_id: patientId,
       doctor_id: data.doctor_id || null,
       tooth_number: data.tooth_number || null,
-      procedure_name: data.procedure_name || data.name || 'Procedimiento Odontológico',
+      treatment: data.treatment || data.procedure_name || data.name || 'Procedimiento Odontológico',
+      procedure_name: data.procedure_name || data.treatment || data.name || 'Procedimiento Odontológico',
+      condition: data.condition || data.treatment || data.procedure_name || data.name || 'Tratamiento Realizado',
       notes: data.notes || null
     });
   }

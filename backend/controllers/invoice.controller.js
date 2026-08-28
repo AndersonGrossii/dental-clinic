@@ -8,14 +8,14 @@ import { parsePagination } from '../utils/pagination.js';
 export const getAll = async (req, res, next) => {
   try {
     const { page, limit, sortBy, sortOrder } = parsePagination(req.query);
-    const { patient_id, quotation_id, status, document_type, date_from, date_to, search } = req.query;
+    const { patient_id, quotation_id, status, document_type, date_from, date_to, search, unlinked_receipts } = req.query;
 
     const { invoices, pagination } = await invoiceService.getAll({
       page,
       limit,
       sortBy,
       sortOrder,
-      filters: { patient_id, quotation_id, status, document_type, date_from, date_to, search },
+      filters: { patient_id, quotation_id, status, document_type, date_from, date_to, search, unlinked_receipts },
     });
 
     return ApiResponse.paginated(res, invoices, pagination, 'Facturas obtenidas exitosamente');
@@ -69,7 +69,7 @@ export const createFromQuotation = async (req, res, next) => {
     const { quotationId } = req.params;
     const { itemIds, item_ids, document_type, documentType, item_allocations, itemAllocations } = req.body || {};
     const selectedItemIds = itemIds || item_ids || null;
-    const docType = document_type || documentType || 'factura';
+    const docType = document_type || documentType || 'recibo';
     const allocations = item_allocations || itemAllocations || null;
     const userId = req.user.id;
     const invoice = await invoiceService.createFromQuotation(quotationId, userId, selectedItemIds, docType, allocations);

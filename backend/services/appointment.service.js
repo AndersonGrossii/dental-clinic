@@ -79,21 +79,7 @@ class AppointmentService {
       throw new AppError('El doctor seleccionado no existe.', 404);
     }
 
-    // Verificar conflicto de horario
-    const conflict = await appointmentRepository.checkConflict(
-      data.doctor_id,
-      data.appointment_date,
-      data.start_time,
-      data.end_time
-    );
-    if (conflict) {
-      throw new AppError(
-        `Conflicto de horario: el doctor ya tiene una cita con ${conflict.patient_name} de ${conflict.start_time} a ${conflict.end_time}.`,
-        409
-      );
-    }
-
-    // Verificar conflicto de gabinete
+    // Verificar conflicto de gabinete (un gabinete no puede tener dos citas a la vez)
     const cabinetConflict = await appointmentRepository.checkCabinetConflict(
       data.gabinete || 'Gabinete 1',
       data.appointment_date,
@@ -193,22 +179,6 @@ class AppointmentService {
 
     const timeChanged =
       data.doctor_id || data.appointment_date || data.start_time || data.end_time;
-
-    if (timeChanged) {
-      const conflict = await appointmentRepository.checkConflict(
-        doctorId,
-        appointmentDate,
-        startTime,
-        endTime,
-        id
-      );
-      if (conflict) {
-        throw new AppError(
-          `Conflicto de horario: el doctor ya tiene una cita con ${conflict.patient_name} de ${conflict.start_time} a ${conflict.end_time}.`,
-          409
-        );
-      }
-    }
 
     const cabinetChanged = timeChanged || data.gabinete;
     if (cabinetChanged) {

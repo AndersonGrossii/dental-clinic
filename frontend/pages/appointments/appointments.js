@@ -1358,6 +1358,8 @@ export class Appointments {
           <select name="gabinete" class="form-select">
             <option value="Gabinete 1">Gabinete 1</option>
             <option value="Gabinete 2">Gabinete 2</option>
+            <option value="Primeras Visitas 1">Primeras Visitas 1</option>
+            <option value="Primeras Visitas 2">Primeras Visitas 2</option>
           </select>
         </div>
         <div class="form-group" style="margin-top: var(--space-3);">
@@ -1710,6 +1712,8 @@ export class Appointments {
               <select name="gabinete" class="form-select">
                 <option value="Gabinete 1" ${appt.gabinete === 'Gabinete 1' ? 'selected' : ''}>Gabinete 1</option>
                 <option value="Gabinete 2" ${appt.gabinete === 'Gabinete 2' ? 'selected' : ''}>Gabinete 2</option>
+                <option value="Primeras Visitas 1" ${appt.gabinete === 'Primeras Visitas 1' ? 'selected' : ''}>Primeras Visitas 1</option>
+                <option value="Primeras Visitas 2" ${appt.gabinete === 'Primeras Visitas 2' ? 'selected' : ''}>Primeras Visitas 2</option>
               </select>
             </div>
             <div class="form-group" style="margin-top: var(--space-3);">

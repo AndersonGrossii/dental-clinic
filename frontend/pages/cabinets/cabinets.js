@@ -6,12 +6,19 @@ import toast from '../../components/toast/toast.js';
 import state from '../../scripts/state.js';
 import { formatDate } from '../../utils/helpers.js';
 
+const CABINET_LIST = [
+  'Gabinete 1',
+  'Gabinete 2',
+  'Primeras Visitas 1',
+  'Primeras Visitas 2'
+];
+
 export class Cabinets {
   constructor(container) {
     this.container = container;
     this.currentDate = new Date();
     this.viewMode = 'week'; // 'week' o 'day'
-    this.selectedCabinet = 'Gabinete 1'; // 'Gabinete 1' o 'Gabinete 2'
+    this.selectedCabinet = 'Gabinete 1';
     this.appointmentsList = [];
   }
 
@@ -57,11 +64,15 @@ export class Cabinets {
       ? this.renderWeekView()
       : this.renderDayView();
 
+    const cabinetOptions = CABINET_LIST.map(cab => `
+      <option value="${cab}" ${this.selectedCabinet === cab ? 'selected' : ''}>${cab}</option>
+    `).join('');
+
     this.container.innerHTML = `
       <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-6); flex-wrap: wrap; gap: var(--space-4);">
         <div>
           <h1 class="page-title">Agenda por Gabinetes</h1>
-          <p style="color: var(--text-secondary); margin-top: 2px;">Visualización del uso de Gabinete 1 y Gabinete 2</p>
+          <p style="color: var(--text-secondary); margin-top: 2px;">Visualización del uso de gabinetes (Gabinete 1, Gabinete 2, Primeras Visitas 1, Primeras Visitas 2)</p>
         </div>
         
         <div style="display: flex; gap: var(--space-2); align-items: center;">
@@ -83,8 +94,7 @@ export class Cabinets {
           <!-- Selector de Gabinete (solo para vista semanal) -->
           ${this.viewMode === 'week' ? `
             <select id="cab-cabinet-select" class="form-select" style="width: auto; margin-left: var(--space-2);">
-              <option value="Gabinete 1" ${this.selectedCabinet === 'Gabinete 1' ? 'selected' : ''}>Gabinete 1</option>
-              <option value="Gabinete 2" ${this.selectedCabinet === 'Gabinete 2' ? 'selected' : ''}>Gabinete 2</option>
+              ${cabinetOptions}
             </select>
           ` : ''}
         </div>
@@ -153,7 +163,7 @@ export class Cabinets {
         appts.forEach(appt => {
           const docColor = appt.doctor?.color || '#0891b2';
           eventsHtml += `
-            <div class="db-wg-event" style="background-color: color-mix(in srgb, ${docColor} 12%, var(--color-surface)) !important; border: 1.5px solid ${docColor} !important; border-radius: var(--radius-sm); padding: 4px; display: flex; flex-direction: column; margin-bottom: 2px;" title="Doctor/a: Dr/a. ${appt.doctor_name || ''}">
+            <div class="db-wg-event" data-id="${appt.id}" style="background-color: color-mix(in srgb, ${docColor} 12%, var(--color-surface)) !important; border: 1.5px solid ${docColor} !important; border-radius: var(--radius-sm); padding: 4px; display: flex; flex-direction: column; margin-bottom: 2px; cursor: pointer;" title="Doctor/a: Dr/a. ${appt.doctor_name || ''}">
               <div style="font-weight: 600; font-size: 10px; color: var(--color-text); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
                 ${appt.patient_name || '—'}
               </div>
@@ -192,8 +202,28 @@ export class Cabinets {
 
     // Encabezado de la cuadrícula
     cells += `<div class="db-wg-time-header">Hora</div>`;
-    cells += `<div class="db-wg-day-header today" style="text-align: center; font-weight: 700;">Gabinete 1</div>`;
-    cells += `<div class="db-wg-day-header today" style="text-align: center; font-weight: 700;">Gabinete 2</div>`;
+    CABINET_LIST.forEach(cab => {
+      cells += `<div class="db-wg-day-header today" style="text-align: center; font-weight: 700;">${cab}</div>`;
+    });
+
+    const renderEvents = (appts) => {
+      return appts.map(appt => {
+        const docColor = appt.doctor?.color || '#0891b2';
+        return `
+          <div class="db-wg-event" data-id="${appt.id}" style="background-color: color-mix(in srgb, ${docColor} 12%, var(--color-surface)) !important; border: 1.5px solid ${docColor} !important; border-radius: var(--radius-sm); padding: 6px; display: flex; flex-direction: column; height: 100%; justify-content: center; cursor: pointer;" title="Doctor/a: Dr/a. ${appt.doctor_name || ''}">
+            <div style="font-weight: 600; font-size: 11px; color: var(--color-text); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
+              ${appt.patient_name || '—'}
+            </div>
+            <div style="font-size: 9px; color: var(--color-text-secondary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap; margin-top: 1px;">
+              Doctor: Dr/a. ${appt.doctor?.lastName || appt.doctor_name || ''}
+            </div>
+            <div style="font-size: 9px; color: ${appt.status_color || '#6b7280'}; font-weight: 600; margin-top: 2px;">
+              ● ${appt.status_label || appt.status_name}
+            </div>
+          </div>
+        `;
+      }).join('');
+    };
 
     slots.forEach(slot => {
       cells += `<div class="db-wg-time-label">${slot}</div>`;
@@ -201,48 +231,20 @@ export class Cabinets {
       const slotEndMin = parseInt(slot.split(':')[0]) * 60 + parseInt(slot.split(':')[1]) + 30;
       const slotEndStr = `${String(Math.floor(slotEndMin / 60)).padStart(2, '0')}:${String(slotEndMin % 60).padStart(2, '0')}`;
 
-      // Gabinete 1
-      const appts1 = this.appointmentsList.filter(a => {
-        if (a.appointment_date.substring(0, 10) !== dateStr) return false;
-        if (a.gabinete !== 'Gabinete 1') return false;
-        const s = a.start_time.substring(0, 5);
-        const e = a.end_time.substring(0, 5);
-        return s < slotEndStr && e > slot;
+      CABINET_LIST.forEach(cab => {
+        const appts = this.appointmentsList.filter(a => {
+          if (a.appointment_date.substring(0, 10) !== dateStr) return false;
+          if (a.gabinete !== cab) return false;
+          const s = a.start_time.substring(0, 5);
+          const e = a.end_time.substring(0, 5);
+          return s < slotEndStr && e > slot;
+        });
+
+        cells += `<div class="db-wg-cell ${isWeekendDay ? 'weekend' : ''}">${renderEvents(appts)}</div>`;
       });
-
-      // Gabinete 2
-      const appts2 = this.appointmentsList.filter(a => {
-        if (a.appointment_date.substring(0, 10) !== dateStr) return false;
-        if (a.gabinete !== 'Gabinete 2') return false;
-        const s = a.start_time.substring(0, 5);
-        const e = a.end_time.substring(0, 5);
-        return s < slotEndStr && e > slot;
-      });
-
-      const renderEvents = (appts) => {
-        return appts.map(appt => {
-          const docColor = appt.doctor?.color || '#0891b2';
-          return `
-            <div class="db-wg-event" style="background-color: color-mix(in srgb, ${docColor} 12%, var(--color-surface)) !important; border: 1.5px solid ${docColor} !important; border-radius: var(--radius-sm); padding: 6px; display: flex; flex-direction: column; height: 100%; justify-content: center;" title="Doctor/a: Dr/a. ${appt.doctor_name || ''}">
-              <div style="font-weight: 600; font-size: 11px; color: var(--color-text); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
-                ${appt.patient_name || '—'}
-              </div>
-              <div style="font-size: 9px; color: var(--color-text-secondary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap; margin-top: 1px;">
-                Doctor: Dr/a. ${appt.doctor?.lastName || appt.doctor_name || ''}
-              </div>
-              <div style="font-size: 9px; color: ${appt.status_color || '#6b7280'}; font-weight: 600; margin-top: 2px;">
-                ● ${appt.status_label || appt.status_name}
-              </div>
-            </div>
-          `;
-        }).join('');
-      };
-
-      cells += `<div class="db-wg-cell ${isWeekendDay ? 'weekend' : ''}">${renderEvents(appts1)}</div>`;
-      cells += `<div class="db-wg-cell ${isWeekendDay ? 'weekend' : ''}">${renderEvents(appts2)}</div>`;
     });
 
-    return `<div class="db-wg-grid" style="grid-template-columns: 80px 1fr 1fr;">${cells}</div>`;
+    return `<div class="db-wg-grid" style="grid-template-columns: 80px repeat(${CABINET_LIST.length}, minmax(180px, 1fr)); min-width: 820px;">${cells}</div>`;
   }
 
   mount() {

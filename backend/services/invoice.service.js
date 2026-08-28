@@ -406,7 +406,7 @@ class InvoiceService {
    * @returns {Promise<object>} Factura creada
    * @throws {AppError} Si la cotización no existe o no está aceptada
    */
-  async createFromQuotation(quotationId, userId, selectedItemIds = null, documentType = 'factura', itemAllocations = null) {
+  async createFromQuotation(quotationId, userId, selectedItemIds = null, documentType = 'recibo', itemAllocations = null) {
     const quotation = await quotationRepository.findByIdWithItems(quotationId);
     if (!quotation) {
       throw new AppError('Cotización no encontrada.', 404);
@@ -454,12 +454,7 @@ class InvoiceService {
       const pctRaw = fullPrice > 0 ? (allocatedAmount / fullPrice) * 100 : 100;
       const pctStr = pctRaw % 1 === 0 ? pctRaw.toFixed(0) : pctRaw.toFixed(1);
 
-      let desc = item.description;
-      if (isPartial) {
-        desc += ` (Abono Parcial: ${allocatedAmount.toFixed(2)}€ / ${fullPrice.toFixed(2)}€ - ${pctStr}%)`;
-      } else if (fullPrice > 0) {
-        desc += ` (Pago Completo: 100%)`;
-      }
+      const desc = item.description;
 
       return {
         treatment_id: item.treatment_id,
@@ -540,7 +535,7 @@ class InvoiceService {
       throw new AppError('Recibo de pago no encontrado.', 404);
     }
 
-    const { items = [], notes = null, invoice_date = null } = customData;
+    const { items = [], notes = null, tax_rate = null, discount = null, patient_id = null, doctor_id = null } = customData;
 
     // Custom items provided by user or default from receipt items
     const invoiceItems = (Array.isArray(items) && items.length > 0)
@@ -548,6 +543,7 @@ class InvoiceService {
           description: item.description || 'Tratamiento Odontológico',
           quantity: parseInt(item.quantity || 1, 10),
           unit_price: parseFloat(item.unit_price || 0),
+          subtotal: parseFloat(item.total || (parseFloat(item.quantity || 1) * parseFloat(item.unit_price || 0))),
           total: parseFloat(item.total || (parseFloat(item.quantity || 1) * parseFloat(item.unit_price || 0))),
           treatment_id: item.treatment_id || null,
         }))
@@ -555,6 +551,7 @@ class InvoiceService {
           description: item.clean_description || item.description,
           quantity: parseInt(item.quantity || 1, 10),
           unit_price: parseFloat(item.unit_price || item.total || 0),
+          subtotal: parseFloat(item.total || 0),
           total: parseFloat(item.total || 0),
           treatment_id: item.treatment_id || null,
           quotation_item_id: item.quotation_item_id || null,
@@ -565,26 +562,32 @@ class InvoiceService {
         description: `Cobro según Recibo #${receipt.invoice_number}`,
         quantity: 1,
         unit_price: parseFloat(receipt.amount_paid || receipt.total || 0),
+        subtotal: parseFloat(receipt.amount_paid || receipt.total || 0),
         total: parseFloat(receipt.amount_paid || receipt.total || 0),
       });
     }
 
-    const subtotal = invoiceItems.reduce((sum, item) => sum + item.total, 0);
+    const subtotal = parseFloat(invoiceItems.reduce((sum, item) => sum + item.total, 0).toFixed(2));
+    const taxRateVal = tax_rate !== null ? parseFloat(tax_rate || 0) : parseFloat(receipt.tax_rate || 0);
+    const discountVal = discount !== null ? parseFloat(discount || 0) : parseFloat(receipt.discount_amount || 0);
+    const taxable = Math.max(0, subtotal - discountVal);
+    const taxAmount = parseFloat((taxable * (taxRateVal / 100)).toFixed(2));
+    const total = parseFloat((taxable + taxAmount).toFixed(2));
 
     const invoiceData = {
-      patient_id: receipt.patient_id,
-      doctor_id: receipt.doctor_id,
+      patient_id: patient_id ? Number(patient_id) : receipt.patient_id,
+      doctor_id: doctor_id ? Number(doctor_id) : receipt.doctor_id,
       clinic_id: receipt.clinic_id,
       quotation_id: receipt.quotation_id || null,
       receipt_id: receipt.id,
       document_type: 'factura',
       subtotal,
-      tax_rate: 0,
-      tax_amount: 0,
+      tax_rate: taxRateVal,
+      tax_amount: taxAmount,
       discount_percentage: 0,
-      discount_amount: 0,
-      total: subtotal,
-      amount_paid: subtotal,
+      discount_amount: discountVal,
+      total,
+      amount_paid: total,
       balance: 0,
       status: 'pagada',
       notes: notes || `Factura oficial vinculada al Recibo #${receipt.invoice_number}`,

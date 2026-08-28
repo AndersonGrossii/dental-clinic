@@ -85,7 +85,7 @@ class QuotationRepository extends BaseRepository {
                  WHERE qi.quotation_id = q.id AND qi.status = 'aceptado'),
                 0
               ) AS accepted_total,
-              COALESCE(
+              (COALESCE(
                 (SELECT SUM(inv2.amount_paid)
                  FROM invoices inv2
                  WHERE inv2.quotation_id = q.id
@@ -99,7 +99,26 @@ class QuotationRepository extends BaseRepository {
                    AND inv2.deleted_at IS NULL
                    AND inv2.status != 'cancelada'),
                 0
-              ) AS amount_paid
+              ) + COALESCE(
+                (SELECT SUM(pay.amount)
+                 FROM payments pay
+                 LEFT JOIN quotation_items qi ON pay.quotation_item_id = qi.id
+                 WHERE (pay.quotation_id = q.id OR qi.quotation_id = q.id)
+                   AND pay.deleted_at IS NULL
+                   AND pay.invoice_id IS NULL),
+                0
+              )) AS amount_paid,
+              COALESCE(
+                (SELECT TRUE
+                 FROM payments pay
+                 LEFT JOIN quotation_items qi ON pay.quotation_item_id = qi.id
+                 JOIN payment_methods pm ON pay.payment_method_id = pm.id
+                 WHERE (pay.quotation_id = q.id OR qi.quotation_id = q.id)
+                   AND (pm.name = 'saldo_credito' OR pay.credit_used > 0)
+                   AND pay.deleted_at IS NULL
+                 LIMIT 1),
+                FALSE
+              ) AS paid_with_credit
        FROM quotations q
        INNER JOIN patients p ON q.patient_id = p.id
        LEFT JOIN doctors d ON q.doctor_id = d.id
@@ -172,7 +191,7 @@ class QuotationRepository extends BaseRepository {
 
     const itemsResult = await query(
       `SELECT qi.*,
-              COALESCE(
+              (COALESCE(
                 (SELECT SUM(ii.total * (CASE WHEN inv2.total > 0 THEN (inv2.amount_paid / inv2.total) ELSE 0 END))
                  FROM invoice_items ii
                  JOIN invoices inv2 ON ii.invoice_id = inv2.id
@@ -181,7 +200,25 @@ class QuotationRepository extends BaseRepository {
                    AND inv2.deleted_at IS NULL
                    AND inv2.status != 'cancelada'),
                 0
-              ) AS amount_paid,
+              ) + COALESCE(
+                (SELECT SUM(pay.amount)
+                 FROM payments pay
+                 WHERE (pay.quotation_item_id = qi.id 
+                     OR (pay.patient_treatment_id IS NOT NULL AND pay.patient_treatment_id = qi.patient_treatment_id))
+                   AND pay.deleted_at IS NULL
+                   AND pay.invoice_id IS NULL),
+                0
+              )) AS amount_paid,
+              COALESCE(
+                (SELECT TRUE
+                 FROM payments pay
+                 JOIN payment_methods pm ON pay.payment_method_id = pm.id
+                 WHERE (pay.quotation_item_id = qi.id OR (pay.patient_treatment_id IS NOT NULL AND pay.patient_treatment_id = qi.patient_treatment_id))
+                   AND (pm.name = 'saldo_credito' OR pay.credit_used > 0)
+                   AND pay.deleted_at IS NULL
+                 LIMIT 1),
+                FALSE
+              ) AS paid_with_credit,
               COALESCE(qi.invoice_id, inv.id) AS invoice_id,
               COALESCE(inv.invoice_number, '') AS invoice_number,
               t.name AS catalog_treatment_name
@@ -214,6 +251,7 @@ class QuotationRepository extends BaseRepository {
         amount_paid: amountPaid,
         remaining_balance: remainingBalance,
         payment_status: paymentStatus,
+        paid_with_credit: !!item.paid_with_credit,
       };
     });
 
@@ -236,6 +274,7 @@ class QuotationRepository extends BaseRepository {
     const allItemsDecided = processedItems.length > 0 && processedItems.every(i => i.status === 'aceptado' || i.status === 'rechazado');
     const allAcceptedRealized = acceptedItems.length > 0 && acceptedItems.every(i => i.execution_status === 'realizado');
     const isClosed = allItemsDecided && allAcceptedRealized && (paymentStatus === 'pagado');
+    const hasCreditPayment = processedItems.some(i => i.paid_with_credit);
 
     return {
       ...quotationResult.rows[0],
@@ -244,6 +283,7 @@ class QuotationRepository extends BaseRepository {
       remaining_balance: remainingBalance,
       payment_status: paymentStatus,
       is_closed: isClosed,
+      paid_with_credit: hasCreditPayment,
       items: processedItems,
     };
   }
@@ -453,7 +493,12 @@ class QuotationRepository extends BaseRepository {
         d.first_name AS doctor_first_name,
         d.last_name AS doctor_last_name,
         t.name AS catalog_treatment_name,
-        true AS is_patient_treatment
+        true AS is_patient_treatment,
+        NULL AS quote_id,
+        pt.price AS amount_paid,
+        0 AS remaining_balance,
+        'pagado' AS payment_status,
+        COALESCE((SELECT TRUE FROM payments pay JOIN payment_methods pm ON pay.payment_method_id = pm.id WHERE (pay.patient_treatment_id = pt.id OR pay.invoice_id = pt.invoice_id) AND (pm.name = 'saldo_credito' OR pay.credit_used > 0) AND pay.deleted_at IS NULL LIMIT 1), FALSE) AS paid_with_credit
       FROM patient_treatments pt
       LEFT JOIN treatments t ON pt.treatment_id = t.id
       LEFT JOIN invoices i ON pt.invoice_id = i.id
@@ -474,7 +519,7 @@ class QuotationRepository extends BaseRepository {
         qi.unit_price,
         qi.total,
         qi.tooth_number,
-        'realizado' AS execution_status,
+        COALESCE(qi.execution_status, 'pendiente') AS execution_status,
         qi.created_at,
         q.quote_number,
         q.doctor_id,
@@ -483,7 +528,85 @@ class QuotationRepository extends BaseRepository {
         d.first_name AS doctor_first_name,
         d.last_name AS doctor_last_name,
         t.name AS catalog_treatment_name,
-        false AS is_patient_treatment
+        false AS is_patient_treatment,
+        q.id AS quote_id,
+        (COALESCE(
+          (SELECT SUM(ii.total * (CASE WHEN inv2.total > 0 THEN (inv2.amount_paid / inv2.total) ELSE 0 END))
+           FROM invoice_items ii
+           JOIN invoices inv2 ON ii.invoice_id = inv2.id
+           WHERE (ii.quotation_item_id = qi.id OR (ii.patient_treatment_id IS NOT NULL AND ii.patient_treatment_id = qi.patient_treatment_id))
+             AND inv2.deleted_at IS NULL
+             AND inv2.status != 'cancelada'),
+          0
+        ) + COALESCE(
+          (SELECT SUM(pay.amount)
+           FROM payments pay
+           WHERE (pay.quotation_item_id = qi.id OR (pay.patient_treatment_id IS NOT NULL AND pay.patient_treatment_id = qi.patient_treatment_id))
+             AND pay.deleted_at IS NULL
+             AND pay.invoice_id IS NULL),
+          0
+        )) AS amount_paid,
+        GREATEST(0, (qi.total * (1 + COALESCE(q.tax_rate, 0) / 100)) - (COALESCE(
+          (SELECT SUM(ii.total * (CASE WHEN inv2.total > 0 THEN (inv2.amount_paid / inv2.total) ELSE 0 END))
+           FROM invoice_items ii
+           JOIN invoices inv2 ON ii.invoice_id = inv2.id
+           WHERE (ii.quotation_item_id = qi.id OR (ii.patient_treatment_id IS NOT NULL AND ii.patient_treatment_id = qi.patient_treatment_id))
+             AND inv2.deleted_at IS NULL
+             AND inv2.status != 'cancelada'),
+          0
+        ) + COALESCE(
+          (SELECT SUM(pay.amount)
+           FROM payments pay
+           WHERE (pay.quotation_item_id = qi.id OR (pay.patient_treatment_id IS NOT NULL AND pay.patient_treatment_id = qi.patient_treatment_id))
+             AND pay.deleted_at IS NULL
+             AND pay.invoice_id IS NULL),
+          0
+        ))) AS remaining_balance,
+        CASE 
+          WHEN (COALESCE(
+            (SELECT SUM(ii.total * (CASE WHEN inv2.total > 0 THEN (inv2.amount_paid / inv2.total) ELSE 0 END))
+             FROM invoice_items ii
+             JOIN invoices inv2 ON ii.invoice_id = inv2.id
+             WHERE (ii.quotation_item_id = qi.id OR (ii.patient_treatment_id IS NOT NULL AND ii.patient_treatment_id = qi.patient_treatment_id))
+               AND inv2.deleted_at IS NULL
+               AND inv2.status != 'cancelada'),
+            0
+          ) + COALESCE(
+            (SELECT SUM(pay.amount + pay.credit_used)
+             FROM payments pay
+             WHERE (pay.quotation_item_id = qi.id OR (pay.patient_treatment_id IS NOT NULL AND pay.patient_treatment_id = qi.patient_treatment_id))
+               AND pay.deleted_at IS NULL
+               AND pay.invoice_id IS NULL),
+            0
+          )) >= (qi.total * (1 + COALESCE(q.tax_rate, 0) / 100)) - 0.001 THEN 'pagado'
+          WHEN (COALESCE(
+            (SELECT SUM(ii.total * (CASE WHEN inv2.total > 0 THEN (inv2.amount_paid / inv2.total) ELSE 0 END))
+             FROM invoice_items ii
+             JOIN invoices inv2 ON ii.invoice_id = inv2.id
+             WHERE (ii.quotation_item_id = qi.id OR (ii.patient_treatment_id IS NOT NULL AND ii.patient_treatment_id = qi.patient_treatment_id))
+               AND inv2.deleted_at IS NULL
+               AND inv2.status != 'cancelada'),
+            0
+          ) + COALESCE(
+            (SELECT SUM(pay.amount + pay.credit_used)
+             FROM payments pay
+             WHERE (pay.quotation_item_id = qi.id OR (pay.patient_treatment_id IS NOT NULL AND pay.patient_treatment_id = qi.patient_treatment_id))
+               AND pay.deleted_at IS NULL
+               AND pay.invoice_id IS NULL),
+            0
+          )) > 0 THEN 'parcial'
+          ELSE 'ninguno'
+        END AS payment_status,
+        COALESCE(
+          (SELECT TRUE
+           FROM payments pay
+           JOIN payment_methods pm ON pay.payment_method_id = pm.id
+           WHERE (pay.quotation_item_id = qi.id OR (pay.patient_treatment_id IS NOT NULL AND pay.patient_treatment_id = qi.patient_treatment_id))
+             AND (pm.name = 'saldo_credito' OR pay.credit_used > 0)
+             AND pay.deleted_at IS NULL
+           LIMIT 1),
+          FALSE
+        ) AS paid_with_credit
       FROM quotation_items qi
       JOIN quotations q ON qi.quotation_id = q.id
       LEFT JOIN doctors doc ON q.doctor_id = doc.id
@@ -491,7 +614,6 @@ class QuotationRepository extends BaseRepository {
       LEFT JOIN treatments t ON qi.treatment_id = t.id
       WHERE q.patient_id = $1
         AND (qi.status = 'aceptado' OR q.status = 'aceptada')
-        AND qi.execution_status = 'realizado'
         AND qi.patient_treatment_id IS NULL
         AND q.deleted_at IS NULL
 

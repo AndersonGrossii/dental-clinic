@@ -150,11 +150,13 @@ export class Quotations {
         <td><strong>${formatCurrency(q.total)}</strong></td>
         <td>
           <span class="badge ${STATUS_BADGES[q.status] || 'badge-secondary'}">${STATUS_LABELS[q.status] || q.status}</span>
-          ${q.payment_status === 'pagado'
-            ? `<span class="badge" style="background-color: var(--success-100); color: var(--success-800); font-size: 11px; margin-left: 4px; padding: 2px 6px;">🟢 100% Pagado</span>`
-            : (q.payment_status === 'parcial'
-              ? `<span class="badge" style="background-color: var(--warning-100); color: var(--warning-800); font-size: 11px; margin-left: 4px; padding: 2px 6px;">🟠 Pagado: ${formatCurrency(q.amount_paid)}</span>`
-              : '')}
+          ${q.paid_with_credit
+            ? `<span class="badge" style="background-color: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; font-weight: 600; font-size: 11px; margin-left: 4px; padding: 2px 6px;">💳 Pago con Saldo(Crédito)</span>`
+            : (q.payment_status === 'pagado'
+              ? `<span class="badge" style="background-color: var(--success-100); color: var(--success-800); font-size: 11px; margin-left: 4px; padding: 2px 6px;">🟢 100% Pagado</span>`
+              : (q.payment_status === 'parcial'
+                ? `<span class="badge" style="background-color: var(--warning-100); color: var(--warning-800); font-size: 11px; margin-left: 4px; padding: 2px 6px;">🟠 Pagado: ${formatCurrency(q.amount_paid)}</span>`
+                : ''))}
         </td>
         <td>${formatDate(q.created_at)}</td>
         <td style="text-align: right;">
@@ -176,7 +178,7 @@ export class Quotations {
               ` : `
                 <button class="btn btn-sm btn-manage-quote manage-items-btn" data-id="${q.id}" title="Gestionar Aceptación e Ítems">⚙️ Gestionar Ítems</button>
                 <button class="btn btn-sm btn-warning change-status-btn" data-id="${q.id}" title="Cambiar Estado del Presupuesto">🏷️ Cambiar Estado</button>
-                ${(q.status === 'aceptada' || q.status === 'parcial') && (q.remaining_balance === undefined || q.remaining_balance > 0) ? `
+                ${!q.is_closed && q.payment_status !== 'pagado' && q.status !== 'completada' && (q.status === 'aceptada' || q.status === 'parcial') && (q.remaining_balance === undefined || q.remaining_balance > 0) ? `
                   <button class="btn btn-sm btn-success pay-quote-btn" data-id="${q.id}" title="Registrar Pago de Presupuesto">💳 Registrar Pago</button>
                 ` : ''}
                 <button class="btn btn-sm btn-primary edit-quote-btn" data-id="${q.id}" title="Editar Presupuesto">✎ Editar</button>
@@ -358,7 +360,9 @@ export class Quotations {
         const payStatus = item.payment_status || (paidAmt >= totalAmt - 0.001 && totalAmt > 0 ? 'pagado' : (paidAmt > 0 ? 'parcial' : 'ninguno'));
 
         let payBadge = '';
-        if (payStatus === 'pagado') {
+        if (item.paid_with_credit) {
+          payBadge = `<span class="badge" style="background-color: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; padding: 4px 8px; font-weight: 600;" title="Pagado con Saldo (Crédito)">💳 Pago con Saldo(Crédito)</span>`;
+        } else if (payStatus === 'pagado') {
           payBadge = `<span class="badge badge-success" style="background-color: var(--success-100); color: var(--success-800); border: 1px solid var(--success-300); padding: 4px 8px; font-weight: 600;" title="100% Pagado (${formatCurrency(paidAmt)})">🟢 100% Pagado</span>`;
         } else if (payStatus === 'parcial') {
           payBadge = `<span class="badge badge-warning" style="background-color: #ffedd5; color: #c2410c; border: 1px solid #fdba74; padding: 4px 8px; font-weight: 600;" title="Cobrado: ${formatCurrency(paidAmt)} | Pendiente: ${formatCurrency(remBal)}">🟠 Parcial (${formatCurrency(paidAmt)} / ${formatCurrency(totalAmt)})</span>`;
@@ -379,7 +383,7 @@ export class Quotations {
           execBadge = `<span style="color: var(--text-tertiary); font-size: 12px;">—</span>`;
         }
 
-        const isItemFullyConsolidated = isInvoiced || (status === 'aceptado' && payStatus === 'pagado' && execStatus === 'realizado');
+        const isItemFullyConsolidated = status === 'aceptado' && payStatus === 'pagado' && execStatus === 'realizado';
 
         return `
         <tr class="quote-manage-item-row" data-item-id="${item.id}">
@@ -450,13 +454,15 @@ export class Quotations {
               <span class="badge ${STATUS_BADGES[qData.status] || 'badge-secondary'}" style="font-size: 14px; padding: 6px 14px; border-radius: 9999px;">
                 ${STATUS_LABELS[qData.status] || qData.status}
               </span>
-              ${isQuoteClosed
-                ? `<span class="badge badge-success" style="font-size: 14px; padding: 6px 14px; border-radius: 9999px;">🟢 100% Pagado y Cerrado</span>`
-                : (isQuotePaid
-                  ? `<span class="badge" style="background-color: var(--success-100); color: var(--success-800); font-size: 14px; padding: 6px 14px; border-radius: 9999px;">🟢 Monto Aceptado Pagado</span>`
-                  : (qData.payment_status === 'parcial'
-                    ? `<span class="badge" style="background-color: var(--warning-100); color: var(--warning-800); font-size: 14px; padding: 6px 14px; border-radius: 9999px;">🟠 Pagado: ${formatCurrency(qData.amount_paid)}</span>`
-                    : ''))}
+              ${qData.paid_with_credit
+                ? `<span class="badge" style="background-color: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; font-weight: 600; font-size: 14px; padding: 6px 14px; border-radius: 9999px;">💳 Pago con Saldo(Crédito)</span>`
+                : (isQuoteClosed
+                  ? `<span class="badge badge-success" style="font-size: 14px; padding: 6px 14px; border-radius: 9999px;">🟢 100% Pagado y Cerrado</span>`
+                  : (isQuotePaid
+                    ? `<span class="badge" style="background-color: var(--success-100); color: var(--success-800); font-size: 14px; padding: 6px 14px; border-radius: 9999px;">🟢 Monto Aceptado Pagado</span>`
+                    : (qData.payment_status === 'parcial'
+                      ? `<span class="badge" style="background-color: var(--warning-100); color: var(--warning-800); font-size: 14px; padding: 6px 14px; border-radius: 9999px;">🟠 Pagado: ${formatCurrency(qData.amount_paid)}</span>`
+                      : '')))}
             </div>
           </div>
 
@@ -657,7 +663,6 @@ export class Quotations {
       </tr>
     `}).join('');
 
-    const taxRate = parseFloat(q.tax_rate || 0);
     const discountPct = parseFloat(q.discount_percentage || 0);
 
     const content = `
@@ -696,12 +701,7 @@ export class Quotations {
             <strong id="convert-selected-discount">-${formatCurrency(q.discount_amount)}</strong>
           </div>
         ` : ''}
-        ${taxRate > 0 ? `
-          <div style="display: flex; justify-content: space-between;">
-            <span>Impuesto (${taxRate}%):</span>
-            <strong id="convert-selected-tax">${formatCurrency(q.tax_amount)}</strong>
-          </div>
-        ` : ''}
+
         <div style="display: flex; justify-content: space-between; border-top: 1px solid var(--border-color); padding-top: var(--space-2); margin-top: var(--space-1); font-size: var(--text-base);">
           <strong>Total Factura:</strong>
           <strong id="convert-selected-total" style="color: var(--primary-700); font-size: var(--text-lg);">${formatCurrency(q.total)}</strong>
@@ -755,18 +755,14 @@ export class Quotations {
       });
 
       const discountAmt = subtotal * (discountPct / 100);
-      const taxable = subtotal - discountAmt;
-      const taxAmt = taxable * (taxRate / 100);
-      const total = taxable + taxAmt;
+      const total = subtotal - discountAmt;
 
       const subtotalEl = overlay.querySelector('#convert-selected-subtotal');
       const discountEl = overlay.querySelector('#convert-selected-discount');
-      const taxEl = overlay.querySelector('#convert-selected-tax');
       const totalEl = overlay.querySelector('#convert-selected-total');
 
       if (subtotalEl) subtotalEl.textContent = formatCurrency(subtotal);
       if (discountEl) discountEl.textContent = `-${formatCurrency(discountAmt)}`;
-      if (taxEl) taxEl.textContent = formatCurrency(taxAmt);
       if (totalEl) totalEl.textContent = formatCurrency(total);
     };
 
@@ -882,10 +878,6 @@ export class Quotations {
         </div>
         <div class="form-row-3col" style="margin-top: var(--space-3);">
           <div class="form-group">
-            <label class="form-label">Impuesto (%)</label>
-            <input type="number" name="tax_rate" class="form-input" value="${q.tax_rate || 21}" min="0" max="100" />
-          </div>
-          <div class="form-group">
             <label class="form-label">Descuento global (%)</label>
             <input type="number" name="discount_percentage" class="form-input" value="${q.discount_percentage || 0}" min="0" max="100" />
           </div>
@@ -941,7 +933,7 @@ export class Quotations {
           doctor_id: raw.doctor_id ? parseInt(raw.doctor_id, 10) : undefined,
           quotation_date: raw.quotation_date || undefined,
           valid_until: raw.valid_until || undefined,
-          tax_rate: parseFloat(raw.tax_rate) || 0,
+          tax_rate: 0,
           discount_percentage: parseFloat(raw.discount_percentage) || 0,
           notes: raw.notes || undefined,
           items,
@@ -1599,7 +1591,7 @@ export class Quotations {
           <div class="totals">
             <p>Subtotal: ${formatCurrency(quote.subtotal)}</p>
             ${parseFloat(quote.discount_amount || 0) > 0 ? `<p>Descuento: -${formatCurrency(quote.discount_amount)}</p>` : ''}
-            ${parseFloat(quote.tax_amount || 0) > 0 ? `<p>IVA (${quote.tax_rate}%): ${formatCurrency(quote.tax_amount)}</p>` : ''}
+
             <hr/>
             <h2 style="color: #0f86ec;">TOTAL: ${formatCurrency(quote.total)}</h2>
           </div>
@@ -1653,13 +1645,13 @@ export class Quotations {
       return;
     }
 
-    let methods = [];
+    let paymentMethods = [];
     try {
-      methods = await paymentService.getMethods();
+      paymentMethods = await paymentService.getMethods();
     } catch {
       toast.error('Error al cargar métodos de pago');
     }
-    const methodOpts = methods.map(m => `<option value="${m.id}">${m.label || m.name}</option>`).join('');
+    const methodOpts = paymentMethods.map(m => `<option value="${m.id}">${m.label || m.name}</option>`).join('');
 
     const { patientCredit, patientCreditBalance } = await (async () => {
       try {
@@ -1672,7 +1664,7 @@ export class Quotations {
       }
     })();
 
-    const storedTaxRate = parseFloat(q.tax_rate || 0);
+    const storedTaxRate = 0;
 
     const itemAllocationsCardsHtml = acceptedItems.map(i => {
       const totalPrice = parseFloat(i.total || 0);
@@ -1706,17 +1698,7 @@ export class Quotations {
       return acc + Math.max(0, owedAmount);
     }, 0);
 
-    const taxFieldHtml = storedTaxRate > 0 ? `
-      <div style="margin-bottom: var(--space-3); background: var(--primary-50); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--primary-200); font-size: 13px; color: var(--primary-900);">
-        ℹ️ Este comprobante aplicará un IVA del <strong>${storedTaxRate}%</strong> sobre este pago.
-      </div>
-      <input type="hidden" id="quote-pay-tax-rate" name="tax_rate" value="${storedTaxRate}" />
-    ` : `
-      <div style="margin-bottom: var(--space-3); background: var(--gray-50); padding: 10px 14px; border-radius: var(--radius-md); border: 1px solid var(--border-color); font-size: 13px; color: var(--text-secondary);">
-        ℹ️ Este comprobante no lleva IVA (<strong>0%</strong>). El monto íntegro se registrará como neto.
-      </div>
-      <input type="hidden" id="quote-pay-tax-rate" name="tax_rate" value="0" />
-    `;
+    const taxFieldHtml = `<input type="hidden" id="quote-pay-tax-rate" name="tax_rate" value="0" />`;
 
     const content = `
       <form id="quote-payment-modal-form">
@@ -1727,7 +1709,7 @@ export class Quotations {
           ${itemAllocationsCardsHtml}
         </div>
 
-        <div class="form-group" style="margin-bottom: var(--space-4);">
+        <div class="form-group" id="quote-doc-type-group" style="margin-bottom: var(--space-4);">
           <label class="form-label" style="font-weight: 600;">Tipo de Comprobante a Generar para este Pago</label>
           <div style="display: flex; gap: 16px; margin-top: 6px;">
             <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; font-weight: 500;">
@@ -1741,6 +1723,10 @@ export class Quotations {
           </div>
         </div>
 
+        <div id="quote-credit-pay-notice" style="display: none; background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; border-radius: var(--radius-md); padding: 10px 14px; font-size: 13px; margin-bottom: var(--space-4);">
+          💳 <strong>Pago con Saldo (Crédito)</strong>: Este pago se descontará directamente del saldo a favor disponible del paciente sin emitir un nuevo recibo.
+        </div>
+
         <div class="form-group" style="margin-bottom: var(--space-3);">
           <label class="form-label" style="font-weight: 600;">Monto Total a Abonar en este Pago ($)</label>
           <input type="number" step="0.01" id="quote-pay-amount" name="amount" class="form-input" value="${initialTotal}" min="0.01" required />
@@ -1751,13 +1737,13 @@ export class Quotations {
 
         <div style="background: var(--primary-50); border: 1px solid var(--primary-200); padding: 14px 18px; border-radius: var(--radius-md); margin-bottom: var(--space-4);">
           <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: bold; color: var(--primary-900);">
-            <span>TOTAL A PAGAR DE ESTE COMPROBANTE:</span> <span id="quote-summary-total">${formatCurrency(initialTotal)}</span>
+            <span id="quote-summary-label">TOTAL A PAGAR DE ESTE COMPROBANTE:</span> <span id="quote-summary-total">${formatCurrency(initialTotal)}</span>
           </div>
         </div>
 
         <div class="form-group">
           <label class="form-label">Método de Pago</label>
-          <select name="payment_method_id" class="form-select" required>
+          <select id="quote-payment-method-select" name="payment_method_id" class="form-select" required>
             ${methodOpts}
           </select>
         </div>
@@ -1789,7 +1775,7 @@ export class Quotations {
     `;
 
     Modal.show({
-      title: 'Registrar Pago y Generar Comprobante',
+      title: 'Registrar Pago de Presupuesto',
       content,
       size: 'lg',
       footer: `
@@ -1800,6 +1786,22 @@ export class Quotations {
 
     const amountInput = document.getElementById('quote-pay-amount');
     const noticeDiv = document.getElementById('quote-partial-pay-notice');
+    const methodSelect = document.getElementById('quote-payment-method-select');
+    const docTypeGroup = document.getElementById('quote-doc-type-group');
+    const creditNotice = document.getElementById('quote-credit-pay-notice');
+    const summaryLabel = document.getElementById('quote-summary-label');
+
+    const updateMethodUI = () => {
+      const selectedVal = methodSelect?.value;
+      const selectedMethod = paymentMethods.find(m => String(m.id) === String(selectedVal));
+      const isCredit = selectedMethod?.name === 'saldo_credito' || selectedVal === '5';
+      if (docTypeGroup) docTypeGroup.style.display = isCredit ? 'none' : 'block';
+      if (creditNotice) creditNotice.style.display = isCredit ? 'block' : 'none';
+      if (summaryLabel) summaryLabel.textContent = isCredit ? 'TOTAL A DESCONTAR DE SALDO (CRÉDITO):' : 'TOTAL A PAGAR DE ESTE COMPROBANTE:';
+    };
+
+    methodSelect?.addEventListener('change', updateMethodUI);
+    updateMethodUI();
 
     const recalc = () => {
       const P = parseFloat(amountInput?.value || 0);
@@ -1829,7 +1831,8 @@ export class Quotations {
 
     amountInput?.addEventListener('input', recalc);
 
-    document.getElementById('confirm-quote-payment-btn')?.addEventListener('click', async () => {
+    const confirmBtn = document.getElementById('confirm-quote-payment-btn');
+    confirmBtn?.addEventListener('click', async () => {
       const form = document.getElementById('quote-payment-modal-form');
       if (!form) return;
       const formData = new FormData(form);
@@ -1855,7 +1858,42 @@ export class Quotations {
         return;
       }
 
+      const selectedMethod = paymentMethods.find(m => String(m.id) === String(paymentMethodId));
+      const isSaldoCredito = selectedMethod?.name === 'saldo_credito' || paymentMethodId === 5;
+
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Procesando...';
+
       try {
+        if (isSaldoCredito) {
+          // Pago con Saldo (Crédito): NO genera recibo/factura
+          for (const alloc of itemAllocations) {
+            await paymentService.create({
+              patient_id: q.patient_id,
+              quotation_id: quotationId,
+              quotation_item_id: alloc.id,
+              payment_method_id: paymentMethodId,
+              amount: alloc.amount,
+              credit_used: alloc.amount,
+              reference_number: referenceNumber,
+              notes: notes,
+              payment_date: new Date().toISOString().split('T')[0]
+            });
+          }
+
+          toast.success(`¡Pago (${formatCurrency(amountVal)}) registrado con Saldo (Crédito)!`);
+          Modal.close();
+
+          if (onSuccess) {
+            await onSuccess();
+          } else {
+            await this.render();
+            this.mount();
+          }
+          return;
+        }
+
+        // Pago con Efectivo, Tarjeta, etc.: genera recibo/factura
         const acceptedItemIds = acceptedItems.map(i => i.id);
         const invoiceRes = await invoiceService.createFromQuotation(quotationId, acceptedItemIds, documentType, itemAllocations);
         const invObj = invoiceRes?.data || invoiceRes;
@@ -1903,6 +1941,8 @@ export class Quotations {
           this.mount();
         }
       } catch (err) {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = '💳 Confirmar Pago';
         toast.error(err.message || 'Error al procesar el pago');
       }
     });

@@ -11,7 +11,7 @@ import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
 import state from '../../scripts/state.js';
 import { formatDate, formatCurrency } from '../../utils/helpers.js';
-import { getInvoiceStatusInfo } from '../../utils/formatters.js';
+import { getInvoiceStatusInfo, formatPaymentMethods } from '../../utils/formatters.js';
 
 export class Invoices {
   constructor(container) {
@@ -40,15 +40,16 @@ export class Invoices {
 
   renderView() {
     let rows = this.invoicesList.map(inv => {
-      const statusInfo = getInvoiceStatusInfo(inv.status);
+      const receiptTag = inv.receipt_number || inv.receipt_id
+        ? `<span class="badge badge-success" style="font-family: monospace; font-size: 12px; padding: 4px 8px; background-color: var(--success-100); color: var(--success-800); border: 1px solid var(--success-300);">🧾 #${inv.receipt_number || inv.receipt_id}</span>`
+        : `<span style="color: var(--text-tertiary); font-size: 12px; font-style: italic;">Sin recibo</span>`;
+
       return `
         <tr class="clickable-table-row invoice-main-row" data-id="${inv.id}">
-          <td><strong># ${inv.invoice_number}</strong></td>
-          <td>${inv.patient_name || 'N/A'}</td>
-          <td><strong>${formatCurrency(inv.total)}</strong></td>
-          <td style="color: var(--success-600);">${formatCurrency(inv.amount_paid)}</td>
-          <td style="color: var(--danger-600);"><strong>${formatCurrency(inv.balance)}</strong></td>
-          <td><span class="badge ${statusInfo.class}">${statusInfo.label}</span></td>
+          <td><strong class="badge badge-info" style="font-family: monospace; font-size: 13px;"># ${inv.invoice_number}</strong></td>
+          <td><strong>${inv.patient_name || 'N/A'}</strong></td>
+          <td>${receiptTag}</td>
+          <td><strong style="color: var(--primary-700);">${formatCurrency(inv.total)}</strong></td>
           <td>${formatDate(inv.created_at)}</td>
           <td style="text-align: right;">
             <button type="button" class="btn btn-sm btn-outline toggle-invoice-actions-btn" data-id="${inv.id}">
@@ -57,7 +58,7 @@ export class Invoices {
           </td>
         </tr>
         <tr class="invoice-actions-bar-row" id="invoice-actions-${inv.id}" style="display: none; background: var(--gray-50);">
-          <td colspan="8" style="padding: 12px 16px; border-bottom: 2px solid var(--primary-400);">
+          <td colspan="6" style="padding: 12px 16px; border-bottom: 2px solid var(--primary-400);">
             <div style="display: flex; gap: var(--space-3); align-items: center; justify-content: space-between; flex-wrap: wrap;">
               <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);">
                 🧾 Opciones para Factura #${inv.invoice_number}:
@@ -65,9 +66,7 @@ export class Invoices {
               <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                 <button class="btn btn-sm btn-outline print-invoice-btn" data-id="${inv.id}">🖨️ Ver / Imprimir Factura</button>
                 <button class="btn btn-sm btn-primary edit-invoice-btn" data-id="${inv.id}">✏️ Editar Factura</button>
-                <button class="btn btn-sm btn-warning change-invoice-status-btn" data-id="${inv.id}">🏷️ Cambiar Estado</button>
-                ${parseFloat(inv.balance || 0) > 0 ? `<button class="btn btn-sm btn-success pay-invoice-btn" data-id="${inv.id}">💳 Registrar Pago</button>` : ''}
-                ${inv.status === 'pendiente' && parseFloat(inv.balance || 0) === parseFloat(inv.total || 0) ? `<button class="btn btn-sm btn-danger delete-invoice-btn" data-id="${inv.id}">✕ Eliminar Factura</button>` : ''}
+                <button class="btn btn-sm btn-danger delete-invoice-btn" data-id="${inv.id}">✕ Eliminar Factura</button>
               </div>
             </div>
           </td>
@@ -76,18 +75,17 @@ export class Invoices {
     }).join('');
 
     if (this.invoicesList.length === 0) {
-      rows = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">No hay facturas registradas.</td></tr>`;
+      rows = `<tr><td colspan="6" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">No hay facturas registradas.</td></tr>`;
     }
 
     this.container.innerHTML = `
       <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-6);">
         <div>
           <h1 class="page-title">Facturación</h1>
-          <p style="color: var(--text-secondary);">Facturas de servicios y saldos pendientes</p>
+          <p style="color: var(--text-secondary);">Facturas oficiales emitidas y vinculadas a recibos</p>
         </div>
         <div style="display: flex; gap: var(--space-2);">
           <button id="add-invoice-btn" class="btn btn-primary">+ Nueva Factura</button>
-          <button id="add-invoice-from-quote-btn" class="btn btn-secondary">Facturar desde Presupuesto</button>
         </div>
       </div>
 
@@ -98,9 +96,8 @@ export class Invoices {
               <tr>
                 <th>No. Factura</th>
                 <th>Paciente</th>
-                <th>Montante Total</th>
-                <th>Montante Pagado</th>
-                <th>Estado</th>
+                <th>Recibo Vinculado (#REC)</th>
+                <th>Monto Total</th>
                 <th>Fecha Emisión</th>
                 <th style="text-align: right;">Acciones</th>
               </tr>
@@ -125,13 +122,7 @@ export class Invoices {
         return;
       }
 
-      const quoteBtn = e.target.closest('#add-invoice-from-quote-btn');
-      if (quoteBtn) {
-        this.showInvoiceFromQuoteModal();
-        return;
-      }
-
-      const actionBtn = e.target.closest('.print-invoice-btn, .edit-invoice-btn, .change-invoice-status-btn, .pay-invoice-btn, .delete-invoice-btn');
+      const actionBtn = e.target.closest('.print-invoice-btn, .edit-invoice-btn, .delete-invoice-btn');
       if (actionBtn) {
         const id = actionBtn.getAttribute('data-id');
         if (actionBtn.classList.contains('print-invoice-btn')) {
@@ -139,12 +130,6 @@ export class Invoices {
         }
         if (actionBtn.classList.contains('edit-invoice-btn')) {
           this.showEditInvoiceModal(id);
-        }
-        if (actionBtn.classList.contains('change-invoice-status-btn')) {
-          this.showChangeInvoiceStatusModal(id);
-        }
-        if (actionBtn.classList.contains('pay-invoice-btn')) {
-          this.showRegisterPaymentModal(id);
         }
         if (actionBtn.classList.contains('delete-invoice-btn')) {
           this.confirmDeleteInvoice(id);
@@ -176,12 +161,21 @@ export class Invoices {
     let patients = [];
     let doctors = [];
     let treatments = [];
+    let unlinkedReceipts = [];
     try {
-      [patients, doctors, treatments] = await Promise.all([
-        patientService.getAll({ limit: 200 }),
-        doctorService.getAll(),
-        treatmentService.getAll({ limit: 500, is_active: true }),
+      const [resPts, resDocs, resTreats, resReceipts] = await Promise.all([
+        patientService.getAll({ limit: 200 }).catch(() => []),
+        doctorService.getAll().catch(() => []),
+        treatmentService.getAll({ limit: 500, is_active: true }).catch(() => []),
+        invoiceService.getAll({ document_type: 'recibo', unlinked_receipts: 'true', limit: 200 }).catch(() => [])
       ]);
+      patients = resPts;
+      doctors = resDocs;
+      treatments = resTreats;
+      unlinkedReceipts = Array.isArray(resReceipts) ? resReceipts : (resReceipts?.rows || resReceipts?.data || []);
+      if (preSelectedPatientId) {
+        unlinkedReceipts = unlinkedReceipts.filter(r => Number(r.patient_id) === Number(preSelectedPatientId));
+      }
     } catch {
       // Fallback
     }
@@ -198,19 +192,47 @@ export class Invoices {
       `<option value="${d.id}">${d.first_name} ${d.last_name} (${d.specialty || ''})</option>`
     ).join('');
 
+    const receiptOptions = unlinkedReceipts.map(r =>
+      `<option value="${r.id}" data-patient-id="${r.patient_id}" data-doctor-id="${r.doctor_id || ''}" data-number="${r.invoice_number}" data-amount="${r.total}"># ${r.invoice_number} — Paciente: ${r.patient_name || 'N/A'} — Monto: ${formatCurrency(r.total)} (${r.created_at ? formatDate(r.created_at) : ''})</option>`
+    ).join('');
+
+    const receiptSectionHtml = unlinkedReceipts.length > 0 ? `
+      <div style="margin-bottom: var(--space-4); background: linear-gradient(135deg, var(--primary-50), var(--primary-100)); border: 1px solid var(--primary-300); padding: var(--space-4); border-radius: var(--radius-md);">
+        <label class="form-label" style="font-weight: 700; color: var(--primary-900); font-size: 14px; margin-bottom: var(--space-2);">
+          🧾 Facturar desde Recibo de Pago Pendiente (Recomendado)
+        </label>
+        <select name="receipt_id" id="modal-invoice-receipt-select" class="form-select" style="font-size: 14px; font-weight: 600; background-color: #fff;">
+          <option value="">-- Seleccionar Recibo para Convertir a Factura Oficial (#FACT) --</option>
+          ${receiptOptions}
+        </select>
+        <p style="font-size: 12px; color: var(--primary-700); margin: 6px 0 0 0;">
+          Al seleccionar un recibo, la factura oficial (#FACT) heredará automáticamente los conceptos, el paciente y el monto pagado del recibo.
+        </p>
+      </div>
+      <div style="text-align: center; margin: var(--space-3) 0; color: var(--text-tertiary); font-size: 12px; font-weight: 600;">
+        — O bien, cree una factura manual a continuación —
+      </div>
+    ` : `
+      <div style="margin-bottom: var(--space-3); padding: var(--space-3); background-color: var(--gray-50); border: 1px dashed var(--border-color); border-radius: var(--radius-md); font-size: 13px; color: var(--text-secondary);">
+        ℹ️ No hay recibos de pago pendientes sin facturar. Complete los siguientes campos para generar una factura manual.
+      </div>
+    `;
+
     const content = `
       <form id="add-invoice-form">
+        ${receiptSectionHtml}
+
         <div class="form-row-responsive">
           <div class="form-group">
             <label class="form-label">Paciente <span style="color: var(--danger-500);">*</span></label>
-            <select name="patient_id" class="form-select" required>
+            <select name="patient_id" id="modal-invoice-patient-select" class="form-select" required>
               <option value="">Seleccione un paciente...</option>
               ${patientOptions}
             </select>
           </div>
           <div class="form-group">
             <label class="form-label">Doctor (Opcional)</label>
-            <select name="doctor_id" class="form-select">
+            <select name="doctor_id" id="modal-invoice-doctor-select" class="form-select">
               <option value="">Seleccione un doctor...</option>
               ${doctorOptions}
             </select>
@@ -230,10 +252,6 @@ export class Invoices {
 
         <div class="form-row-3col" style="margin-top: var(--space-3);">
           <div class="form-group">
-            <label class="form-label">Impuesto (%)</label>
-            <input type="number" name="tax_rate" class="form-input" value="16" min="0" max="100" required />
-          </div>
-          <div class="form-group">
             <label class="form-label">Descuento Global ($)</label>
             <input type="number" step="0.01" name="discount" class="form-input" value="0.00" min="0" required />
           </div>
@@ -243,7 +261,7 @@ export class Invoices {
           </div>
         </div>
 
-        <div style="margin-top: var(--space-4);">
+        <div id="manual-items-section" style="margin-top: var(--space-4);">
           <label class="form-label" style="display: block; margin-bottom: var(--space-1);">Detalle de Conceptos / Tratamientos <span style="color: var(--danger-500);">*</span></label>
           <div id="invoice-items-container">
             <div class="quote-item-row">
@@ -267,10 +285,6 @@ export class Invoices {
               <span style="color: var(--text-secondary);">Subtotal:</span>
               <strong id="calc-subtotal">€0,00</strong>
             </div>
-            <div style="display: flex; justify-content: space-between; font-size: var(--text-sm);">
-              <span style="color: var(--text-secondary);">Impuestos:</span>
-              <strong id="calc-tax">€0,00</strong>
-            </div>
             <div style="display: flex; justify-content: space-between; font-size: var(--text-sm); color: var(--danger-600);">
               <span>Descuento:</span>
               <strong id="calc-discount">-€0,00</strong>
@@ -285,7 +299,7 @@ export class Invoices {
     `;
 
     Modal.show({
-      title: 'Crear Nueva Factura',
+      title: 'Crear Nueva Factura Oficial (#FACT)',
       content: content,
       confirmText: 'Generar Factura',
       size: 'lg',
@@ -311,8 +325,35 @@ export class Invoices {
           itemIndex++;
         }
 
+        if (raw.receipt_id) {
+          if (items.length === 0) {
+            toast.error('Debe incluir al menos un concepto en la factura');
+            return false;
+          }
+          try {
+            await invoiceService.createFromReceipt(raw.receipt_id, {
+              patient_id: raw.patient_id ? parseInt(raw.patient_id, 10) : undefined,
+              doctor_id: raw.doctor_id ? parseInt(raw.doctor_id, 10) : undefined,
+              notes: raw.notes || undefined,
+              discount: parseFloat(raw.discount) || 0,
+              items: items,
+            });
+            toast.success('¡Factura oficial (#FACT) creada exitosamente a partir del recibo!');
+            if (onSuccess) {
+              await onSuccess();
+            } else {
+              await this.render();
+              this.mount();
+            }
+            return true;
+          } catch (err) {
+            toast.error(err.message || 'Error al generar factura oficial desde el recibo');
+            return false;
+          }
+        }
+
         if (items.length === 0) {
-          toast.error('Debe incluir al menos un concepto en la factura');
+          toast.error('Debe incluir al menos un concepto o seleccionar un recibo de pago');
           return false;
         }
 
@@ -321,7 +362,7 @@ export class Invoices {
           doctor_id: raw.doctor_id ? parseInt(raw.doctor_id, 10) : undefined,
           invoice_date: raw.invoice_date || undefined,
           due_date: raw.due_date || undefined,
-          tax_rate: parseFloat(raw.tax_rate) || 0,
+          tax_rate: 0,
           discount: parseFloat(raw.discount) || 0,
           notes: raw.notes || undefined,
           items,
@@ -451,20 +492,17 @@ export class Invoices {
           subtotal += qty * price;
         });
 
-        const taxRate = parseFloat(modalBody.querySelector('input[name="tax_rate"]')?.value || 0);
-        const taxAmount = (subtotal * taxRate) / 100;
         const discount = parseFloat(modalBody.querySelector('input[name="discount"]')?.value || 0);
-        const total = Math.max(0, subtotal + taxAmount - discount);
+        const total = Math.max(0, subtotal - discount);
 
         modalBody.querySelector('#calc-subtotal').textContent = formatCurrency(subtotal);
-        modalBody.querySelector('#calc-tax').textContent = formatCurrency(taxAmount);
         modalBody.querySelector('#calc-discount').textContent = `-${formatCurrency(discount)}`;
         modalBody.querySelector('#calc-total').textContent = formatCurrency(total);
       };
 
       // Add event listeners for recalculations
       modalBody.addEventListener('input', (e) => {
-        if (e.target.name === 'tax_rate' || e.target.name === 'discount' || e.target.name.startsWith('item_qty_') || e.target.name.startsWith('item_price_')) {
+        if (e.target.name === 'discount' || e.target.name.startsWith('item_qty_') || e.target.name.startsWith('item_price_')) {
           recalculate();
         }
       });
@@ -593,85 +631,67 @@ export class Invoices {
           recalculate();
         });
       }
+
+      // Receipt select change handler to auto-populate patient, doctor and editable line items
+      const receiptSelect = modalBody.querySelector('#modal-invoice-receipt-select');
+      const patientSelect = modalBody.querySelector('#modal-invoice-patient-select');
+      const doctorSelect = modalBody.querySelector('#modal-invoice-doctor-select');
+      const notesTextarea = modalBody.querySelector('textarea[name="notes"]');
+      const container = modalBody.querySelector('#invoice-items-container');
+
+      if (receiptSelect) {
+        receiptSelect.addEventListener('change', async () => {
+          const selectedReceiptId = receiptSelect.value;
+          if (!selectedReceiptId) return;
+
+          try {
+            const receipt = await invoiceService.getById(selectedReceiptId);
+            if (receipt) {
+              if (patientSelect && receipt.patient_id) {
+                patientSelect.value = String(receipt.patient_id);
+              }
+              if (doctorSelect && receipt.doctor_id) {
+                doctorSelect.value = String(receipt.doctor_id);
+              }
+              if (notesTextarea) {
+                notesTextarea.value = receipt.notes || `Factura oficial vinculada al Recibo #${receipt.invoice_number}`;
+              }
+
+              if (container && Array.isArray(receipt.items) && receipt.items.length > 0) {
+                container.innerHTML = '';
+                receipt.items.forEach((item, idx) => {
+                  const desc = item.clean_description || item.description || 'Tratamiento Odontológico';
+                  const qty = parseInt(item.quantity || 1, 10);
+                  const price = parseFloat(item.unit_price || item.total || 0);
+                  const tid = item.treatment_id || '';
+
+                  const div = document.createElement('div');
+                  div.className = 'quote-item-row';
+                  div.innerHTML = `
+                    <div class="treatment-autocomplete-wrapper">
+                      <input type="text" name="item_desc_${idx}" class="form-input quote-item-desc" placeholder="Buscar o escribir tratamiento..." value="${desc}" autocomplete="off" required />
+                      <input type="hidden" name="item_treatment_id_${idx}" class="item-treatment-id" value="${tid}" />
+                      <ul class="treatment-autocomplete-list"></ul>
+                    </div>
+                    <input type="number" name="item_qty_${idx}" class="form-input" placeholder="Cant." value="${qty}" min="1" required />
+                    <input type="number" step="0.01" name="item_price_${idx}" class="form-input" placeholder="Precio $" value="${price.toFixed(2)}" min="0" required />
+                    <button type="button" class="btn btn-sm btn-outline btn-danger remove-item-btn" style="padding: 0 8px; font-weight: bold; border-color: transparent;">✕</button>
+                  `;
+                  container.appendChild(div);
+                  initAutocomplete(div.querySelector('.quote-item-desc'));
+                });
+                recalculate();
+              }
+            }
+          } catch (err) {
+            console.warn('Error cargando datos del recibo:', err);
+          }
+        });
+      }
     }, 50);
   }
 
-  async showInvoiceFromQuoteModal(preSelectedPatientId = null, onSuccess = null) {
-    let quotations = [];
-    try {
-      const filterParams = { status: 'aceptada', limit: 200 };
-      if (preSelectedPatientId) filterParams.patient_id = preSelectedPatientId;
-      const quotesRes = await quotationService.getAll(filterParams);
-      quotations = Array.isArray(quotesRes) ? quotesRes : (quotesRes.rows || []);
-      // Filter out already invoiced ones
-      quotations = quotations.filter(q => !q.invoice_id);
-    } catch {
-      toast.error('Error al cargar presupuestos aceptados');
-      return;
-    }
 
-    if (quotations.length === 0) {
-      Modal.show({
-        title: 'Facturar Presupuesto',
-        content: `
-          <div style="text-align: center; padding: var(--space-4);">
-            <div style="font-size: 48px; margin-bottom: var(--space-2);">📄</div>
-            <h3>Sin presupuestos pendientes</h3>
-            <p style="color: var(--text-secondary); margin-top: var(--space-2);">No hay presupuestos con estado "Aceptada" que no hayan sido facturados aún.</p>
-          </div>
-        `,
-        confirmText: 'Aceptar',
-        cancelText: null
-      });
-      return;
-    }
-
-    const options = quotations.map(q => {
-      return `<option value="${q.id}"># ${q.quote_number} — Paciente: ${q.patient_name || 'N/A'} — Total: ${formatCurrency(q.total)}</option>`;
-    }).join('');
-
-    const content = `
-      <form id="invoice-quote-form">
-        <div class="form-group">
-          <label class="form-label">Seleccione el Presupuesto / Tratamiento Realizado <span style="color: var(--danger-500);">*</span></label>
-          <select name="quotation_id" class="form-select" required>
-            <option value="">Seleccione un presupuesto...</option>
-            ${options}
-          </select>
-        </div>
-      </form>
-    `;
-
-    Modal.show({
-      title: 'Facturar Presupuesto',
-      content: content,
-      confirmText: 'Generar Factura',
-      onConfirm: async (modalBody) => {
-        const form = modalBody.querySelector('#invoice-quote-form');
-        const quoteId = form.querySelector('[name="quotation_id"]').value;
-
-        if (!quoteId) {
-          toast.error('Debe seleccionar un presupuesto');
-          return false;
-        }
-
-        try {
-          await invoiceService.createFromQuotation(quoteId);
-          toast.success('Factura creada exitosamente a partir de la cotización');
-          if (onSuccess) {
-            await onSuccess();
-          } else {
-            await this.render();
-            this.mount();
-          }
-          return true;
-        } catch (err) {
-          toast.error(err.message || 'Error al generar la factura');
-          return false;
-        }
-      }
-    });
-  }
 
   async showRegisterPaymentModal(invoiceId, onSuccess = null) {
     // Cargar métodos de pago
@@ -683,7 +703,7 @@ export class Invoices {
     }
 
     const methodOptions = methods.map(m => `
-      <option value="${m.id}">${m.label || m.name}</option>
+      <option value="${m.id}">${m.label}</option>
     `).join('');
 
     const invoice = this.invoicesList.find(i => i.id == invoiceId);
@@ -858,33 +878,12 @@ export class Invoices {
             </thead>
             <tbody>
               ${(invoice.items || []).map(item => {
-                const isPart = item.is_partial || (item.description && item.description.includes('Abono Parcial'));
-                const isFinalComp = item.is_final_payment_of_partial;
-                const prevP = parseFloat(item.previously_paid || 0);
                 let displayDesc = item.clean_description || item.description;
-                let badgeHtml = '';
-                
-                if (isPart) {
-                  const pct = item.percentage_str || (item.description.match(/- ([\d.]+%)/)?.[1] || '');
-                  const prevStr = prevP > 0 ? ` + ${formatCurrency(prevP)} anteriores` : '';
-                  badgeHtml = `
-                    <div style="font-size: 11px; color: #c2410c; font-weight: 600; margin-top: 3px; background: #fff7ed; border: 1px solid #fdba74; padding: 2px 6px; border-radius: 4px; display: inline-block;">
-                      ⚡ Abono Parcial${pct ? ` (${pct})` : ''}: ${formatCurrency(item.total)} abonados hoy${prevStr} (de ${formatCurrency(item.original_total)})
-                    </div>
-                  `;
-                } else if (isFinalComp) {
-                  badgeHtml = `
-                    <div style="font-size: 11px; color: #15803d; font-weight: 600; margin-top: 3px; background: #f0fdf4; border: 1px solid #86efac; padding: 2px 6px; border-radius: 4px; display: inline-block;">
-                      ✅ Pago Final / Completo (100%): ${formatCurrency(item.total)} abonados hoy + ${formatCurrency(prevP)} anteriores (Total: ${formatCurrency(item.original_total)})
-                    </div>
-                  `;
-                }
 
                 return `
                   <tr>
                     <td>
                       <div><strong>${displayDesc}</strong></div>
-                      ${badgeHtml}
                     </td>
                     <td style="text-align: right;">${formatCurrency(item.unit_price)}</td>
                     <td style="text-align: center;">${item.quantity}</td>
@@ -897,9 +896,9 @@ export class Invoices {
 
           <div class="totals">
             <p>Subtotal: ${formatCurrency(invoice.subtotal)}</p>
-            <p>IVA (${invoice.tax_rate}%): ${formatCurrency(invoice.tax_amount)}</p>
             <p>Descuento: -${formatCurrency(invoice.discount_amount)}</p>
             <p>Montante Pagado: ${formatCurrency(invoice.amount_paid)}</p>
+            <p>Método de Pago: ${formatPaymentMethods(invoice)}</p>
             <hr/>
             <h2>Saldo Restante: ${formatCurrency(invoice.balance)}</h2>
             <h2 style="color: #0f86ec;">TOTAL FACTURA: ${formatCurrency(invoice.total)}</h2>
@@ -1112,10 +1111,6 @@ export class Invoices {
           </div>
           <div class="form-group" style="flex: 1; background: var(--gray-50); padding: var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--border-color);">
             <div class="form-group" style="margin-bottom: var(--space-2);">
-              <label class="form-label" style="font-size: var(--text-xs);">Impuesto IVA (%)</label>
-              <input type="number" name="tax_rate" class="form-input" value="${invoice.tax_rate || 0}" step="0.1" min="0" />
-            </div>
-            <div class="form-group" style="margin-bottom: var(--space-2);">
               <label class="form-label" style="font-size: var(--text-xs);">Descuento ($)</label>
               <input type="number" name="discount" class="form-input" value="${invoice.discount_amount || 0}" step="0.01" min="0" />
             </div>
@@ -1123,10 +1118,6 @@ export class Invoices {
               <div style="display: flex; justify-content: space-between; font-size: 13px;">
                 <span>Subtotal:</span>
                 <strong id="calc-subtotal">${formatCurrency(invoice.subtotal || 0)}</strong>
-              </div>
-              <div style="display: flex; justify-content: space-between; font-size: 13px;">
-                <span>Impuesto:</span>
-                <strong id="calc-tax">${formatCurrency(invoice.tax_amount || 0)}</strong>
               </div>
               <div style="display: flex; justify-content: space-between; font-size: 13px; color: var(--danger-600);">
                 <span>Descuento:</span>
@@ -1184,7 +1175,7 @@ export class Invoices {
           status: raw.status,
           invoice_date: raw.invoice_date || undefined,
           due_date: raw.due_date || undefined,
-          tax_rate: parseFloat(raw.tax_rate) || 0,
+          tax_rate: 0,
           discount: parseFloat(raw.discount) || 0,
           notes: raw.notes || undefined,
           items,
@@ -1228,22 +1219,18 @@ export class Invoices {
         subtotal += qty * price;
       });
 
-      const taxRate = parseFloat(modalBody.querySelector('input[name="tax_rate"]')?.value || 0);
       const discount = parseFloat(modalBody.querySelector('input[name="discount"]')?.value || 0);
-      const taxable = Math.max(0, subtotal - discount);
-      const taxAmount = (taxable * taxRate) / 100;
-      const total = parseFloat((taxable + taxAmount).toFixed(2));
+      const total = Math.max(0, parseFloat((subtotal - discount).toFixed(2)));
       const balance = Math.max(0, parseFloat((total - amountPaid).toFixed(2)));
 
       if (modalBody.querySelector('#calc-subtotal')) modalBody.querySelector('#calc-subtotal').textContent = formatCurrency(subtotal);
-      if (modalBody.querySelector('#calc-tax')) modalBody.querySelector('#calc-tax').textContent = formatCurrency(taxAmount);
       if (modalBody.querySelector('#calc-discount')) modalBody.querySelector('#calc-discount').textContent = `-${formatCurrency(discount)}`;
       if (modalBody.querySelector('#calc-total')) modalBody.querySelector('#calc-total').textContent = formatCurrency(total);
       if (modalBody.querySelector('#calc-balance')) modalBody.querySelector('#calc-balance').textContent = formatCurrency(balance);
     };
 
     modalBody.addEventListener('input', (e) => {
-      if (e.target.name === 'tax_rate' || e.target.name === 'discount' || e.target.name.startsWith('item_qty_') || e.target.name.startsWith('item_price_')) {
+      if (e.target.name === 'discount' || e.target.name.startsWith('item_qty_') || e.target.name.startsWith('item_price_')) {
         recalculate();
       }
     });

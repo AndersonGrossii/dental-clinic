@@ -173,10 +173,6 @@ export class Settings {
                 <option value="EUR" ${info.currency === 'EUR' ? 'selected' : ''}>EUR - Euro</option>
               </select>
             </div>
-            <div class="form-group">
-              <label class="form-label">Tasa de Impuesto (%)</label>
-              <input type="number" name="tax_rate" class="form-input" value="${info.tax_rate ?? 16}" step="0.01" min="0" max="100" />
-            </div>
           </div>
           <div class="form-row-responsive">
             <div class="form-group">

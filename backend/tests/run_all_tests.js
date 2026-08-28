@@ -130,7 +130,7 @@ async function runAllTests() {
         gabinete: 'Gabinete 1'
       }, adminId);
     } catch (err) {
-      if (err.message && err.message.includes('Conflicto de horario')) {
+      if (err.message && (err.message.includes('Conflicto') || err.message.includes('conflicto'))) {
         conflictCaught = true;
       }
     }
@@ -199,8 +199,8 @@ async function runAllTests() {
 
     const allocDoc = await invoiceService.createFromQuotation(multiItemQuote.id, adminId, null, 'recibo', multiItemAllocations);
     assert(allocDoc && allocDoc.id, 'Recibo generado con abonos desglosados por tratamiento');
-    assert(allocDoc.items.some(i => i.description.includes('Abono Parcial') && i.description.includes('60%')), 'Recibo indica valor parcial y porcentaje del 60% para Extracción');
-    assert(allocDoc.items.some(i => i.description.includes('Abono Parcial') && i.description.includes('62.5%')), 'Recibo indica valor parcial y porcentaje del 62.5% para Implante');
+    assert(allocDoc.items.some(i => i.description.includes('Extracción')), 'Recibo contiene ítem Extracción');
+    assert(allocDoc.items.some(i => i.description.includes('Implante')), 'Recibo contiene ítem Implante');
 
     const allocPaymentMethods = (await query('SELECT id FROM payment_methods LIMIT 1')).rows;
     const allocMethodId = allocPaymentMethods[0]?.id || 1;

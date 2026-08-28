@@ -37,6 +37,10 @@ class InvoiceRepository extends BaseRepository {
       paramIndex++;
     }
 
+    if (filters.unlinked_receipts === 'true' || filters.unlinked_receipts === true) {
+      conditions.push(`i.receipt_id IS NULL`);
+    }
+
     if (filters.patient_id) {
       conditions.push(`i.patient_id = $${paramIndex}`);
       params.push(filters.patient_id);
@@ -92,11 +96,13 @@ class InvoiceRepository extends BaseRepository {
               CONCAT(u.first_name, ' ', u.last_name) AS doctor_name,
               u.first_name AS doctor_first_name,
               u.last_name AS doctor_last_name,
-              d.specialty AS doctor_specialty
+              d.specialty AS doctor_specialty,
+              rec.invoice_number AS receipt_number
        FROM invoices i
        INNER JOIN patients p ON i.patient_id = p.id
        LEFT JOIN doctors d ON i.doctor_id = d.id
        LEFT JOIN users u ON d.user_id = u.id
+       LEFT JOIN invoices rec ON (rec.receipt_id = i.id OR i.receipt_id = rec.id)
        ${whereClause}
        ORDER BY ${safeSortBy} ${safeSortOrder}
        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
@@ -216,7 +222,8 @@ class InvoiceRepository extends BaseRepository {
 
     const paymentsResult = await query(
       `SELECT pay.*,
-              pm.name AS payment_method_name
+              pm.name AS payment_method_name,
+              pm.label AS payment_method_label
        FROM payments pay
        LEFT JOIN payment_methods pm ON pay.payment_method_id = pm.id
        WHERE ${payConditions.join(' AND ')}

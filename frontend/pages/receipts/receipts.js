@@ -7,7 +7,7 @@ import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
 import state from '../../scripts/state.js';
 import { formatDate, formatCurrency } from '../../utils/helpers.js';
-import { getInvoiceStatusInfo } from '../../utils/formatters.js';
+import { getInvoiceStatusInfo, formatPaymentMethods } from '../../utils/formatters.js';
 
 export class Receipts {
   constructor(container) {
@@ -95,7 +95,6 @@ export class Receipts {
                 <th>Paciente</th>
                 <th>Monto Total</th>
                 <th>Monto Pagado</th>
-                <th>Saldo Restante</th>
                 <th>Estado</th>
                 <th>Fecha Emisión</th>
                 <th style="text-align: right;">Acciones</th>
@@ -239,33 +238,11 @@ export class Receipts {
             </thead>
             <tbody>
               ${(rec.items || []).map(item => {
-                const isPart = item.is_partial || (item.description && item.description.includes('Abono Parcial'));
-                const isFinalComp = item.is_final_payment_of_partial;
-                const prevP = parseFloat(item.previously_paid || 0);
                 let displayDesc = item.clean_description || item.description;
-                let badgeHtml = '';
-                
-                if (isPart) {
-                  const pct = item.percentage_str || (item.description.match(/- ([\d.]+%)/)?.[1] || '');
-                  const prevStr = prevP > 0 ? ` + ${formatCurrency(prevP)} anteriores` : '';
-                  badgeHtml = `
-                    <div style="font-size: 11px; color: #c2410c; font-weight: 600; margin-top: 3px; background: #fff7ed; border: 1px solid #fdba74; padding: 2px 6px; border-radius: 4px; display: inline-block;">
-                      ⚡ Abono Parcial${pct ? ` (${pct})` : ''}: ${formatCurrency(item.total)} abonados hoy${prevStr} (de ${formatCurrency(item.original_total)})
-                    </div>
-                  `;
-                } else if (isFinalComp) {
-                  badgeHtml = `
-                    <div style="font-size: 11px; color: #15803d; font-weight: 600; margin-top: 3px; background: #f0fdf4; border: 1px solid #86efac; padding: 2px 6px; border-radius: 4px; display: inline-block;">
-                      ✅ Pago Final / Completo (100%): ${formatCurrency(item.total)} abonados hoy + ${formatCurrency(prevP)} anteriores (Total: ${formatCurrency(item.original_total)})
-                    </div>
-                  `;
-                }
-
                 return `
                   <tr>
                     <td>
                       <div><strong>${displayDesc}</strong></div>
-                      ${badgeHtml}
                     </td>
                     <td style="text-align: right;">${formatCurrency(item.unit_price)}</td>
                     <td style="text-align: center;">${item.quantity}</td>
@@ -278,9 +255,9 @@ export class Receipts {
 
           <div class="totals">
             <p>Subtotal: ${formatCurrency(rec.subtotal)}</p>
-            <p>Impuestos (${rec.tax_rate || 0}%): ${formatCurrency(rec.tax_amount)}</p>
             <p>Descuento: -${formatCurrency(rec.discount_amount)}</p>
             <p>Monto Pagado: ${formatCurrency(rec.amount_paid)}</p>
+            <p>Método de Pago: ${formatPaymentMethods(rec)}</p>
             <hr/>
             <h2>Saldo Restante: ${formatCurrency(rec.balance)}</h2>
             <h2 style="color: #0f86ec;">TOTAL RECIBO: ${formatCurrency(rec.total)}</h2>
@@ -313,7 +290,7 @@ export class Receipts {
 
       const methods = await paymentService.getPaymentMethods();
 
-      const methodOpts = methods.map(m => `<option value="${m.id}">${m.label || m.name}</option>`).join('');
+      const methodOpts = methods.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
 
       const content = `
         <form id="register-payment-form">

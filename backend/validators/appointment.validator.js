@@ -95,7 +95,7 @@ export const createAppointmentRules = [
     label: 'Gabinete',
     required: false,
     type: 'string',
-    enum: ['Gabinete 1', 'Gabinete 2'],
+    enum: ['Gabinete 1', 'Gabinete 2', 'Primeras Visitas 1', 'Primeras Visitas 2'],
   },
 ];
 
@@ -166,7 +166,7 @@ export const updateAppointmentRules = [
     label: 'Gabinete',
     required: false,
     type: 'string',
-    enum: ['Gabinete 1', 'Gabinete 2'],
+    enum: ['Gabinete 1', 'Gabinete 2', 'Primeras Visitas 1', 'Primeras Visitas 2'],
   },
 ];
 

@@ -26,7 +26,8 @@ class PaymentRepository extends BaseRepository {
     params.push(invoiceId);
     const result = await query(
       `SELECT pay.*,
-              pm.name AS payment_method_name
+              pm.name AS payment_method_name,
+              pm.label AS payment_method_label
        FROM payments pay
        LEFT JOIN payment_methods pm ON pay.payment_method_id = pm.id
        WHERE ${conditions.join(' AND ')}
@@ -106,7 +107,8 @@ class PaymentRepository extends BaseRepository {
               p.first_name AS patient_first_name,
               p.last_name AS patient_last_name,
               p.dni AS patient_dni,
-              pm.name AS payment_method_name
+              pm.name AS payment_method_name,
+              pm.label AS payment_method_label
        FROM payments pay
        LEFT JOIN invoices i ON pay.invoice_id = i.id
        LEFT JOIN patients p ON COALESCE(pay.patient_id, i.patient_id) = p.id

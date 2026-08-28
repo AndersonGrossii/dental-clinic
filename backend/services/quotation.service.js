@@ -58,7 +58,7 @@ class QuotationService {
       discount_percentage: discountPct,
       discount_amount: totals.discount_amount,
       total: totals.total,
-      status: 'borrador',
+      status: fields.status || 'borrador',
       notes: fields.notes || null,
       created_by: fields.created_by,
     };

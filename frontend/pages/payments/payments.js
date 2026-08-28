@@ -73,7 +73,7 @@ export class Payments {
 
   renderLayout() {
     const methodOptions = this.paymentMethods
-      .map(m => `<option value="${m.id}" ${this.filterMethod == m.id ? 'selected' : ''}>${m.name}</option>`)
+      .map(m => `<option value="${m.id}" ${this.filterMethod == m.id ? 'selected' : ''}>${m.label}</option>`)
       .join('');
 
     this.container.innerHTML = `
@@ -324,7 +324,7 @@ export class Payments {
     }
 
     const methodOptions = this.paymentMethods
-      .map(m => `<option value="${m.id}">${m.name}</option>`)
+      .map(m => `<option value="${m.id}">${m.label}</option>`)
       .join('');
 
     const invoiceOptions = invoices.map(inv => {
@@ -431,11 +431,7 @@ export class Payments {
             </div>
           </div>
 
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: var(--space-3);">
-            <div class="form-group">
-              <label class="form-label">Impuesto / IVA (%)</label>
-              <input type="number" id="payment-modal-tax-rate" name="tax_rate" class="form-input" value="16" min="0" max="100" step="0.5" />
-            </div>
+          <div style="display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: var(--space-3);">
             <div class="form-group">
               <label class="form-label">Descuento ($)</label>
               <input type="number" id="payment-modal-disc-amt" name="discount_amount" class="form-input" value="0" min="0" step="0.5" />
@@ -597,7 +593,6 @@ export class Payments {
 
           try {
             const documentType = formData.get('document_type') || 'recibo';
-            const taxRate = parseFloat(formData.get('tax_rate') || 16);
             const discountAmount = parseFloat(formData.get('discount_amount') || 0);
 
             const res = await paymentService.processTreatmentPayment({
@@ -607,7 +602,7 @@ export class Payments {
               payment_method_id: data.payment_method_id,
               amount: data.amount,
               credit_used: data.credit_used,
-              tax_rate: taxRate,
+              tax_rate: 0,
               discount_amount: discountAmount,
               reference_number: data.reference_number || null,
               notes: data.notes || null,
@@ -744,18 +739,14 @@ export class Payments {
         });
       }
 
-      const tr = parseFloat(taxRateInput?.value || 0);
       const da = parseFloat(discAmtInput?.value || 0);
-      const taxable = Math.max(0, sum - da);
-      const totalWithTax = parseFloat((taxable * (1 + tr / 100)).toFixed(2));
+      const totalAfterDiscount = Math.max(0, parseFloat((sum - da).toFixed(2)));
 
-      if (totalDisplay) totalDisplay.textContent = formatCurrency(totalWithTax);
+      if (totalDisplay) totalDisplay.textContent = formatCurrency(totalAfterDiscount);
       if (modeInput.value === 'new' && amountInput) {
-        amountInput.value = totalWithTax.toFixed(2);
+        amountInput.value = totalAfterDiscount.toFixed(2);
       }
     };
-
-    if (taxRateInput) taxRateInput.addEventListener('input', recalcNewInvoiceTotal);
     if (discAmtInput) discAmtInput.addEventListener('input', recalcNewInvoiceTotal);
 
     if (patientSelect) {

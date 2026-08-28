@@ -62,11 +62,26 @@ class PatientRepository extends BaseRepository {
               GREATEST(0, COALESCE(pc.available_credit, 0)) AS available_credit
        FROM patients p
        LEFT JOIN (
-         SELECT pt.patient_id,
-                SUM(pt.price) AS total_debit
-         FROM patient_treatments pt
-         WHERE pt.status = 'completado' AND pt.deleted_at IS NULL
-         GROUP BY pt.patient_id
+         SELECT patient_id,
+                SUM(debit_amount) AS total_debit
+         FROM (
+           SELECT pt.patient_id,
+                  pt.price AS debit_amount
+           FROM patient_treatments pt
+           WHERE pt.status = 'completado' AND pt.deleted_at IS NULL
+
+           UNION ALL
+
+           SELECT q.patient_id,
+                  qi.total * (1 + COALESCE(q.tax_rate, 0) / 100) AS debit_amount
+           FROM quotation_items qi
+           JOIN quotations q ON qi.quotation_id = q.id
+           WHERE q.deleted_at IS NULL
+             AND q.status IN ('aceptada', 'completada', 'parcial')
+             AND (qi.status = 'aceptado' OR (qi.status IS NULL AND q.status IN ('aceptada', 'completada')))
+             AND qi.patient_treatment_id IS NULL
+         ) all_debts
+         GROUP BY patient_id
        ) dbt ON dbt.patient_id = p.id
        LEFT JOIN (
          SELECT COALESCE(pay.patient_id, i.patient_id) AS patient_id,
@@ -134,11 +149,26 @@ class PatientRepository extends BaseRepository {
               GREATEST(0, COALESCE(pc.available_credit, 0)) AS available_credit
        FROM patients p
        LEFT JOIN (
-         SELECT pt.patient_id,
-                SUM(pt.price) AS total_debit
-         FROM patient_treatments pt
-         WHERE pt.status = 'completado' AND pt.deleted_at IS NULL
-         GROUP BY pt.patient_id
+         SELECT patient_id,
+                SUM(debit_amount) AS total_debit
+         FROM (
+           SELECT pt.patient_id,
+                  pt.price AS debit_amount
+           FROM patient_treatments pt
+           WHERE pt.status = 'completado' AND pt.deleted_at IS NULL
+
+           UNION ALL
+
+           SELECT q.patient_id,
+                  qi.total * (1 + COALESCE(q.tax_rate, 0) / 100) AS debit_amount
+            FROM quotation_items qi
+            JOIN quotations q ON qi.quotation_id = q.id
+            WHERE q.deleted_at IS NULL
+              AND q.status IN ('aceptada', 'completada', 'parcial')
+              AND (qi.status = 'aceptado' OR (qi.status IS NULL AND q.status IN ('aceptada', 'completada')))
+              AND qi.patient_treatment_id IS NULL
+         ) all_debts
+         GROUP BY patient_id
        ) dbt ON dbt.patient_id = p.id
        LEFT JOIN (
          SELECT COALESCE(pay.patient_id, i.patient_id) AS patient_id,
@@ -212,11 +242,26 @@ class PatientRepository extends BaseRepository {
          GROUP BY patient_id
        ) pi ON pi.patient_id = p.id
         LEFT JOIN (
-          SELECT pt.patient_id,
-                 SUM(pt.price) AS total_debit
-          FROM patient_treatments pt
-          WHERE pt.status = 'completado' AND pt.deleted_at IS NULL
-          GROUP BY pt.patient_id
+          SELECT patient_id,
+                 SUM(debit_amount) AS total_debit
+          FROM (
+            SELECT pt.patient_id,
+                   pt.price AS debit_amount
+            FROM patient_treatments pt
+            WHERE pt.status = 'completado' AND pt.deleted_at IS NULL
+
+            UNION ALL
+
+            SELECT q.patient_id,
+                   qi.total * (1 + COALESCE(q.tax_rate, 0) / 100) AS debit_amount
+            FROM quotation_items qi
+            JOIN quotations q ON qi.quotation_id = q.id
+            WHERE q.deleted_at IS NULL
+              AND q.status IN ('aceptada', 'completada', 'parcial')
+              AND (qi.status = 'aceptado' OR (qi.status IS NULL AND q.status IN ('aceptada', 'completada')))
+              AND qi.patient_treatment_id IS NULL
+          ) all_debts
+          GROUP BY patient_id
         ) dbt ON dbt.patient_id = p.id
        LEFT JOIN (
          SELECT COALESCE(pay.patient_id, i.patient_id) AS patient_id,
@@ -309,6 +354,7 @@ class PatientRepository extends BaseRepository {
     }
     const result = await query(
       `SELECT dh.*,
+              COALESCE(dh.treatment, '') AS procedure_name,
               doc.specialty,
               u.first_name AS doctor_name, u.last_name AS doctor_lastname
        FROM dental_history dh
@@ -324,23 +370,38 @@ class PatientRepository extends BaseRepository {
   /**
    * Agrega una entrada al historial dental (diario clínico).
    */
-  async addDentalHistory({ patient_id, doctor_id, tooth_number, procedure_name, notes }) {
+  async addDentalHistory({ patient_id, doctor_id, tooth_number, procedure_name, treatment, condition, notes }) {
     const clinicId = this.getClinicId();
-    const result = await query(
-      `INSERT INTO dental_history (patient_id, doctor_id, tooth_number, procedure_name, notes${clinicId ? ', clinic_id' : ''})
-       VALUES ($1, $2, $3, $4, $5${clinicId ? ', $6' : ''})
-       RETURNING *`,
-      clinicId
-        ? [patient_id, doctor_id || null, tooth_number || null, procedure_name, notes || null, clinicId]
-        : [patient_id, doctor_id || null, tooth_number || null, procedure_name, notes || null]
-    );
-    return result.rows[0];
+    const procValue = treatment || procedure_name || 'Procedimiento Odontológico';
+    const condValue = condition || procValue || 'Tratamiento Realizado';
+
+    try {
+      const result = await query(
+        `INSERT INTO dental_history (patient_id, doctor_id, tooth_number, treatment, condition, notes${clinicId ? ', clinic_id' : ''})
+         VALUES ($1, $2, $3, $4, $5, $6${clinicId ? ', $7' : ''})
+         RETURNING *, treatment AS procedure_name`,
+        clinicId
+          ? [patient_id, doctor_id || null, tooth_number || null, procValue, condValue, notes || null, clinicId]
+          : [patient_id, doctor_id || null, tooth_number || null, procValue, condValue, notes || null]
+      );
+      return result.rows[0];
+    } catch (err) {
+      if (err.message && err.message.includes('column "condition"')) {
+        await query(`ALTER TABLE dental_history ADD COLUMN IF NOT EXISTS condition VARCHAR(255) DEFAULT 'Tratamiento Realizado'`).catch(() => {});
+        return this.addDentalHistory({ patient_id, doctor_id, tooth_number, procedure_name, treatment, condition, notes });
+      }
+      if (err.message && err.message.includes('column "treatment"')) {
+        await query(`ALTER TABLE dental_history ADD COLUMN IF NOT EXISTS treatment VARCHAR(255) DEFAULT 'Procedimiento Odontológico'`).catch(() => {});
+        return this.addDentalHistory({ patient_id, doctor_id, tooth_number, procedure_name, treatment, condition, notes });
+      }
+      throw err;
+    }
   }
 
   /**
    * Actualiza una entrada del historial dental.
    */
-  async updateDentalHistory(id, { tooth_number, procedure_name, notes, doctor_id }) {
+  async updateDentalHistory(id, { tooth_number, procedure_name, treatment, condition, notes, doctor_id }) {
     const clinicId = this.getClinicId();
     const conditions = ['id = $1', 'deleted_at IS NULL'];
     const params = [id];
@@ -348,18 +409,31 @@ class PatientRepository extends BaseRepository {
       conditions.push(`clinic_id = $${params.length + 1}`);
       params.push(clinicId);
     }
-    const result = await query(
-      `UPDATE dental_history
-       SET tooth_number = COALESCE($2, tooth_number),
-           procedure_name = COALESCE($3, procedure_name),
-           notes = COALESCE($4, notes),
-           doctor_id = COALESCE($5, doctor_id),
-           updated_at = NOW()
-       WHERE ${conditions.join(' AND ')}
-       RETURNING *`,
-      [id, tooth_number, procedure_name, notes, doctor_id]
-    );
-    return result.rows[0];
+    const procValue = treatment || procedure_name || null;
+    const condValue = condition || procValue || null;
+
+    try {
+      const result = await query(
+        `UPDATE dental_history
+         SET tooth_number = COALESCE($2, tooth_number),
+             treatment = COALESCE($3, treatment),
+             condition = COALESCE($4, condition),
+             notes = COALESCE($5, notes),
+             doctor_id = COALESCE($6, doctor_id),
+             updated_at = NOW()
+         WHERE ${conditions.join(' AND ')}
+         RETURNING *, treatment AS procedure_name`,
+        [id, tooth_number, procValue, condValue, notes, doctor_id]
+      );
+      return result.rows[0];
+    } catch (err) {
+      if (err.message && (err.message.includes('column "condition"') || err.message.includes('column "treatment"'))) {
+        await query(`ALTER TABLE dental_history ADD COLUMN IF NOT EXISTS condition VARCHAR(255) DEFAULT 'Tratamiento Realizado'`).catch(() => {});
+        await query(`ALTER TABLE dental_history ADD COLUMN IF NOT EXISTS treatment VARCHAR(255) DEFAULT 'Procedimiento Odontológico'`).catch(() => {});
+        return this.updateDentalHistory(id, { tooth_number, procedure_name, treatment, condition, notes, doctor_id });
+      }
+      throw err;
+    }
   }
 
   /**

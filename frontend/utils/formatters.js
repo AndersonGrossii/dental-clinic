@@ -45,3 +45,45 @@ export function getQuotationStatusInfo(status) {
     default: return { label: status, class: 'badge-neutral' };
   }
 }
+
+/**
+ * Formatea los métodos de pago de un recibo o factura.
+ * @param {object} doc - Objeto del recibo o factura (puede contener doc.payments o campos individuales)
+ * @returns {string} Texto formateado con los métodos de pago usados (ej: "Efectivo", "Tarjeta de Crédito, Financiación")
+ */
+export function formatPaymentMethods(doc) {
+  if (!doc) return 'N/A';
+  
+  let payments = doc.payments;
+  if (payments && Array.isArray(payments) && payments.length > 0) {
+    const labels = payments.map(p => {
+      if (p.payment_method_label) return p.payment_method_label;
+      const name = (p.payment_method_name || p.name || '').toLowerCase();
+      switch (name) {
+        case 'efectivo': return 'Efectivo';
+        case 'tarjeta_credito': return 'Tarjeta de Crédito';
+        case 'saldo_credito': return 'Saldo (crédito)';
+        case 'transferencia': return 'Transferencia Bancaria';
+        case 'financing': return 'Financiación';
+        default: return p.payment_method_label || p.payment_method_name || p.name || 'N/A';
+      }
+    });
+    return [...new Set(labels)].join(', ');
+  }
+
+  if (doc.payment_method_label) return doc.payment_method_label;
+  if (doc.payment_method_name || doc.payment_method) {
+    const name = (doc.payment_method_name || doc.payment_method || '').toLowerCase();
+    switch (name) {
+      case 'efectivo': return 'Efectivo';
+      case 'tarjeta_credito': return 'Tarjeta de Crédito';
+      case 'saldo_credito': return 'Saldo (crédito)';
+      case 'transferencia': return 'Transferencia Bancaria';
+      case 'financing': return 'Financiación';
+      default: return doc.payment_method_name || doc.payment_method;
+    }
+  }
+
+  return 'N/A';
+}
+
