@@ -79,6 +79,7 @@ class PatientRepository extends BaseRepository {
            WHERE q.deleted_at IS NULL
              AND q.status IN ('aceptada', 'completada', 'parcial')
              AND (qi.status = 'aceptado' OR (qi.status IS NULL AND q.status IN ('aceptada', 'completada')))
+             AND qi.execution_status = 'realizado'
              AND qi.patient_treatment_id IS NULL
          ) all_debts
          GROUP BY patient_id
@@ -166,6 +167,7 @@ class PatientRepository extends BaseRepository {
             WHERE q.deleted_at IS NULL
               AND q.status IN ('aceptada', 'completada', 'parcial')
               AND (qi.status = 'aceptado' OR (qi.status IS NULL AND q.status IN ('aceptada', 'completada')))
+              AND qi.execution_status = 'realizado'
               AND qi.patient_treatment_id IS NULL
          ) all_debts
          GROUP BY patient_id
@@ -259,6 +261,7 @@ class PatientRepository extends BaseRepository {
             WHERE q.deleted_at IS NULL
               AND q.status IN ('aceptada', 'completada', 'parcial')
               AND (qi.status = 'aceptado' OR (qi.status IS NULL AND q.status IN ('aceptada', 'completada')))
+              AND qi.execution_status = 'realizado'
               AND qi.patient_treatment_id IS NULL
           ) all_debts
           GROUP BY patient_id

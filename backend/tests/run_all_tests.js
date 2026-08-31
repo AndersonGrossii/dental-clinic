@@ -242,6 +242,62 @@ async function runAllTests() {
     await query('DELETE FROM quotation_items WHERE quotation_id = $1', [multiItemQuote.id]);
     await query('DELETE FROM quotations WHERE id = $1', [multiItemQuote.id]);
 
+    // Test de Presupuesto Unificado (Creación con estados de ejecución y actualización dinámica)
+    const unifiedQuote = await quotationService.create({
+      patient_id: testPatientId,
+      notes: 'Presupuesto de prueba unificado',
+      items: [
+        { description: 'Profilaxis Dental', unit_price: 50, quantity: 1, discount: 0, execution_status: 'en_proceso' },
+        { description: 'Obturación Simple', unit_price: 70, quantity: 1, discount: 0, execution_status: 'realizado' }
+      ]
+    });
+    assert(unifiedQuote && unifiedQuote.id, 'Presupuesto unificado creado exitosamente');
+    assert(unifiedQuote.items.length === 2, 'Presupuesto unificado contiene 2 ítems');
+    const obturacionItem = unifiedQuote.items.find(i => i.description === 'Obturación Simple');
+    assert(obturacionItem && obturacionItem.execution_status === 'realizado', 'Ítem marcado como realizado');
+
+    // Verificar que se haya sincronizado a patient_treatments
+    const ptUnifiedCheck = await query('SELECT * FROM patient_treatments WHERE patient_id = $1 AND deleted_at IS NULL AND price = 70', [testPatientId]);
+    assert(ptUnifiedCheck.rows.length > 0, 'Tratamiento realizado sincronizado en patient_treatments');
+
+    // Verificar que solo el ítem realizado afecte al débito/balance del paciente ($70, no $120)
+    const patUnifiedState1 = await patientService.getById(testPatientId);
+    assert(parseFloat(patUnifiedState1.total_debit) === 70.00, 'El débito del paciente solo incluye el ítem marcado como completado ($70)');
+
+    // Actualizar presupuesto: añadir nuevo ítem pendiente y cambiar Profilaxis a realizado
+    const updatedUnified = await quotationService.update(unifiedQuote.id, {
+      items: [
+        { id: unifiedQuote.items[0].id, description: 'Profilaxis Dental', unit_price: 50, quantity: 1, discount: 0, execution_status: 'realizado' },
+        { id: unifiedQuote.items[1].id, description: 'Obturación Simple', unit_price: 70, quantity: 1, discount: 0, execution_status: 'realizado' },
+        { description: 'Corona Zirconio', unit_price: 350, quantity: 1, discount: 0, execution_status: 'pendiente' }
+      ]
+    });
+    assert(updatedUnified.items.length === 3, 'Presupuesto actualizado a 3 ítems con nuevo ítem agregado');
+
+    // Verificar que el débito sea $120 (50 + 70) y no incluya los $350 del ítem pendiente
+    const patUnifiedState2 = await patientService.getById(testPatientId);
+    assert(parseFloat(patUnifiedState2.total_debit) === 120.00, 'El débito del paciente se actualiza a $120 (50+70) tras completar Profilaxis sin incluir el ítem pendiente de $350');
+
+    // Test: Revertir Obturación Simple ($70) de realizado a en_proceso
+    await quotationService.updateExecutionStatus(updatedUnified.items[1].id, 'en_proceso');
+    const patUnifiedState3 = await patientService.getById(testPatientId);
+    assert(parseFloat(patUnifiedState3.total_debit) === 50.00, 'Al cambiar Obturación Simple a en_proceso, el débito se reduce a $50 y el balance se actualiza');
+
+    // Test: Revertir Profilaxis Dental ($50) de realizado a pendiente
+    await quotationService.updateExecutionStatus(updatedUnified.items[0].id, 'pendiente');
+    const patUnifiedState4 = await patientService.getById(testPatientId);
+    assert(parseFloat(patUnifiedState4.total_debit) === 0.00, 'Al cambiar Profilaxis a pendiente, el débito regresa a $0.00');
+
+    // Test: Volver a marcar Profilaxis ($50) como realizado
+    await quotationService.updateExecutionStatus(updatedUnified.items[0].id, 'realizado');
+    const patUnifiedState5 = await patientService.getById(testPatientId);
+    assert(parseFloat(patUnifiedState5.total_debit) === 50.00, 'Al volver a marcar Profilaxis como realizado, el débito sube a $50');
+
+    // Limpieza de presupuesto unificado
+    await query('DELETE FROM patient_treatments WHERE patient_id = $1 AND notes LIKE $2', [testPatientId, `%${unifiedQuote.quote_number}%`]);
+    await query('DELETE FROM quotation_items WHERE quotation_id = $1', [unifiedQuote.id]);
+    await query('DELETE FROM quotations WHERE id = $1', [unifiedQuote.id]);
+
     // Registrar pago con fecha personalizada
     const invoice = await invoiceService.create({
       patient_id: testPatientId,
@@ -388,9 +444,28 @@ async function runAllTests() {
     assert(true, 'Día específico de prueba eliminado correctamente');
 
     // --------------------------------------------------
-    // TEST 8: Limpieza y Teardown
+    // TEST 8: Carga de Expediente / Perfil de Paciente (Rol Higienista)
     // --------------------------------------------------
-    console.log('\n🔹 [8/8] Limpieza de Datos de Prueba');
+    console.log('\n🔹 [8/9] Carga de Perfil de Paciente para Rol Higienista');
+    const patProfile = await patientService.getById(testPatientId);
+    assert(patProfile && patProfile.id === testPatientId, 'Higienista puede obtener datos de paciente por ID');
+
+    const patHistory = await patientService.getHistory(testPatientId);
+    assert(patHistory !== undefined, 'Higienista puede consultar historial clínico');
+
+    const patTreatments = await treatmentService.getPatientTreatments(testPatientId);
+    assert(Array.isArray(patTreatments), 'Higienista puede consultar tratamientos del paciente');
+
+    const patPayments = await paymentService.getAll({ patient_id: testPatientId, limit: 10 });
+    assert(patPayments !== undefined, 'Higienista puede consultar pagos del paciente');
+
+    const patAcceptedItems = await quotationService.getAcceptedItemsByPatient(testPatientId);
+    assert(Array.isArray(patAcceptedItems), 'Higienista puede consultar ítems de presupuestos aceptados');
+
+    // --------------------------------------------------
+    // TEST 9: Limpieza y Teardown
+    // --------------------------------------------------
+    console.log('\n🔹 [9/9] Limpieza de Datos de Prueba');
     if (testAppointmentId) {
       await appointmentService.delete(testAppointmentId);
       assert(true, 'Cita de prueba eliminada');

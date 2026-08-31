@@ -13,7 +13,7 @@ const router = Router();
 
 router.use(authMiddleware);
 
-router.get('/', staffOnly, controller.getAll);
+router.get('/', allRoles, controller.getAll);
 router.get('/methods', allRoles, controller.getPaymentMethods);
 router.get('/invoice/:invoiceId', allRoles, controller.getByInvoice);
 

@@ -21,18 +21,28 @@ export class Appointments {
     this.allDoctorUnavail = {};
     this.allDoctorSchedules = {};
     this.allDoctorWorkdays = {};
-    this.doctorColors = {};
+    this.slotDuration = 30;
     
-    // Bind handler
+    // Bind handlers
     this.handleContainerClick = this._handleContainerClick.bind(this);
+    this.handleContainerChange = this._handleContainerChange.bind(this);
   }
 
   mount() {
     this.container.addEventListener('click', this.handleContainerClick);
+    this.container.addEventListener('change', this.handleContainerChange);
   }
 
   destroy() {
     this.container.removeEventListener('click', this.handleContainerClick);
+    this.container.removeEventListener('change', this.handleContainerChange);
+  }
+
+  _handleContainerChange(e) {
+    if (e.target && e.target.id === 'slot-duration') {
+      this.slotDuration = parseInt(e.target.value, 10) || 30;
+      this.renderView();
+    }
   }
 
   _handleContainerClick(e) {
@@ -521,7 +531,7 @@ export class Appointments {
     const todayStr = this.toDateStr(new Date());
     const dayNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
-    const slotDuration = 15;
+    const slotDuration = this.slotDuration || 30;
     const slots = [];
     for (let m = 540; m < 1200; m += slotDuration) {
       slots.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
@@ -602,31 +612,52 @@ export class Appointments {
         let subSlotsHtml = '';
         activeDoctors.forEach(d => {
           const docColor = d.color || '#0891b2';
-          const sm = parseInt(slot.split(':')[0]) * 60 + parseInt(slot.split(':')[1]) + 30;
+          const sm = parseInt(slot.split(':')[0]) * 60 + parseInt(slot.split(':')[1]) + slotDuration;
           const ns = `${String(Math.floor(sm / 60)).padStart(2, '0')}:${String(sm % 60).padStart(2, '0')}`;
-          const appt = this.getEventsForDate(dateStr).find(a => {
+          
+          const appts = this.getEventsForDate(dateStr).filter(a => {
             if (a.doctor_id != d.id) return false;
+            if (a.status_name === 'cancelada') return false;
             const s = a.start_time ? a.start_time.substring(0, 5) : '';
             const e = a.end_time ? a.end_time.substring(0, 5) : '';
             return s < ns && e > slot;
           });
 
-          if (appt) {
-            const patientName = appt.patient_name || '—';
+          if (appts.length > 0) {
+            const isMulti = appts.length > 1;
+            const itemsHtml = appts.map(appt => {
+              const patientName = appt.patient_name || '—';
+              const treatmentLabel = appt.treatment_name || appt.reason || '';
+              const cabinetLabel = appt.gabinete || '';
+              const timeRange = `${formatTime(appt.start_time)} - ${formatTime(appt.end_time)}`;
+
+              return `
+                <div class="db-wg-event sub-slot-event" data-id="${appt.id}" data-patient-id="${appt.patient_id || ''}" style="background-color: color-mix(in srgb, ${docColor} 15%, var(--color-surface)) !important; border: 1px solid color-mix(in srgb, ${docColor} 35%, var(--color-border-light)) !important; border-radius: var(--radius-sm); padding: 3px 4px; display: flex; flex-direction: column; justify-content: space-between; min-height: 36px; flex: 1; min-width: 0; cursor: pointer;" title="Cita: ${patientName} (${timeRange}) | ${cabinetLabel ? 'Gabinete: ' + cabinetLabel + ' | ' : ''}${treatmentLabel ? 'Tratamiento: ' + treatmentLabel : ''} con Dr/a. ${d.first_name} ${d.last_name}">
+                  <div>
+                    <div class="db-wg-event-patient" style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 2px;">
+                      <span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 10px); font-size: ${isMulti ? '8px' : '9px'}; color: var(--color-text);">${formatTime(appt.start_time)} ${patientName}</span>
+                      <span style="width: 7px; height: 7px; border-radius: 50%; background: ${appt.status_color || '#0891b2'}; border: 1.5px solid #fff; display: inline-block; flex-shrink: 0;" title="${appt.status_label || appt.status_name}"></span>
+                    </div>
+                    <div style="display: flex; gap: 2px; align-items: center; flex-wrap: nowrap; overflow: hidden; margin-top: 1px;">
+                      ${cabinetLabel ? `<span style="font-size: 7.5px; background: #e0f2fe; color: #0369a1; padding: 0 2px; border-radius: 2px; font-weight: 700; white-space: nowrap;">${cabinetLabel}</span>` : ''}
+                      ${treatmentLabel ? `<span style="font-size: 8px; color: var(--primary-700); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${treatmentLabel}">${treatmentLabel}</span>` : ''}
+                    </div>
+                  </div>
+                  <div class="db-wg-event-doctor" style="font-size: 8px; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px;">
+                    Dr. ${d.last_name}
+                  </div>
+                </div>
+              `;
+            }).join('');
+
             subSlotsHtml += `
-              <div class="db-wg-event sub-slot-event" data-id="${appt.id}" data-patient-id="${appt.patient_id}" style="background-color: color-mix(in srgb, ${docColor} 15%, var(--color-surface)) !important; border: 1px solid color-mix(in srgb, ${docColor} 30%, var(--color-border-light)) !important; padding: 4px; display: flex; flex-direction: column; justify-content: space-between; min-height: 36px;" title="Cita: ${patientName} con Dr/a. ${d.first_name} ${d.last_name} (${appt.status_label || appt.status_name})">
-                <div class="db-wg-event-patient" style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 2px;">
-                  <span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 10px); font-size: 9px; color: var(--color-text);">${patientName}</span>
-                  <span style="width: 7px; height: 7px; border-radius: 50%; background: ${appt.status_color || '#0891b2'}; border: 1.5px solid #fff; display: inline-block; flex-shrink: 0;" title="${appt.status_label || appt.status_name}"></span>
-                </div>
-                <div class="db-wg-event-doctor" style="font-size: 8px; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                  Dr. ${d.last_name}
-                </div>
+              <div class="doctor-slot-group" style="display: grid; grid-template-columns: repeat(${appts.length}, minmax(0, 1fr)); gap: 2px; flex: 1; min-width: 0; width: 100%;">
+                ${itemsHtml}
               </div>
             `;
           } else {
             subSlotsHtml += `
-              <div class="sub-slot empty-sub-slot" data-doctor-id="${d.id}" style="background-color: color-mix(in srgb, ${docColor} 8%, var(--color-surface)) !important; border: 1px dashed color-mix(in srgb, ${docColor} 25%, var(--color-border-light)) !important; padding: 4px; display: flex; flex-direction: column; justify-content: center; min-height: 36px;" title="Disponible: Dr/a. ${d.first_name} ${d.last_name}">
+              <div class="sub-slot empty-sub-slot" data-doctor-id="${d.id}" style="background-color: color-mix(in srgb, ${docColor} 8%, var(--color-surface)) !important; border: 1px dashed color-mix(in srgb, ${docColor} 25%, var(--color-border-light)) !important; padding: 4px; display: flex; flex-direction: column; justify-content: center; min-height: 36px; flex: 1; min-width: 0;" title="Disponible: Dr/a. ${d.first_name} ${d.last_name}">
                 <span style="font-size: 8px; color: var(--color-text-secondary); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;">Dr. ${d.last_name}</span>
               </div>
             `;
@@ -652,7 +683,7 @@ export class Appointments {
     const isWeekendDay = this.currentDate.getDay() === 0 || this.currentDate.getDay() === 6;
     const dow = this.currentDate.getDay();
 
-    const slotDuration = 15;
+    const slotDuration = this.slotDuration || 30;
     const slots = [];
     for (let m = 540; m < 1200; m += slotDuration) {
       slots.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
@@ -726,31 +757,53 @@ export class Appointments {
       let subSlotsHtml = '';
       activeDoctors.forEach(d => {
         const docColor = d.color || '#0891b2';
-        const sm = parseInt(slot.split(':')[0]) * 60 + parseInt(slot.split(':')[1]) + 30;
+        const sm = parseInt(slot.split(':')[0]) * 60 + parseInt(slot.split(':')[1]) + slotDuration;
         const ns = `${String(Math.floor(sm / 60)).padStart(2, '0')}:${String(sm % 60).padStart(2, '0')}`;
-        const appt = this.getEventsForDate(dateStr).find(a => {
+        
+        // Find ALL appointments active for doctor d at this slot
+        const appts = this.getEventsForDate(dateStr).filter(a => {
           if (a.doctor_id != d.id) return false;
+          if (a.status_name === 'cancelada') return false;
           const s = a.start_time ? a.start_time.substring(0, 5) : '';
           const e = a.end_time ? a.end_time.substring(0, 5) : '';
           return s < ns && e > slot;
         });
 
-        if (appt) {
-          const patientName = appt.patient_name || '—';
+        if (appts.length > 0) {
+          const isMulti = appts.length > 1;
+          const itemsHtml = appts.map(appt => {
+            const patientName = appt.patient_name || '—';
+            const treatmentLabel = appt.treatment_name || appt.reason || '';
+            const cabinetLabel = appt.gabinete || '';
+            const timeRange = `${formatTime(appt.start_time)} - ${formatTime(appt.end_time)}`;
+
+            return `
+              <div class="cal-dg-event sub-slot-event" data-id="${appt.id}" data-patient-id="${appt.patient_id || ''}" style="background-color: color-mix(in srgb, ${docColor} 15%, var(--color-surface)) !important; border: 1.5px solid color-mix(in srgb, ${docColor} 40%, var(--color-border-light)) !important; border-radius: var(--radius-sm); padding: 4px 6px; display: flex; flex-direction: column; justify-content: space-between; min-height: 48px; flex: 1; min-width: 0; cursor: pointer;" title="Cita: ${patientName} (${timeRange}) | ${cabinetLabel ? 'Gabinete: ' + cabinetLabel + ' | ' : ''}${treatmentLabel ? 'Tratamiento: ' + treatmentLabel : ''} con Dr/a. ${d.first_name} ${d.last_name}">
+                <div>
+                  <div class="cal-dg-event-patient" style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 4px;">
+                    <span style="font-weight: 700; font-size: ${isMulti ? '10px' : '11px'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--color-text);">${formatTime(appt.start_time)} ${patientName}</span>
+                    <span style="width: 8px; height: 8px; border-radius: 50%; background: ${appt.status_color || '#0891b2'}; border: 1.5px solid #fff; display: inline-block; flex-shrink: 0;" title="${appt.status_label || appt.status_name}"></span>
+                  </div>
+                  <div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap; margin-top: 2px;">
+                    ${cabinetLabel ? `<span class="badge" style="background-color: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; font-size: 8.5px; padding: 0.5px 4px; font-weight: 700; border-radius: 3px; white-space: nowrap;">🏢 ${cabinetLabel}</span>` : ''}
+                    ${treatmentLabel ? `<span style="font-size: 9px; font-weight: 600; color: var(--primary-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;" title="${treatmentLabel}">🦷 ${treatmentLabel}</span>` : ''}
+                  </div>
+                </div>
+                <div class="cal-dg-event-doctor" style="font-size: 9px; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px;">
+                  Dr/a. ${d.first_name} ${d.last_name} ${isMulti ? `<span style="font-size: 8.5px; color: var(--primary-600); font-weight: 600;">(${timeRange})</span>` : ''}
+                </div>
+              </div>
+            `;
+          }).join('');
+
           subSlotsHtml += `
-            <div class="cal-dg-event sub-slot-event" data-id="${appt.id}" data-patient-id="${appt.patient_id}" style="background-color: color-mix(in srgb, ${docColor} 15%, var(--color-surface)) !important; border: 1px solid color-mix(in srgb, ${docColor} 30%, var(--color-border-light)) !important; padding: 6px 8px; display: flex; flex-direction: column; justify-content: space-between; min-height: 48px;" title="Cita: ${patientName} con Dr/a. ${d.first_name} ${d.last_name}">
-              <div class="cal-dg-event-patient" style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 6px;">
-                <span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 14px); color: var(--color-text);">${formatTime(appt.start_time)} ${patientName}</span>
-                <span style="width: 8px; height: 8px; border-radius: 50%; background: ${appt.status_color || '#0891b2'}; border: 1.5px solid #fff; display: inline-block; flex-shrink: 0;" title="${appt.status_label || appt.status_name}"></span>
-              </div>
-              <div class="cal-dg-event-doctor" style="font-size: 10px; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                Dr/a. ${d.first_name} ${d.last_name}
-              </div>
+            <div class="doctor-slot-group" style="display: grid; grid-template-columns: repeat(${appts.length}, minmax(0, 1fr)); gap: 4px; flex: 1; min-width: 0; width: 100%;">
+              ${itemsHtml}
             </div>
           `;
         } else {
           subSlotsHtml += `
-            <div class="sub-slot empty-sub-slot" data-doctor-id="${d.id}" style="background-color: color-mix(in srgb, ${docColor} 8%, var(--color-surface)) !important; border: 1px dashed color-mix(in srgb, ${docColor} 25%, var(--color-border-light)) !important; padding: 6px 8px; display: flex; flex-direction: column; justify-content: space-between; min-height: 48px;" title="Disponible: Dr/a. ${d.first_name} ${d.last_name}">
+            <div class="sub-slot empty-sub-slot" data-doctor-id="${d.id}" style="background-color: color-mix(in srgb, ${docColor} 8%, var(--color-surface)) !important; border: 1px dashed color-mix(in srgb, ${docColor} 25%, var(--color-border-light)) !important; padding: 6px 8px; display: flex; flex-direction: column; justify-content: space-between; min-height: 48px; flex: 1; min-width: 0;" title="Disponible: Dr/a. ${d.first_name} ${d.last_name}">
               <span style="font-size: 10px; color: var(--color-text-secondary); font-weight: 500;">Dr/a. ${d.first_name} ${d.last_name}</span>
               <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
                 <span style="font-size: 9px; color: var(--color-text-tertiary);">Disponible</span>
@@ -934,17 +987,34 @@ export class Appointments {
         // Build table rows: one row per time slot
         let rows = '';
         slots.forEach(slot => {
-          const match = doc.appointments.find(a => {
+          const matches = doc.appointments.filter(a => {
             const s = a.start_time ? a.start_time.substring(0, 5) : '';
             const e = a.end_time ? a.end_time.substring(0, 5) : '';
             return s <= slot && e > slot;
           });
-          const statusColor = match ? match.status_color || '#333' : '#333';
-          rows += `<tr>
-            <td style="${cellStyle}font-weight:600;color:#555;width:60px;">${slot}</td>
-            <td style="${cellStyle}${match ? '' : 'color:#ccc;'}">${match ? getPatientWithId(match) : '—'}</td>
-            <td style="${cellStyle}${match ? '' : 'color:#ccc;'}">${match ? getTreatment(match) : ''}</td>
-          </tr>`;
+          if (matches.length > 0) {
+            const patientHtml = matches.map(m => {
+              const cabText = m.gabinete ? ` [${m.gabinete}]` : '';
+              const timeText = ` (${formatTime(m.start_time)}-${formatTime(m.end_time)})`;
+              return `<div style="margin-bottom: 2px;"><strong>${getPatientWithId(m)}</strong>${cabText}<span style="color:#666;font-size:11px;">${timeText}</span></div>`;
+            }).join('');
+
+            const treatmentHtml = matches.map(m => {
+              return `<div style="margin-bottom: 2px;">${getTreatment(m) || '—'}</div>`;
+            }).join('');
+
+            rows += `<tr>
+              <td style="${cellStyle}font-weight:600;color:#555;width:60px;">${slot}</td>
+              <td style="${cellStyle}">${patientHtml}</td>
+              <td style="${cellStyle}">${treatmentHtml}</td>
+            </tr>`;
+          } else {
+            rows += `<tr>
+              <td style="${cellStyle}font-weight:600;color:#555;width:60px;">${slot}</td>
+              <td style="${cellStyle}color:#ccc;">—</td>
+              <td style="${cellStyle}color:#ccc;"></td>
+            </tr>`;
+          }
         });
 
         return `
@@ -1197,17 +1267,20 @@ export class Appointments {
           rows += `<td style="${cellStyle}font-weight:600;color:#555;text-align:center;width:55px;">${slot}</td>`;
           weekDays.forEach(wd => {
             const dayAppts = apptsByDate[wd.dateStr] || [];
-            const match = dayAppts.find(a => {
+            const matches = dayAppts.filter(a => {
               const s = a.start_time ? a.start_time.substring(0, 5) : '';
               const e = a.end_time ? a.end_time.substring(0, 5) : '';
               return s <= slot && e > slot;
             });
-            if (match) {
-              const statusColor = match.status_color || '#333';
-              rows += `<td style="${cellStyle}">
-                <div style="font-weight:600;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">${getPatientWithId(match)}</div>
-                <div style="font-size:9px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">${getTreatment(match)}</div>
-              </td>`;
+            if (matches.length > 0) {
+              const content = matches.map(m => {
+                const cab = m.gabinete ? `[${m.gabinete}] ` : '';
+                return `<div style="border-bottom: 1px dashed #eee; padding-bottom: 2px; margin-bottom: 2px;">
+                  <div style="font-weight:600;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">${cab}${getPatientWithId(m)}</div>
+                  <div style="font-size:9px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">${getTreatment(m)}</div>
+                </div>`;
+              }).join('');
+              rows += `<td style="${cellStyle}">${content}</td>`;
             } else {
               rows += `<td style="${cellStyle}color:#ddd;text-align:center;">—</td>`;
             }

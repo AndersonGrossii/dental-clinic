@@ -18,6 +18,7 @@ const router = Router();
 router.use(authMiddleware);
 
 router.get('/', allRoles, controller.getAll);
+router.get('/patients/:patientId/accepted-items', allRoles, controller.getAcceptedItemsByPatient);
 router.get('/:id', allRoles, controller.getById);
 
 router.post('/', staffOnly, validate(createQuotationRules), auditMiddleware('CREAR_COTIZACION', 'quotations'), controller.create);
@@ -25,9 +26,8 @@ router.put('/:id', staffOnly, validate(updateQuotationRules), auditMiddleware('A
 router.patch('/:id/status', staffOnly, validate(changeStatusRules), auditMiddleware('CAMBIAR_ESTADO_COTIZACION', 'quotations'), controller.changeStatus);
 router.post('/:id/accept-all', staffOnly, auditMiddleware('ACEPTAR_COTIZACION_COMPLETA', 'quotations'), controller.acceptAll);
 router.post('/:id/items-status', staffOnly, auditMiddleware('ACTUALIZAR_ITEMS_COTIZACION', 'quotations'), controller.updateItemsStatusBulk);
-router.get('/patients/:patientId/accepted-items', allRoles, controller.getAcceptedItemsByPatient);
-router.patch('/items/:itemId/execution-status', staffOnly, auditMiddleware('CAMBIAR_ESTADO_EJECUCION_ITEM', 'quotation_items'), controller.updateExecutionStatus);
-router.patch('/items/:itemId/status', staffOnly, auditMiddleware('CAMBIAR_ESTADO_ITEM_COTIZACION', 'quotations'), controller.updateItemStatus);
+router.patch('/items/:itemId/execution-status', allRoles, auditMiddleware('CAMBIAR_ESTADO_EJECUCION_ITEM', 'quotation_items'), controller.updateExecutionStatus);
+router.patch('/items/:itemId/status', allRoles, auditMiddleware('CAMBIAR_ESTADO_ITEM_COTIZACION', 'quotations'), controller.updateItemStatus);
 router.delete('/:id', staffOnly, auditMiddleware('ELIMINAR_COTIZACION', 'quotations'), controller.remove);
 
 export default router;

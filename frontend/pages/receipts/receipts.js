@@ -259,7 +259,7 @@ export class Receipts {
             <p>Monto Pagado: ${formatCurrency(rec.amount_paid)}</p>
             <p>Método de Pago: ${formatPaymentMethods(rec)}</p>
             <hr/>
-            <h2>Saldo Restante: ${formatCurrency(rec.balance)}</h2>
+            <h2>A falta de abonar: ${formatCurrency(rec.balance)}</h2>
             <h2 style="color: #0f86ec;">TOTAL RECIBO: ${formatCurrency(rec.total)}</h2>
           </div>
 

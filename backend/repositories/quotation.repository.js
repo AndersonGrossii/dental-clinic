@@ -76,7 +76,7 @@ class QuotationRepository extends BaseRepository {
                 0
               ) AS pending_items_count,
               COALESCE(
-                (SELECT COUNT(*) FROM quotation_items qi WHERE qi.quotation_id = q.id AND qi.status = 'aceptado' AND (qi.execution_status IS NULL OR qi.execution_status != 'realizado')),
+                (SELECT COUNT(*) FROM quotation_items qi WHERE qi.quotation_id = q.id AND (qi.execution_status IS NULL OR qi.execution_status != 'realizado')),
                 0
               ) AS unrealized_accepted_count,
               COALESCE(
@@ -323,15 +323,16 @@ class QuotationRepository extends BaseRepository {
       const insertedItems = [];
 
       for (const item of items) {
-        const clinicId = store?.clinicId;
-        const itemStatus = item.status || 'pendiente';
+        const itemStatus = item.status || 'aceptado';
+        const execStatus = item.execution_status || 'pendiente';
+        const toothNumber = item.tooth_number || null;
         const itemResult = await client.query(
-          `INSERT INTO quotation_items (quotation_id, treatment_id, description, quantity, unit_price, discount, total, status${clinicId ? ', clinic_id' : ''})
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8${clinicId ? ', $9' : ''})
+          `INSERT INTO quotation_items (quotation_id, treatment_id, description, quantity, unit_price, discount, total, status, execution_status, tooth_number${clinicId ? ', clinic_id' : ''})
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10${clinicId ? ', $11' : ''})
            RETURNING *`,
           clinicId
-            ? [quotation.id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.discount || 0, item.total, itemStatus, clinicId]
-            : [quotation.id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.discount || 0, item.total, itemStatus]
+            ? [quotation.id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.discount || 0, item.total, itemStatus, execStatus, toothNumber, clinicId]
+            : [quotation.id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.discount || 0, item.total, itemStatus, execStatus, toothNumber]
         );
         insertedItems.push(itemResult.rows[0]);
       }
@@ -366,29 +367,48 @@ class QuotationRepository extends BaseRepository {
 
       if (quotationResult.rows.length === 0) return null;
 
-      const delConditions = ['quotation_id = $1'];
-      const delParams = [id];
-      if (clinicId) {
-        delConditions.push(`clinic_id = $${delParams.length + 1}`);
-        delParams.push(clinicId);
-      }
-      await client.query(`DELETE FROM quotation_items WHERE ${delConditions.join(' AND ')}`, delParams);
+      const existingItemIds = items.filter(i => i.id).map(i => parseInt(i.id, 10));
 
-      const insertedItems = [];
-      for (const item of items) {
-        const itemStatus = item.status || 'pendiente';
-        const itemResult = await client.query(
-          `INSERT INTO quotation_items (quotation_id, treatment_id, description, quantity, unit_price, discount, total, status${clinicId ? ', clinic_id' : ''})
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8${clinicId ? ', $9' : ''})
-           RETURNING *`,
-          clinicId
-            ? [id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.discount || 0, item.total, itemStatus, clinicId]
-            : [id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.discount || 0, item.total, itemStatus]
+      if (existingItemIds.length > 0) {
+        await client.query(
+          `DELETE FROM quotation_items WHERE quotation_id = $1 AND id NOT IN (${existingItemIds.map((_, i) => `$${i + 2}`).join(', ')})`,
+          [id, ...existingItemIds]
         );
-        insertedItems.push(itemResult.rows[0]);
+      } else {
+        await client.query(`DELETE FROM quotation_items WHERE quotation_id = $1`, [id]);
       }
 
-      return { ...quotationResult.rows[0], items: insertedItems };
+      const processedItems = [];
+      for (const item of items) {
+        const itemStatus = item.status || 'aceptado';
+        const execStatus = item.execution_status || 'pendiente';
+        const toothNumber = item.tooth_number || null;
+
+        if (item.id) {
+          const updateRes = await client.query(
+            `UPDATE quotation_items
+             SET treatment_id = $1, description = $2, quantity = $3, unit_price = $4, discount = $5, total = $6, status = $7, execution_status = $8, tooth_number = $9
+             WHERE id = $10 AND quotation_id = $11
+             RETURNING *`,
+            [item.treatment_id || null, item.description, item.quantity, item.unit_price, item.discount || 0, item.total, itemStatus, execStatus, toothNumber, item.id, id]
+          );
+          if (updateRes.rows.length > 0) {
+            processedItems.push(updateRes.rows[0]);
+          }
+        } else {
+          const insertRes = await client.query(
+            `INSERT INTO quotation_items (quotation_id, treatment_id, description, quantity, unit_price, discount, total, status, execution_status, tooth_number${clinicId ? ', clinic_id' : ''})
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10${clinicId ? ', $11' : ''})
+             RETURNING *`,
+            clinicId
+              ? [id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.discount || 0, item.total, itemStatus, execStatus, toothNumber, clinicId]
+              : [id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.discount || 0, item.total, itemStatus, execStatus, toothNumber]
+          );
+          processedItems.push(insertRes.rows[0]);
+        }
+      }
+
+      return { ...quotationResult.rows[0], items: processedItems };
     });
   }
 
@@ -647,6 +667,19 @@ class QuotationRepository extends BaseRepository {
             [patientTreatmentId]
           );
           patientTreatmentId = null;
+        }
+
+        // Si existen registros en patient_treatments derivados de este ítem/presupuesto, asegurar su desactivación
+        if (item.quote_number) {
+          await client.query(
+            `UPDATE patient_treatments 
+             SET deleted_at = NOW(), updated_at = NOW() 
+             WHERE patient_id = $1 
+               AND deleted_at IS NULL 
+               AND (notes ILIKE $2 OR notes ILIKE $3)
+               AND (treatment_id = $4 OR price = $5)`,
+            [item.patient_id, `%${item.quote_number}%`, `%COT-${item.quotation_id}%`, item.treatment_id || null, item.total]
+          );
         }
 
         // Si la factura asociada no tiene pagos, remover el ítem de la factura

@@ -96,7 +96,13 @@ export class PatientProfile {
 
   renderProfile() {
     const pat = this.patient;
-    const isDoctor = state.get('user')?.role_name === 'doctor';
+    const userRole = (state.get('user')?.role_name || '').toLowerCase();
+    const isClinicalStaff = ['doctor', 'higienista'].includes(userRole);
+
+    const allowedClinicalTabs = ['info', 'treatments', 'appointments', 'notes', 'prescriptions'];
+    if (isClinicalStaff && !allowedClinicalTabs.includes(this.activeTab)) {
+      this.activeTab = 'info';
+    }
 
     // Tabs links
     const tabLink = (id, label) => `
@@ -126,8 +132,8 @@ export class PatientProfile {
             <p><strong>Dirección:</strong> ${pat.address || 'N/A'}</p>
             <p><strong>Contacto de Emergencia:</strong> ${pat.emergency_contact_name || 'N/A'} (${pat.emergency_contact_phone || 'N/A'})</p>
           </div>
-          <div style="grid-column: span 2; margin-top: var(--space-4); display: grid; grid-template-columns: ${isDoctor ? '1fr' : '1fr 1fr'}; gap: var(--space-6);">
-            <div style="${isDoctor ? 'grid-column: span 2;' : ''}">
+          <div style="grid-column: span 2; margin-top: var(--space-4); display: grid; grid-template-columns: ${isClinicalStaff ? '1fr' : '1fr 1fr'}; gap: var(--space-6);">
+            <div style="${isClinicalStaff ? 'grid-column: span 2;' : ''}">
               <h3 style="margin-bottom: var(--space-4); border-bottom: 2px solid var(--gray-100); padding-bottom: 4px;">Historial Médico & Alergias</h3>
               <div style="background-color: var(--danger-50); border-left: 4px solid var(--danger-500); padding: var(--space-3); border-radius: var(--radius-sm); margin-bottom: var(--space-3);">
                 <p style="color: var(--danger-900); font-weight: 600; margin-bottom: 2px;">⚠️ Alergias Registradas</p>
@@ -137,7 +143,7 @@ export class PatientProfile {
               <p><strong>Medicamentos Actuales:</strong> ${pat.current_medications || 'Ninguno.'}</p>
               <p><strong>Aseguradora:</strong> ${pat.insurance_provider || 'Ninguna'} (No. Póliza: ${pat.insurance_number || 'N/A'})</p>
             </div>
-            ${isDoctor ? '' : `
+            ${isClinicalStaff ? '' : `
               <div>
                 <h3 style="margin-bottom: var(--space-4); border-bottom: 2px solid var(--gray-100); padding-bottom: 4px;">Resumen Financiero</h3>
                 <div style="display: flex; flex-direction: column; gap: var(--space-3); background-color: var(--gray-50); padding: var(--space-4); border-radius: var(--radius-md); border: 1px solid var(--border-color);">
@@ -540,67 +546,56 @@ export class PatientProfile {
         </div>
       `;
     } else if (this.activeTab === 'quotations') {
-      const STATUS_LABELS = {
-        borrador: 'Borrador',
-        enviada: 'Enviada',
-        aceptada: 'Aceptada',
-        rechazada: 'Rechazada',
-        expirada: 'Expirada',
-      };
+      let quotationRows = (this.quotations || []).map(q => {
+        const totalAmt = parseFloat(q.total || 0);
+        const paidAmt = parseFloat(q.amount_paid || 0);
+        const remBal = q.remaining_balance !== undefined ? parseFloat(q.remaining_balance) : Math.max(0, totalAmt - paidAmt);
+        const isFullyPaid = (q.payment_status === 'pagado' || remBal <= 0.001) && totalAmt > 0 && paidAmt >= totalAmt - 0.001;
+        const itemsCount = parseInt(q.items_count || (q.items ? q.items.length : 0), 10);
+        const unrealizedCount = parseInt(q.unrealized_accepted_count !== undefined ? q.unrealized_accepted_count : (q.items ? q.items.filter(i => (i.execution_status || 'pendiente') !== 'realizado').length : 0), 10);
+        const pendingCount = parseInt(q.pending_items_count !== undefined ? q.pending_items_count : (q.items ? q.items.filter(i => (i.status || 'pendiente') === 'pendiente').length : 0), 10);
+        const allRealized = itemsCount > 0 && unrealizedCount === 0 && pendingCount === 0;
 
-      const STATUS_BADGES = {
-        borrador: 'badge-secondary',
-        enviada: 'badge-info',
-        aceptada: 'badge-success',
-        rechazada: 'badge-danger',
-        expirada: 'badge-warning',
-      };
+        let statusBadge = '';
+        if (isFullyPaid && allRealized) {
+          if (q.paid_with_credit) {
+            statusBadge = `<span class="badge" style="background-color: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; font-weight: 600; font-size: 11px; padding: 3px 8px;">💳 Pagado (Saldo Crédito)</span>`;
+          } else {
+            statusBadge = `<span class="badge badge-success" style="background-color: var(--success-100); color: var(--success-800); font-weight: 600; font-size: 11px; padding: 3px 8px;">🟢 Pagado</span>`;
+          }
+        } else {
+          // If there is ANY treatment still not paid or not realized -> "Presupuesto Abierto"
+          if (paidAmt > 0 && isFullyPaid && !allRealized) {
+            statusBadge = `<span class="badge" style="background-color: #e0e7ff; color: #3730a3; border: 1px solid #c7d2fe; font-weight: 600; font-size: 11px; padding: 3px 8px;" title="Presupuesto 100% Pagado pero con tratamientos clínicos aún en curso">🔵 Presupuesto Abierto (100% Pagado - En Curso)</span>`;
+          } else if (paidAmt > 0) {
+            statusBadge = `<span class="badge" style="background-color: var(--warning-100); color: var(--warning-800); border: 1px solid #fed7aa; font-weight: 600; font-size: 11px; padding: 3px 8px;" title="Presupuesto con cobro parcial registrado">🟠 Presupuesto Abierto (Parcial: ${formatCurrency(paidAmt)} / ${formatCurrency(totalAmt)})</span>`;
+          } else {
+            statusBadge = `<span class="badge" style="background-color: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; font-weight: 600; font-size: 11px; padding: 3px 8px;" title="Presupuesto abierto sin cobros registrados">🔴 Presupuesto Abierto (Sin Pagar)</span>`;
+          }
+        }
 
-      let quotationRows = (this.quotations || []).map(q => `
+        return `
         <tr class="clickable-table-row profile-quotation-main-row" data-id="${q.id}">
           <td><strong># ${q.quote_number}</strong></td>
           <td>Dr/a. ${q.doctor_name || 'Sin asignar'}</td>
           <td><strong>${formatCurrency(q.total)}</strong></td>
-          <td>
-            <span class="badge ${STATUS_BADGES[q.status] || 'badge-secondary'}">${STATUS_LABELS[q.status] || q.status}</span>
-            ${q.paid_with_credit
-              ? `<span class="badge" style="background-color: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; font-weight: 600; font-size: 11px; margin-left: 4px; padding: 2px 6px;">💳 Pago con Saldo(Crédito)</span>`
-              : (q.payment_status === 'pagado'
-                ? `<span class="badge" style="background-color: var(--success-100); color: var(--success-800); font-size: 11px; margin-left: 4px; padding: 2px 6px;">🟢 100% Pagado${(q.status === 'parcial' || (q.accepted_total && q.accepted_total < q.total)) ? ' (Monto Aceptado)' : ''}</span>`
-                : (q.payment_status === 'parcial'
-                  ? `<span class="badge" style="background-color: var(--warning-100); color: var(--warning-800); font-size: 11px; margin-left: 4px; padding: 2px 6px;">🟠 Pagado: ${formatCurrency(q.amount_paid)}</span>`
-                  : ''))}
-          </td>
+          <td>${statusBadge}</td>
           <td>${q.created_at ? formatDate(q.created_at) : 'N/A'}</td>
           <td style="text-align: right;">
-            <button type="button" class="btn btn-sm btn-outline toggle-profile-quotation-actions-btn" data-id="${q.id}">
-              Acciones ▾
-            </button>
-          </td>
-        </tr>
-        <tr class="profile-quotation-actions-bar-row" id="profile-quotation-actions-${q.id}" style="display: none; background: var(--gray-50);">
-          <td colspan="6" style="padding: 12px 16px; border-bottom: 2px solid var(--primary-400);">
-            <div style="display: flex; gap: var(--space-3); align-items: center; justify-content: space-between; flex-wrap: wrap;">
-              <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);">
-                ⚙️ Opciones para Presupuesto #${q.quote_number}:
-              </div>
-              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                <button class="btn btn-sm btn-outline print-profile-quotation-btn" data-id="${q.id}" title="Ver / Imprimir Cotización">👁 Ver / Imprimir</button>
-                ${!q.is_closed ? `
-                  <button class="btn btn-sm btn-manage-quote manage-profile-quotation-btn" data-id="${q.id}" title="Gestionar Aceptación e Ítems">⚙️ Gestionar Ítems</button>
-                  <button class="btn btn-sm btn-warning status-profile-quotation-btn" data-id="${q.id}" title="Cambiar Estado del Presupuesto">🏷️ Cambiar Estado</button>
-                ` : ''}
-                ${!q.is_closed && q.payment_status !== 'pagado' && q.status !== 'completada' && ((q.status === 'aceptada' || q.status === 'parcial') && (q.remaining_balance === undefined || q.remaining_balance > 0)) ? `
-                  <button class="btn btn-sm btn-success pay-profile-quotation-btn" data-id="${q.id}" title="Registrar Pago del Presupuesto">💳 Registrar Pago</button>
-                ` : ''}
-                ${!q.invoice_id && !q.is_closed && q.payment_status !== 'pagado' ? `<button class="btn btn-sm btn-info invoice-profile-quotation-btn" data-id="${q.id}" title="Generar Factura de Ítems Aceptados">📄 Facturar Ítems</button>` : ''}
-                <button class="btn btn-sm btn-primary edit-profile-quotation-btn" data-id="${q.id}" title="Editar Presupuesto">✎ Editar</button>
-                <button class="btn btn-sm btn-danger delete-profile-quotation-btn" data-id="${q.id}" title="Eliminar Presupuesto">✕ Eliminar</button>
-              </div>
+            <div style="display: inline-flex; gap: 6px;">
+              <button type="button" class="btn btn-sm btn-primary manage-profile-quotation-btn" data-id="${q.id}" title="Gestionar ítems, estados y pagos del presupuesto">
+                ⚙️ Gestionar / Cobrar
+              </button>
+              <button type="button" class="btn btn-sm btn-outline print-profile-quotation-btn" data-id="${q.id}" title="Ver / Imprimir Cotización">
+                👁 Imprimir
+              </button>
+              <button type="button" class="btn btn-sm btn-ghost delete-profile-quotation-btn" data-id="${q.id}" title="Eliminar Presupuesto" style="color: var(--danger-600);">
+                ✕
+              </button>
             </div>
           </td>
         </tr>
-      `).join('');
+      `}).join('');
 
       if (!this.quotations || this.quotations.length === 0) {
         quotationRows = `
@@ -614,7 +609,10 @@ export class PatientProfile {
 
       tabContent = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
-          <h3>Presupuestos / Cotizaciones</h3>
+          <div>
+            <h3 style="margin: 0;">Presupuestos y Plan de Tratamientos</h3>
+            <p style="margin: 2px 0 0; color: var(--text-secondary); font-size: 13px;">Gestione tratamientos, estados de avance clínico y registre cobros en un único panel.</p>
+          </div>
           <button id="add-profile-quote-btn" class="btn btn-sm btn-primary">+ Nuevo Presupuesto</button>
         </div>
         <div class="table-container">
@@ -624,164 +622,13 @@ export class PatientProfile {
                 <th>No. Presupuesto</th>
                 <th>Doctor</th>
                 <th>Monto Total</th>
-                <th>Estado</th>
+                <th>Estado de Pago</th>
                 <th>Fecha de Creación</th>
-                <th>Acciones</th>
+                <th style="text-align: right;">Acciones</th>
               </tr>
             </thead>
             <tbody>
               ${quotationRows}
-            </tbody>
-          </table>
-        </div>
-      `;
-    } else if (this.activeTab === 'accepted-treatments') {
-      const allAccepted = this.acceptedTreatments || [];
-      const totalCount = allAccepted.length;
-      const totalRealized = allAccepted.filter(t => t.execution_status === 'realizado').length;
-      const taxedTotal = (t) => {
-        return parseFloat(t.total || 0);
-      };
-      const totalFinancialValue = allAccepted.reduce((acc, t) => acc + taxedTotal(t), 0);
-
-      let acceptedRows = allAccepted.map(t => {
-        const itemNet = parseFloat(t.total || 0);
-        const itemGross = itemNet;
-
-        const execStatus = t.execution_status || 'pendiente';
-        const payStatus = t.payment_status || 'ninguno';
-        const paidAmt = parseFloat(t.amount_paid || 0);
-        const remBal = parseFloat(t.remaining_balance !== undefined ? t.remaining_balance : Math.max(0, itemGross - paidAmt));
-
-        let execBadgeHtml = '';
-        if (execStatus === 'realizado') {
-          execBadgeHtml = `<span class="badge badge-success" style="font-weight: 600; padding: 4px 10px; background-color: var(--success-100); color: var(--success-800); border: 1px solid var(--success-300);" title="Tratamiento realizado y completado">🟢 Completado</span>`;
-        } else if (execStatus === 'en_proceso') {
-          execBadgeHtml = `<span class="badge badge-info" style="font-weight: 600; padding: 4px 10px; background-color: var(--primary-100); color: var(--primary-800); border: 1px solid var(--primary-300);" title="En proceso de atención">⚙️ En Proceso</span>`;
-        } else {
-          execBadgeHtml = `<span class="badge badge-warning" style="font-weight: 600; padding: 4px 10px; background-color: #ffedd5; color: #c2410c; border: 1px solid #fdba74;" title="Pendiente de ejecución">⏳ Pendiente</span>`;
-        }
-
-        let payBadgeHtml = '';
-        if (t.paid_with_credit || t.payment_method_name === 'saldo_credito') {
-          payBadgeHtml = `<span class="badge" style="background-color: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; font-weight: 600; padding: 4px 10px;">💳 Pago con Saldo(Crédito)</span>`;
-        } else if (payStatus === 'pagado' || remBal <= 0.001) {
-          payBadgeHtml = `<span class="badge badge-success" style="font-weight: 600; padding: 4px 10px; background-color: var(--success-100); color: var(--success-800); border: 1px solid var(--success-300);">🟢 100% Pagado</span>`;
-        } else if (payStatus === 'parcial' || paidAmt > 0) {
-          payBadgeHtml = `
-            <span class="badge badge-warning" style="font-weight: 600; padding: 4px 8px; background-color: #ffedd5; color: #c2410c; border: 1px solid #fdba74;">
-              🟠 Parcial (${formatCurrency(paidAmt)} / ${formatCurrency(itemGross)})
-            </span>
-            <div style="font-size: 11px; color: var(--danger-600); margin-top: 2px;">Debe ${formatCurrency(remBal)}</div>
-          `;
-        } else {
-          payBadgeHtml = `<span class="badge badge-danger" style="font-weight: 600; padding: 4px 8px; background-color: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5;">🔴 Sin Pagar (${formatCurrency(itemGross)})</span>`;
-        }
-
-        const isPatientPt = t.is_patient_treatment !== false;
-
-        return `
-          <tr>
-            <td><strong class="badge badge-info" style="font-family: monospace; font-size: 13px;"># ${t.quote_number || 'Presupuesto'}</strong></td>
-            <td>
-              <strong style="color: var(--text-primary);">${t.description}</strong>
-              ${t.tooth_number ? `<span class="badge badge-secondary" style="font-size: 11px; margin-left: 6px; padding: 2px 6px;">🦷 Diente #${t.tooth_number}</span>` : ''}
-            </td>
-            <td>${t.doctor_first_name ? `Dr/a. ${t.doctor_first_name} ${t.doctor_last_name || ''}` : '<span style="color: var(--text-secondary); font-style: italic;">Sin asignar</span>'}</td>
-            <td>
-              <strong style="color: var(--primary-700);">${formatCurrency(itemGross)}</strong>
-            </td>
-            <td>${execBadgeHtml}</td>
-            <td>${payBadgeHtml}</td>
-            <td>
-              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-                ${!isPatientPt ? `
-                  ${execStatus !== 'realizado' ? `
-                    <button class="btn btn-xs btn-success set-item-exec-btn" data-id="${t.id}" data-exec-status="realizado" title="Marcar como Completado">
-                      ✅ Completado
-                    </button>
-                  ` : `
-                    <button class="btn btn-xs btn-outline-secondary set-item-exec-btn" data-id="${t.id}" data-exec-status="en_proceso" title="Cambiar a En Proceso">
-                      ⚙️ En Proceso
-                    </button>
-                  `}
-                ` : ''}
-                ${remBal > 0.001 ? `
-                  <button class="btn btn-xs btn-primary profile-charge-quoteitem-btn" data-quote-item-id="${t.id}" data-rem-bal="${remBal}" data-gross="${itemGross}" data-name="${t.description}" title="Cobrar saldo pendiente de este tratamiento">
-                    💵 Cobrar Saldo (${formatCurrency(remBal)})
-                  </button>
-                ` : ''}
-                ${isPatientPt ? `
-                  <button class="btn btn-xs btn-outline-danger cancel-realized-treatment-btn" data-id="${t.id}" data-is-patient-treatment="true" data-description="${t.description}" data-amount="${formatCurrency(itemGross)}" title="Cancelar tratamiento">
-                    ❌ Cancelar
-                  </button>
-                ` : ''}
-              </div>
-            </td>
-          </tr>
-        `;
-      }).join('');
-
-      if (totalCount === 0) {
-        acceptedRows = `
-          <tr>
-            <td colspan="7" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
-              No hay tratamientos aceptados en los presupuestos de este paciente.
-            </td>
-          </tr>
-        `;
-      }
-
-      tabContent = `
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: var(--space-4); flex-wrap: wrap; gap: var(--space-3);">
-          <div>
-            <h3 style="margin: 0;">Tratamientos Aceptados del Paciente</h3>
-            <p style="margin: 4px 0 0 0; font-size: var(--text-xs); color: var(--text-secondary);">
-              Tratamientos aceptados en presupuestos. Puede gestionar su ejecución (En Proceso / Completado) y cobrar saldos pendientes.
-            </p>
-          </div>
-          <span class="badge badge-success" style="font-size: 13px; padding: 6px 12px; font-weight: 600;">
-            ${totalRealized} / ${totalCount} Completado(s)
-          </span>
-        </div>
-
-        <div class="exec-stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: var(--space-4);">
-          <div class="exec-stat-card">
-            <div class="exec-stat-icon" style="background-color: var(--success-50); color: var(--success-700);">
-              ✅
-            </div>
-            <div>
-              <div class="exec-stat-val" style="color: var(--success-600);">${totalRealized} de ${totalCount}</div>
-              <div class="exec-stat-lbl">Tratamientos Completados</div>
-            </div>
-          </div>
-
-          <div class="exec-stat-card">
-            <div class="exec-stat-icon" style="background-color: var(--purple-50, #f3e8ff); color: var(--purple-700, #7e22ce);">
-              💎
-            </div>
-            <div>
-              <div class="exec-stat-val" style="color: var(--primary-800);">${formatCurrency(totalFinancialValue)}</div>
-              <div class="exec-stat-lbl">Valor Total Aceptado</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Presupuesto</th>
-                <th>Tratamiento / Descripción</th>
-                <th>Doctor</th>
-                <th>Monto Total</th>
-                <th>Ejecución</th>
-                <th>Estado de Pago</th>
-                <th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${acceptedRows}
             </tbody>
           </table>
         </div>
@@ -879,7 +726,7 @@ export class PatientProfile {
             <h1 class="page-title">${pat.first_name} ${pat.last_name}</h1>
             <div style="display: flex; gap: var(--space-2); align-items: center; margin-top: 4px;">
               <span class="badge badge-info" style="font-size: var(--text-sm); font-weight: 600; padding: 2px 8px;">ID: ${pat.custom_id || 'N/A'}</span>
-              ${isDoctor ? '' : `
+              ${isClinicalStaff ? '' : `
                 <span class="badge ${parseFloat(pat.balance || 0) > 0 ? 'badge-success' : parseFloat(pat.balance || 0) < 0 ? 'badge-danger' : 'badge-secondary'}" style="font-size: var(--text-sm); font-weight: 700; padding: 4px 10px;" title="Balance general de la cuenta">
                   ${parseFloat(pat.balance || 0) > 0 ? `🟢 Balance a Favor: ${formatCurrency(pat.balance)}` : parseFloat(pat.balance || 0) < 0 ? `🔴 Balance Deudor: ${formatCurrency(Math.abs(pat.balance))}` : `Balance: $0.00`}
                 </span>
@@ -892,8 +739,10 @@ export class PatientProfile {
           </div>
         </div>
         <div style="display: flex; gap: var(--space-2); flex-wrap: wrap;">
-          <button id="btn-add-deposit" class="btn btn-success" style="font-weight: 600;">💵 Registrar Adelanto</button>
-          <button id="btn-charge-treatment" class="btn btn-primary" style="font-weight: 600;">🦷 Cobrar Tratamiento</button>
+          ${isClinicalStaff ? '' : `
+            <button id="btn-add-deposit" class="btn btn-success" style="font-weight: 600;">💵 Registrar Adelanto</button>
+            <button id="btn-charge-treatment" class="btn btn-primary" style="font-weight: 600;">🦷 Cobrar Tratamiento</button>
+          `}
           <button id="schedule-appointment-btn" class="btn btn-outline-primary">📅 Agendar Cita</button>
           <button id="edit-patient-profile-btn" class="btn btn-secondary">Editar Datos</button>
           <button id="delete-patient-profile-btn" class="btn btn-danger" title="Eliminar este paciente">🗑️ Eliminar</button>
@@ -903,13 +752,12 @@ export class PatientProfile {
 
       <div class="tabs" style="display: flex; gap: var(--space-2); margin-bottom: var(--space-4); border-bottom: 1px solid var(--border-color); padding-bottom: var(--space-2); flex-wrap: wrap;">
         ${tabLink('info', 'Ficha Técnica')}
-        ${tabLink('payments', 'Pagos y Saldo')}
+        ${isClinicalStaff ? '' : tabLink('payments', 'Pagos y Saldo')}
         ${tabLink('treatments', 'Historial Odontológico')}
-        ${tabLink('accepted-treatments', 'Tratamientos Realizados')}
         ${tabLink('appointments', 'Historial de Citas')}
-        ${tabLink('invoices', 'Facturas')}
-        ${tabLink('receipts', 'Recibos')}
-        ${tabLink('quotations', 'Presupuestos')}
+        ${isClinicalStaff ? '' : tabLink('invoices', 'Facturas')}
+        ${isClinicalStaff ? '' : tabLink('receipts', 'Recibos')}
+        ${isClinicalStaff ? '' : tabLink('quotations', 'Presupuestos')}
         ${tabLink('notes', 'Notas de Evolución')}
         ${tabLink('prescriptions', 'Prescripciones')}
       </div>
@@ -997,50 +845,6 @@ export class PatientProfile {
       btn.addEventListener('click', () => {
         const id = Number(btn.dataset.id);
         this.showDeleteDentalHistoryModal(id);
-      }, { signal });
-    });
-
-    // Cancelar tratamiento realizado del paciente y recuperar balance
-    this.container.querySelectorAll('.cancel-realized-treatment-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const id = btn.getAttribute('data-id');
-        const isPatientTreatment = btn.getAttribute('data-is-patient-treatment') !== 'false';
-        const description = btn.getAttribute('data-description');
-        const amountStr = btn.getAttribute('data-amount');
-
-        if (confirm(`¿Está seguro de que desea cancelar el tratamiento realizado "${description}"?\n\nEl monto de ${amountStr} se devolverá y recuperará automáticamente en el balance del paciente.`)) {
-          try {
-            await treatmentService.cancelRealizedTreatment(id, isPatientTreatment);
-            toast.success(`Tratamiento "${description}" cancelado. El saldo de ${amountStr} ha sido recuperado en la cuenta.`);
-            await this.loadPatientData();
-          } catch (err) {
-            toast.error(err.message || 'Error al cancelar el tratamiento realizado');
-          }
-        }
-      }, { signal });
-    });
-
-    // Cambiar estado de ejecución de ítem aceptado (realizado / en_proceso)
-    this.container.querySelectorAll('.set-item-exec-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const itemId = Number(btn.getAttribute('data-id'));
-        const newStatus = btn.getAttribute('data-exec-status');
-        const user = state.get('user');
-        try {
-          await quotationService.updateExecutionStatus(itemId, newStatus, user?.id);
-          toast.success(`Estado de ejecución actualizado a ${newStatus === 'realizado' ? 'Completado' : 'En Proceso'}.`);
-          await this.loadPatientData();
-        } catch (err) {
-          toast.error(err.message || 'Error al actualizar el estado de ejecución.');
-        }
-      }, { signal });
-    });
-
-    // Cobrar saldo pendiente de ítem aceptado desde la pestaña Tratamientos Aceptados
-    this.container.querySelectorAll('.profile-charge-quoteitem-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const quoteItemId = btn.getAttribute('data-quote-item-id');
-        this.showChargeTreatmentModal(quoteItemId);
       }, { signal });
     });
 
@@ -1300,22 +1104,14 @@ export class PatientProfile {
 
     // Quotation table row toggle in patient profile
     this.container.querySelectorAll('.profile-quotation-main-row').forEach(row => {
-      row.addEventListener('click', (e) => {
-        // Ignore clicks on action buttons inside row options bar
-        if (e.target.closest('.print-profile-quotation-btn, .manage-profile-quotation-btn, .status-profile-quotation-btn, .invoice-profile-quotation-btn, .edit-profile-quotation-btn, .delete-profile-quotation-btn')) {
+      row.addEventListener('click', async (e) => {
+        if (e.target.closest('.print-profile-quotation-btn, .manage-profile-quotation-btn, .delete-profile-quotation-btn')) {
           return;
         }
-
         const id = row.getAttribute('data-id');
-        const targetActionsRow = this.container.querySelector(`#profile-quotation-actions-${id}`);
-        if (targetActionsRow) {
-          const isOpen = targetActionsRow.style.display !== 'none';
-          this.container.querySelectorAll('.profile-quotation-actions-bar-row').forEach(r => r.style.display = 'none');
-          this.container.querySelectorAll('.profile-quotation-main-row').forEach(r => r.classList.remove('row-active'));
-          if (!isOpen) {
-            targetActionsRow.style.display = 'table-row';
-            row.classList.add('row-active');
-          }
+        if (id) {
+          const { Quotations } = await import('../quotations/quotations.js');
+          new Quotations(this.container).showQuoteModal(id, this.patientId, refreshProfile);
         }
       }, { signal });
     });
@@ -1326,49 +1122,24 @@ export class PatientProfile {
     };
 
     this.container.querySelectorAll('.print-profile-quotation-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
         const { Quotations } = await import('../quotations/quotations.js');
         new Quotations(this.container).showViewOptionsModal(btn.dataset.id, refreshProfile);
       }, { signal });
     });
 
     this.container.querySelectorAll('.manage-profile-quotation-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const { Quotations } = await import('../quotations/quotations.js');
-        new Quotations(this.container).showManageQuoteModal(btn.dataset.id, refreshProfile);
-      }, { signal });
-    });
-
-    this.container.querySelectorAll('.status-profile-quotation-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const { Quotations } = await import('../quotations/quotations.js');
-        new Quotations(this.container).showStatusModal(btn.dataset.id, refreshProfile);
-      }, { signal });
-    });
-
-    this.container.querySelectorAll('.pay-profile-quotation-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const { Quotations } = await import('../quotations/quotations.js');
-        new Quotations(this.container).showQuotationPaymentModal(btn.dataset.id, refreshProfile);
-      }, { signal });
-    });
-
-    this.container.querySelectorAll('.invoice-profile-quotation-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const { Quotations } = await import('../quotations/quotations.js');
-        new Quotations(this.container).showConvertInvoiceModal(btn.dataset.id, refreshProfile);
-      }, { signal });
-    });
-
-    this.container.querySelectorAll('.edit-profile-quotation-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
         const { Quotations } = await import('../quotations/quotations.js');
         new Quotations(this.container).showQuoteModal(btn.dataset.id, this.patientId, refreshProfile);
       }, { signal });
     });
 
     this.container.querySelectorAll('.delete-profile-quotation-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
         const { Quotations } = await import('../quotations/quotations.js');
         new Quotations(this.container).showDeleteConfirm(btn.dataset.id, refreshProfile);
       }, { signal });
@@ -2624,7 +2395,6 @@ export class PatientProfile {
 
     const catalogList = Array.isArray(catalogTreatments) ? catalogTreatments : (catalogTreatments?.data || catalogTreatments?.rows || []);
     const doctorList = Array.isArray(doctors) ? doctors : (doctors?.data || doctors?.rows || []);
-
     const availCredit = Math.max(0, this.patientCredit?.balance !== undefined ? this.patientCredit.balance : (this.patient.available_credit || 0));
 
     const methodOptions = (methods || []).map(m => {
@@ -2643,8 +2413,10 @@ export class PatientProfile {
       treatmentSelectOptions += unlinkedAccepted.map(at => {
         const fullTotal = parseFloat(at.total || 0);
         const owed = at.remaining_balance !== undefined ? parseFloat(at.remaining_balance) : (fullTotal - parseFloat(at.amount_paid || 0));
+        const qty = parseInt(at.quantity || 1, 10) || 1;
+        const unitPrice = parseFloat(at.unit_price || (qty > 0 ? (fullTotal / qty) : fullTotal));
         const quoteRef = at.quote_number ? ` (Presupuesto #${at.quote_number})` : '';
-        return `<option value="quoteitem_${at.id}" data-total="${fullTotal}" data-price="${owed}" data-doctor="${at.doctor_id || ''}" data-tooth="${at.tooth_number || ''}" data-name="${at.description}">${at.description}${quoteRef} — Total: ${formatCurrency(fullTotal)} | Pendiente: ${formatCurrency(owed)}</option>`;
+        return `<option value="quoteitem_${at.id}" data-total="${fullTotal}" data-price="${owed}" data-quantity="${qty}" data-unit-price="${unitPrice}" data-doctor="${at.doctor_id || ''}" data-tooth="${at.tooth_number || ''}" data-name="${at.description}">${at.description}${quoteRef} — Total: ${formatCurrency(fullTotal)} | Pendiente: ${formatCurrency(owed)}${qty > 1 ? ` (Cant: ${qty})` : ''}</option>`;
       }).join('');
       treatmentSelectOptions += `</optgroup>`;
     }
@@ -2653,7 +2425,7 @@ export class PatientProfile {
       treatmentSelectOptions += `<optgroup label="📋 Catálogo General de Tratamientos (Nuevo Presupuesto)">`;
       treatmentSelectOptions += catalogList.map(ct => {
         const price = formatCurrency(ct.default_price || 0);
-        return `<option value="catalog_${ct.id}" data-total="${ct.default_price || 0}" data-price="${ct.default_price || 0}" data-name="${ct.name}">${ct.name} — ${price}</option>`;
+        return `<option value="catalog_${ct.id}" data-total="${ct.default_price || 0}" data-price="${ct.default_price || 0}" data-quantity="1" data-unit-price="${ct.default_price || 0}" data-name="${ct.name}">${ct.name} — ${price}</option>`;
       }).join('');
       treatmentSelectOptions += `</optgroup>`;
     }
@@ -2667,18 +2439,24 @@ export class PatientProfile {
           </select>
         </div>
 
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
-          <div class="form-group">
-            <label class="form-label">Precio Total del Tratamiento ($) <span style="color: var(--danger-500);">*</span></label>
-            <input type="number" name="total_price" id="modal-charge-total-price" class="form-input" placeholder="0.00" step="0.01" min="0.01" required style="font-size: 16px; font-weight: 700; color: var(--primary-800);" />
-            <span style="font-size: 11px; color: var(--gray-500);">Monto total contratado (editable)</span>
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
+          <div class="form-group" id="modal-charge-qty-container">
+            <label class="form-label">Cantidad a Pagar</label>
+            <input type="number" name="quantity" id="modal-charge-quantity" class="form-input" value="1" min="1" step="1" required style="font-size: 15px; font-weight: 600;" />
+            <span id="modal-charge-qty-hint" style="font-size: 11px; color: var(--gray-500);">Unidades a abonar</span>
           </div>
           <div class="form-group">
-            <label class="form-label">Monto a Pagar en este Momento ($) <span style="color: var(--danger-500);">*</span></label>
+            <label class="form-label">Precio Unitario ($) <span style="color: var(--danger-500);">*</span></label>
+            <input type="number" name="unit_price" id="modal-charge-unit-price" class="form-input" placeholder="0.00" step="0.01" min="0.01" required style="font-size: 15px; font-weight: 600;" />
+            <span style="font-size: 11px; color: var(--gray-500);">Precio por unidad</span>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Monto a Pagar ($) <span style="color: var(--danger-500);">*</span></label>
             <input type="number" name="amount" id="modal-charge-amount" class="form-input" placeholder="0.00" step="0.01" min="0.01" required style="font-size: 18px; font-weight: 700; color: var(--success-700);" />
-            <span style="font-size: 11px; color: var(--gray-500);">Abono / pago a realizar ahora</span>
+            <span style="font-size: 11px; color: var(--gray-500);">Abono / total a cobrar</span>
           </div>
         </div>
+        <input type="hidden" name="total_price" id="modal-charge-total-price" value="0.00" />
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
           <div class="form-group">
@@ -2743,7 +2521,9 @@ export class PatientProfile {
         const targetVal = data.treatment_selection || '';
         const patientId = Number(this.patientId);
         const paymentMethodId = data.payment_method_id === 'saldo_credito' ? 'saldo_credito' : Number(data.payment_method_id);
-        const totalPrice = parseFloat(data.total_price || data.amount);
+        const quantity = parseInt(data.quantity || 1, 10) || 1;
+        const unitPrice = parseFloat(data.unit_price || 0);
+        const totalPrice = parseFloat(data.total_price || (quantity * unitPrice) || data.amount);
         const amountPaid = parseFloat(data.amount);
         const doctorId = data.doctor_id ? Number(data.doctor_id) : null;
         const toothNumber = data.tooth_number || null;
@@ -2785,8 +2565,8 @@ export class PatientProfile {
                 {
                   treatment_id: catalogId,
                   description: treatmentName,
-                  quantity: 1,
-                  unit_price: totalPrice,
+                  quantity: quantity,
+                  unit_price: unitPrice || (totalPrice / quantity),
                   total: totalPrice,
                   status: 'aceptado',
                   tooth_number: toothNumber
@@ -2832,7 +2612,7 @@ export class PatientProfile {
                 payment_date: paymentDate
               });
 
-              toast.success(`¡Presupuesto Aceptado #${createdQuote.quote_number || ''} generado y recibo (${formatCurrency(amountPaid)}) registrado con éxito!`);
+              toast.success(`¡Cobro de tratamiento registrado y recibo (${formatCurrency(amountPaid)}) generado con éxito!`);
             }
           } else if (targetVal.startsWith('quoteitem_')) {
             const quoteItemId = Number(targetVal.replace('quoteitem_', ''));
@@ -2897,9 +2677,7 @@ export class PatientProfile {
             toast.success(`¡Cobro de tratamiento (${formatCurrency(amountPaid)}) registrado con éxito!`);
           }
 
-          setTimeout(() => {
-            window.location.reload();
-          }, 500);
+          await this.loadPatientData();
           return true;
         } catch (err) {
           toast.error(err.message || 'Error al procesar el cobro del tratamiento');
@@ -2908,14 +2686,29 @@ export class PatientProfile {
       }
     });
 
-    // Auto-completar monto total, abono actual, diente, doctor y notas al seleccionar tratamiento
+    // Auto-completar monto total, abono actual, cantidad, diente, doctor y notas al seleccionar tratamiento
     setTimeout(() => {
       const selectElem = document.getElementById('modal-charge-treatment-select');
+      const qtyElem = document.getElementById('modal-charge-quantity');
+      const unitPriceElem = document.getElementById('modal-charge-unit-price');
       const totalPriceElem = document.getElementById('modal-charge-total-price');
       const amountElem = document.getElementById('modal-charge-amount');
+      const qtyHintElem = document.getElementById('modal-charge-qty-hint');
       const toothElem = document.getElementById('modal-charge-tooth');
       const doctorElem = document.getElementById('modal-charge-doctor');
       const notesElem = document.getElementById('modal-charge-notes');
+
+      const updateAmountFromQty = () => {
+        const q = parseInt(qtyElem?.value || 1, 10) || 1;
+        const u = parseFloat(unitPriceElem?.value || 0);
+        const calculated = q * u;
+        if (amountElem) {
+          amountElem.value = calculated > 0 ? calculated.toFixed(2) : '0.00';
+        }
+      };
+
+      if (qtyElem) qtyElem.addEventListener('input', updateAmountFromQty);
+      if (unitPriceElem) unitPriceElem.addEventListener('input', updateAmountFromQty);
 
       if (selectElem) {
         selectElem.addEventListener('change', () => {
@@ -2923,12 +2716,24 @@ export class PatientProfile {
           if (selectedOption && selectedOption.dataset) {
             const pendingPrice = selectedOption.dataset.price ? parseFloat(selectedOption.dataset.price) : 0;
             const fullTotal = selectedOption.dataset.total ? parseFloat(selectedOption.dataset.total) : pendingPrice;
+            const totalQty = selectedOption.dataset.quantity ? parseInt(selectedOption.dataset.quantity, 10) : 1;
+            const unitPrice = selectedOption.dataset.unitPrice ? parseFloat(selectedOption.dataset.unitPrice) : (totalQty > 0 ? fullTotal / totalQty : fullTotal);
             const name = selectedOption.dataset.name;
             const tooth = selectedOption.dataset.tooth;
             const doctor = selectedOption.dataset.doctor;
 
+            const unpaidUnits = unitPrice > 0 ? Math.min(totalQty, Math.max(1, Math.round(pendingPrice / unitPrice))) : totalQty;
+
+            if (qtyElem) {
+              qtyElem.max = totalQty;
+              qtyElem.value = unpaidUnits;
+            }
+            if (qtyHintElem) {
+              qtyHintElem.textContent = totalQty > 1 ? `De ${totalQty} unidades contratadas` : 'Unidades a abonar';
+            }
+            if (unitPriceElem) unitPriceElem.value = unitPrice.toFixed(2);
             if (totalPriceElem) totalPriceElem.value = fullTotal.toFixed(2);
-            if (amountElem) amountElem.value = pendingPrice.toFixed(2);
+            if (amountElem) amountElem.value = (unpaidUnits * unitPrice).toFixed(2);
             if (name && notesElem) notesElem.value = `Cobro de tratamiento: ${name}`;
             if (tooth && toothElem) toothElem.value = tooth;
             if (doctor && doctorElem) doctorElem.value = doctor;

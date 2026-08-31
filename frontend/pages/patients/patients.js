@@ -17,7 +17,7 @@ export class Patients {
     this.searchQuery = '';
     this.statusFilter = 'all';
     this.searchTimeout = null;
-    this.isDoctor = state.get('user')?.role_name === 'doctor';
+    this.isDoctor = ['doctor', 'higienista'].includes(state.get('user')?.role_name);
   }
 
   async render() {
