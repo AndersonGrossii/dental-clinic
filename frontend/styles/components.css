@@ -2562,3 +2562,66 @@ tbody tr.clickable {
   color: var(--text-secondary);
   font-weight: 500;
 }
+
+/* ═══════════════════════════════════════════
+   QUOTATION ITEM COLOR STATES
+   ═══════════════════════════════════════════ */
+
+/* 1. Paid & Complete -> Light Green */
+.quote-manage-item-row.quote-item-paid-complete,
+.quote-manage-item-row.quote-item-paid-complete td,
+.quote-item-table-row.quote-item-paid-complete,
+.quote-item-table-row.quote-item-paid-complete td {
+  background-color: #dcfce7 !important;
+}
+.quote-manage-item-row.quote-item-paid-complete,
+.quote-item-table-row.quote-item-paid-complete {
+  border-left: 4px solid #22c55e !important;
+}
+
+/* 2. Complete & Not Paid -> Light Red */
+.quote-manage-item-row.quote-item-complete-unpaid,
+.quote-manage-item-row.quote-item-complete-unpaid td,
+.quote-item-table-row.quote-item-complete-unpaid,
+.quote-item-table-row.quote-item-complete-unpaid td {
+  background-color: #fee2e2 !important;
+}
+.quote-manage-item-row.quote-item-complete-unpaid,
+.quote-item-table-row.quote-item-complete-unpaid {
+  border-left: 4px solid #ef4444 !important;
+}
+
+/* 3. Paid & Incomplete -> Light Orange */
+.quote-manage-item-row.quote-item-paid-incomplete,
+.quote-manage-item-row.quote-item-paid-incomplete td,
+.quote-item-table-row.quote-item-paid-incomplete,
+.quote-item-table-row.quote-item-paid-incomplete td {
+  background-color: #ffedd5 !important;
+}
+.quote-manage-item-row.quote-item-paid-incomplete,
+.quote-item-table-row.quote-item-paid-incomplete {
+  border-left: 4px solid #f97316 !important;
+}
+
+/* Dark mode overrides */
+[data-theme='dark'] .quote-manage-item-row.quote-item-paid-complete,
+[data-theme='dark'] .quote-manage-item-row.quote-item-paid-complete td,
+[data-theme='dark'] .quote-item-table-row.quote-item-paid-complete,
+[data-theme='dark'] .quote-item-table-row.quote-item-paid-complete td {
+  background-color: rgba(34, 197, 94, 0.18) !important;
+}
+
+[data-theme='dark'] .quote-manage-item-row.quote-item-complete-unpaid,
+[data-theme='dark'] .quote-manage-item-row.quote-item-complete-unpaid td,
+[data-theme='dark'] .quote-item-table-row.quote-item-complete-unpaid,
+[data-theme='dark'] .quote-item-table-row.quote-item-complete-unpaid td {
+  background-color: rgba(239, 68, 68, 0.18) !important;
+}
+
+[data-theme='dark'] .quote-manage-item-row.quote-item-paid-incomplete,
+[data-theme='dark'] .quote-manage-item-row.quote-item-paid-incomplete td,
+[data-theme='dark'] .quote-item-table-row.quote-item-paid-incomplete,
+[data-theme='dark'] .quote-item-table-row.quote-item-paid-incomplete td {
+  background-color: rgba(249, 115, 22, 0.18) !important;
+}
+

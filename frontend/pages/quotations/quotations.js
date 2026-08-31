@@ -386,8 +386,25 @@ export class Quotations {
 
         const isItemFullyConsolidated = status === 'aceptado' && payStatus === 'pagado' && execStatus === 'realizado';
 
+        const isFullyPaid = payStatus === 'pagado' || (paidAmt >= totalAmt - 0.001 && totalAmt > 0);
+        const isComplete = execStatus === 'realizado';
+        const isUnpaid = payStatus === 'ninguno' || paidAmt <= 0.001;
+
+        let rowStateClass = '';
+        let rowStyle = '';
+        if (isFullyPaid && isComplete) {
+          rowStateClass = 'quote-item-paid-complete';
+          rowStyle = 'background-color: #dcfce7 !important; border-left: 4px solid #22c55e;';
+        } else if (isComplete && isUnpaid) {
+          rowStateClass = 'quote-item-complete-unpaid';
+          rowStyle = 'background-color: #fee2e2 !important; border-left: 4px solid #ef4444;';
+        } else if (isFullyPaid && !isComplete) {
+          rowStateClass = 'quote-item-paid-incomplete';
+          rowStyle = 'background-color: #ffedd5 !important; border-left: 4px solid #f97316;';
+        }
+
         return `
-        <tr class="quote-manage-item-row" data-item-id="${item.id}">
+        <tr class="quote-manage-item-row ${rowStateClass}" data-item-id="${item.id}" style="${rowStyle}">
           <td>
             <strong>${item.description}</strong>
             ${item.tooth_number ? `<span style="font-size: 11px; color: var(--text-secondary); margin-left: 6px;">(Diente #${item.tooth_number})</span>` : ''}
@@ -498,20 +515,35 @@ export class Quotations {
           </div>
         ` : '')}
 
-        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-bottom: var(--space-3); flex-wrap: wrap;">
-          ${!isQuoteClosed ? `
-            <button id="manage-accept-all-btn" class="btn btn-sm btn-outline-success" style="padding: 6px 14px; font-size: 13px; font-weight: 500;">
-              ✅ Aceptar Presupuesto Completo
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: var(--space-3); flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 10px; font-size: 12px; flex-wrap: wrap;">
+            <span style="font-weight: 600; color: var(--text-secondary);">Leyenda:</span>
+            <span style="display: inline-flex; align-items: center; gap: 5px; background: #dcfce7; color: #166534; padding: 3px 8px; border-radius: 4px; border: 1px solid #86efac; font-weight: 600;">
+              <span style="width: 8px; height: 8px; border-radius: 50%; background: #22c55e;"></span> Pagado & Completado
+            </span>
+            <span style="display: inline-flex; align-items: center; gap: 5px; background: #fee2e2; color: #991b1b; padding: 3px 8px; border-radius: 4px; border: 1px solid #fca5a5; font-weight: 600;">
+              <span style="width: 8px; height: 8px; border-radius: 50%; background: #ef4444;"></span> Completado y Sin Pagar
+            </span>
+            <span style="display: inline-flex; align-items: center; gap: 5px; background: #ffedd5; color: #9a3412; padding: 3px 8px; border-radius: 4px; border: 1px solid #fdba74; font-weight: 600;">
+              <span style="width: 8px; height: 8px; border-radius: 50%; background: #f97316;"></span> Pagado y No Completado
+            </span>
+          </div>
+
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            ${!isQuoteClosed ? `
+              <button id="manage-accept-all-btn" class="btn btn-sm btn-outline-success" style="padding: 6px 14px; font-size: 13px; font-weight: 500;">
+                ✅ Aceptar Presupuesto Completo
+              </button>
+            ` : ''}
+            ${!isQuotePaid ? `
+              <button id="manage-pay-quote-btn" class="btn btn-sm btn-primary" style="padding: 6px 16px; font-size: 13px; font-weight: 600;">
+                💳 Cobrar Presupuesto / Tratamientos
+              </button>
+            ` : ''}
+            <button id="manage-edit-quote-btn" class="btn btn-sm btn-outline" style="padding: 6px 14px; font-size: 13px; font-weight: 500;">
+              ✏️ Editar / Agregar Ítems
             </button>
-          ` : ''}
-          ${!isQuotePaid ? `
-            <button id="manage-pay-quote-btn" class="btn btn-sm btn-primary" style="padding: 6px 16px; font-size: 13px; font-weight: 600;">
-              💳 Cobrar Presupuesto / Tratamientos
-            </button>
-          ` : ''}
-          <button id="manage-edit-quote-btn" class="btn btn-sm btn-outline" style="padding: 6px 14px; font-size: 13px; font-weight: 500;">
-            ✏️ Editar / Agregar Ítems
-          </button>
+          </div>
         </div>
 
         <div class="card" style="margin-bottom: var(--space-4); padding: 0; border: 1px solid var(--border-color); overflow: hidden; flex: 1; display: flex; flex-direction: column;">
@@ -900,8 +932,25 @@ export class Quotations {
       const isAlreadyPaid = (item.payment_status === 'pagado' || (remainingAmount <= 0.001 && paidAmount > 0));
       const execStatus = item.execution_status || 'pendiente';
 
+      const isFullyPaid = isAlreadyPaid;
+      const isComplete = execStatus === 'realizado';
+      const isUnpaid = paidAmount <= 0.001;
+
+      let rowStateClass = '';
+      let rowStyle = '';
+      if (isFullyPaid && isComplete) {
+        rowStateClass = 'quote-item-paid-complete';
+        rowStyle = 'background-color: #dcfce7 !important; border-left: 4px solid #22c55e;';
+      } else if (isComplete && isUnpaid) {
+        rowStateClass = 'quote-item-complete-unpaid';
+        rowStyle = 'background-color: #fee2e2 !important; border-left: 4px solid #ef4444;';
+      } else if (isFullyPaid && !isComplete) {
+        rowStateClass = 'quote-item-paid-incomplete';
+        rowStyle = 'background-color: #ffedd5 !important; border-left: 4px solid #f97316;';
+      }
+
       return `
-        <tr class="quote-item-table-row" data-item-id="${item.id || ''}" data-paid-amt="${paidAmount}" data-rem-amt="${remainingAmount}">
+        <tr class="quote-item-table-row ${rowStateClass}" data-item-id="${item.id || ''}" data-paid-amt="${paidAmount}" data-rem-amt="${remainingAmount}" style="${rowStyle}">
           <td style="text-align: center; vertical-align: middle;">
             <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;">
               <input type="checkbox" class="quote-item-pay-chk" ${isAlreadyPaid ? 'disabled' : ''} style="transform: scale(1.2); cursor: pointer;" title="${isAlreadyPaid ? 'Tratamiento ya 100% pagado' : 'Seleccionar para cobrar ahora'}" />
@@ -991,13 +1040,24 @@ export class Quotations {
 
         <!-- ITEMS TABLE -->
         <div style="margin-top: var(--space-4);">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
             <label class="form-label" style="font-weight: 700; font-size: 14px; margin: 0; color: var(--text-primary);">
               🦷 Tratamientos y Procedimientos
             </label>
-            <span style="font-size: 12px; color: var(--text-secondary);">
-              Seleccione la casilla <strong>[✓ Pagar]</strong> para cobrar tratamientos en este mismo momento.
-            </span>
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 11px; flex-wrap: wrap;">
+              <span style="display: inline-flex; align-items: center; gap: 4px; background: #dcfce7; color: #166534; padding: 2px 6px; border-radius: 4px; border: 1px solid #86efac; font-weight: 600;">
+                <span style="width: 6px; height: 6px; border-radius: 50%; background: #22c55e;"></span> Pagado & Completado
+              </span>
+              <span style="display: inline-flex; align-items: center; gap: 4px; background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 4px; border: 1px solid #fca5a5; font-weight: 600;">
+                <span style="width: 6px; height: 6px; border-radius: 50%; background: #ef4444;"></span> Completado y Sin Pagar
+              </span>
+              <span style="display: inline-flex; align-items: center; gap: 4px; background: #ffedd5; color: #9a3412; padding: 2px 6px; border-radius: 4px; border: 1px solid #fdba74; font-weight: 600;">
+                <span style="width: 6px; height: 6px; border-radius: 50%; background: #f97316;"></span> Pagado y No Completado
+              </span>
+            </div>
+          </div>
+          <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">
+            Seleccione la casilla <strong>[✓ Pagar]</strong> para cobrar tratamientos en este mismo momento.
           </div>
 
           <div class="table-container" style="overflow-x: auto; border: 1px solid var(--border-color); border-radius: var(--radius-md);">
@@ -1438,6 +1498,35 @@ export class Quotations {
 
       discountPctInput?.addEventListener('input', recalculateAll);
 
+      const updateRowStateColor = (r) => {
+        const paidAmt = parseFloat(r.getAttribute('data-paid-amt') || 0);
+        const remAmt = parseFloat(r.getAttribute('data-rem-amt') || 0);
+        const execSelect = r.querySelector('.quote-item-exec-select');
+        const execSt = execSelect ? execSelect.value : 'pendiente';
+        const payChk = r.querySelector('.quote-item-pay-chk');
+        const isPaid = (payChk && payChk.disabled) || (paidAmt > 0 && remAmt <= 0.001);
+        const isComp = execSt === 'realizado';
+        const isUnp = paidAmt <= 0.001;
+
+        r.classList.remove('quote-item-paid-complete', 'quote-item-complete-unpaid', 'quote-item-paid-incomplete');
+        r.style.backgroundColor = '';
+        r.style.borderLeft = '';
+
+        if (isPaid && isComp) {
+          r.classList.add('quote-item-paid-complete');
+          r.style.backgroundColor = '#dcfce7';
+          r.style.borderLeft = '4px solid #22c55e';
+        } else if (isComp && isUnp) {
+          r.classList.add('quote-item-complete-unpaid');
+          r.style.backgroundColor = '#fee2e2';
+          r.style.borderLeft = '4px solid #ef4444';
+        } else if (isPaid && !isComp) {
+          r.classList.add('quote-item-paid-incomplete');
+          r.style.backgroundColor = '#ffedd5';
+          r.style.borderLeft = '4px solid #f97316';
+        }
+      };
+
       const attachRowEvents = (row) => {
         const descInput = row.querySelector('.quote-item-desc');
         if (descInput) initTreatmentAutocomplete(descInput);
@@ -1445,6 +1534,13 @@ export class Quotations {
         row.querySelectorAll('.quote-item-qty, .quote-item-price, .quote-item-discount').forEach(input => {
           input.addEventListener('input', recalculateAll);
         });
+
+        const execSelect = row.querySelector('.quote-item-exec-select');
+        if (execSelect) {
+          execSelect.addEventListener('change', () => {
+            updateRowStateColor(row);
+          });
+        }
 
         const payQtyInput = row.querySelector('.quote-item-pay-qty');
         if (payQtyInput) {
