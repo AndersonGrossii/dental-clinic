@@ -231,11 +231,9 @@ export const createPatientTreatmentRules = [
   },
   {
     field: 'tooth_number',
-    label: 'Número de diente',
+    label: 'Número de diente / Piezas',
     required: false,
-    type: 'number',
-    min: 1,
-    max: 32,
+    maxLength: 100,
   },
   {
     field: 'price',
@@ -291,11 +289,9 @@ export const createPatientTreatmentRules = [
 export const updatePatientTreatmentRules = [
   {
     field: 'tooth_number',
-    label: 'Número de diente',
+    label: 'Número de diente / Piezas',
     required: false,
-    type: 'number',
-    min: 1,
-    max: 32,
+    maxLength: 100,
   },
   {
     field: 'price',

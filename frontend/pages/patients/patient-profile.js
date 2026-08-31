@@ -1483,7 +1483,7 @@ export class PatientProfile {
 
         <div class="form-group" style="margin-top: var(--space-3);">
           <label class="form-label">Diente / Pieza (Opcional)</label>
-          <input type="number" name="tooth_number" class="form-input" placeholder="Ej: 18 (o dejar en blanco para tratamiento general)" min="1" max="32" />
+          <input type="text" name="tooth_number" class="form-input" placeholder="Ej: 14, 15 o 18, 21 (o dejar en blanco para tratamiento general)" />
         </div>
 
         <div class="form-group" style="margin-top: var(--space-3);">
@@ -1515,7 +1515,7 @@ export class PatientProfile {
           data.description = data.custom_treatment_name.trim();
         }
 
-        if (data.tooth_number) data.tooth_number = Number(data.tooth_number);
+        if (data.tooth_number && data.tooth_number.trim()) data.tooth_number = data.tooth_number.trim();
         else delete data.tooth_number;
 
         if (data.doctor_id) data.doctor_id = Number(data.doctor_id);
@@ -1544,7 +1544,7 @@ export class PatientProfile {
         </div>
         <div class="form-group" style="margin-top: var(--space-3);">
           <label class="form-label">Diente / Pieza (Opcional)</label>
-          <input type="number" name="tooth_number" class="form-input" value="${treatment.tooth_number || ''}" placeholder="Ej: 18" min="1" max="32" />
+          <input type="text" name="tooth_number" class="form-input" value="${treatment.tooth_number || ''}" placeholder="Ej: 14, 15 o 18, 21" />
         </div>
         <div class="form-group" style="margin-top: var(--space-3);">
           <label class="form-label">Notas Clínicas y Detalles de la Intervención</label>
@@ -1561,7 +1561,7 @@ export class PatientProfile {
         const formData = new FormData(form);
         const data = Object.fromEntries(formData.entries());
         data.price = 0;
-        if (data.tooth_number) data.tooth_number = Number(data.tooth_number);
+        if (data.tooth_number && data.tooth_number.trim()) data.tooth_number = data.tooth_number.trim();
         else data.tooth_number = null;
 
         try {
@@ -2815,7 +2815,7 @@ export class PatientProfile {
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
           <div class="form-group">
             <label class="form-label">Pieza / Diente # (Opcional)</label>
-            <input type="text" name="tooth_number" class="form-input" placeholder="Ej: 18, 21, Molar..." />
+            <input type="text" name="tooth_number" class="form-input" placeholder="Ej: 14, 15 o 18, 21, Molar..." />
           </div>
           <div class="form-group">
             <label class="form-label">Doctor / Profesional Responsable</label>
@@ -2843,8 +2843,9 @@ export class PatientProfile {
 
         try {
           await patientService.addDentalHistory(this.patientId, {
-            treatment: data.treatment,
-            tooth_number: data.tooth_number || null,
+            procedure_name: data.procedure_name,
+            treatment: data.procedure_name,
+            tooth_number: data.tooth_number ? data.tooth_number.trim() : null,
             doctor_id: data.doctor_id ? Number(data.doctor_id) : null,
             notes: data.notes || null,
             condition: 'Tratamiento Realizado'
@@ -2873,12 +2874,12 @@ export class PatientProfile {
       <form id="edit-dental-history-form">
         <div class="form-group">
           <label class="form-label">Procedimiento / Tratamiento Realizado <span style="color: var(--danger-500);">*</span></label>
-          <input type="text" name="procedure_name" class="form-input" value="${item.procedure_name || item.description || ''}" required />
+          <input type="text" name="procedure_name" class="form-input" value="${item.procedure_name || item.treatment || item.description || ''}" required />
         </div>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
           <div class="form-group">
             <label class="form-label">Pieza / Diente # (Opcional)</label>
-            <input type="text" name="tooth_number" class="form-input" value="${item.tooth_number || ''}" placeholder="Ej: 18, 21..." />
+            <input type="text" name="tooth_number" class="form-input" value="${item.tooth_number || ''}" placeholder="Ej: 14, 15 o 18, 21..." />
           </div>
           <div class="form-group">
             <label class="form-label">Doctor / Profesional Responsable</label>
@@ -2907,7 +2908,8 @@ export class PatientProfile {
         try {
           await patientService.updateDentalHistory(item.id, {
             procedure_name: data.procedure_name,
-            tooth_number: data.tooth_number || null,
+            treatment: data.procedure_name,
+            tooth_number: data.tooth_number ? data.tooth_number.trim() : null,
             doctor_id: data.doctor_id ? Number(data.doctor_id) : null,
             notes: data.notes || null
           });

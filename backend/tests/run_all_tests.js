@@ -463,9 +463,32 @@ async function runAllTests() {
     assert(Array.isArray(patAcceptedItems), 'Higienista puede consultar ítems de presupuestos aceptados');
 
     // --------------------------------------------------
-    // TEST 9: Limpieza y Teardown
+    // TEST 9: Historial Odontológico y Tratamientos con Múltiples Piezas (ej. "14, 15", "18, 28, 38, 48")
     // --------------------------------------------------
-    console.log('\n🔹 [9/9] Limpieza de Datos de Prueba');
+    console.log('\n🔹 [9/10] Historial Odontológico y Tratamientos con Múltiples Piezas');
+    const dhMulti = await patientService.addDentalHistory(testPatientId, {
+      procedure_name: 'Obturaciones múltiples en cuadrante 1',
+      treatment: 'Obturaciones múltiples en cuadrante 1',
+      tooth_number: '14, 15',
+      notes: 'Tratamiento en 2 piezas dentales contiguas',
+      condition: 'Tratamiento Realizado'
+    });
+    assert(dhMulti && dhMulti.tooth_number === '14, 15', 'Historial odontológico acepta múltiples piezas (ej. "14, 15")');
+
+    const dhUpdated = await patientService.updateDentalHistory(dhMulti.id, {
+      procedure_name: 'Obturaciones y selladores',
+      tooth_number: '14, 15, 16',
+      notes: 'Se amplió a 3 piezas'
+    });
+    assert(dhUpdated && dhUpdated.tooth_number === '14, 15, 16', 'Historial odontológico actualizado con 3 piezas ("14, 15, 16")');
+
+    // Limpieza de entrada de historial dental
+    await query('DELETE FROM dental_history WHERE id = $1', [dhMulti.id]);
+
+    // --------------------------------------------------
+    // TEST 10: Limpieza y Teardown
+    // --------------------------------------------------
+    console.log('\n🔹 [10/10] Limpieza de Datos de Prueba');
     if (testAppointmentId) {
       await appointmentService.delete(testAppointmentId);
       assert(true, 'Cita de prueba eliminada');

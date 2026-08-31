@@ -404,39 +404,52 @@ class PatientRepository extends BaseRepository {
   /**
    * Actualiza una entrada del historial dental.
    */
-  async updateDentalHistory(id, { tooth_number, procedure_name, treatment, condition, notes, doctor_id }) {
+  async updateDentalHistory(id, { tooth_number, procedure_name, treatment, condition, notes, doctor_id } = {}) {
     const clinicId = this.getClinicId();
-    const conditions = ['id = $1', 'deleted_at IS NULL'];
+    const setClauses = ['updated_at = NOW()'];
     const params = [id];
+
+    if (tooth_number !== undefined) {
+      params.push(tooth_number || null);
+      setClauses.push(`tooth_number = $${params.length}`);
+    }
+
+    const procValue = treatment || procedure_name;
+    if (procValue !== undefined) {
+      params.push(procValue);
+      setClauses.push(`treatment = $${params.length}`);
+    }
+
+    const condValue = condition || procValue;
+    if (condValue !== undefined) {
+      params.push(condValue);
+      setClauses.push(`condition = $${params.length}`);
+    }
+
+    if (notes !== undefined) {
+      params.push(notes || null);
+      setClauses.push(`notes = $${params.length}`);
+    }
+
+    if (doctor_id !== undefined) {
+      params.push(doctor_id ? Number(doctor_id) : null);
+      setClauses.push(`doctor_id = $${params.length}`);
+    }
+
+    const conditions = ['id = $1', 'deleted_at IS NULL'];
     if (clinicId) {
       conditions.push(`clinic_id = $${params.length + 1}`);
       params.push(clinicId);
     }
-    const procValue = treatment || procedure_name || null;
-    const condValue = condition || procValue || null;
 
-    try {
-      const result = await query(
-        `UPDATE dental_history
-         SET tooth_number = COALESCE($2, tooth_number),
-             treatment = COALESCE($3, treatment),
-             condition = COALESCE($4, condition),
-             notes = COALESCE($5, notes),
-             doctor_id = COALESCE($6, doctor_id),
-             updated_at = NOW()
-         WHERE ${conditions.join(' AND ')}
-         RETURNING *, treatment AS procedure_name`,
-        [id, tooth_number, procValue, condValue, notes, doctor_id]
-      );
-      return result.rows[0];
-    } catch (err) {
-      if (err.message && (err.message.includes('column "condition"') || err.message.includes('column "treatment"'))) {
-        await query(`ALTER TABLE dental_history ADD COLUMN IF NOT EXISTS condition VARCHAR(255) DEFAULT 'Tratamiento Realizado'`).catch(() => {});
-        await query(`ALTER TABLE dental_history ADD COLUMN IF NOT EXISTS treatment VARCHAR(255) DEFAULT 'Procedimiento Odontológico'`).catch(() => {});
-        return this.updateDentalHistory(id, { tooth_number, procedure_name, treatment, condition, notes, doctor_id });
-      }
-      throw err;
-    }
+    const result = await query(
+      `UPDATE dental_history
+       SET ${setClauses.join(', ')}
+       WHERE ${conditions.join(' AND ')}
+       RETURNING *, treatment AS procedure_name`,
+      params
+    );
+    return result.rows[0] || null;
   }
 
   /**
