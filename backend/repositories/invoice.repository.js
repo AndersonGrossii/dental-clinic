@@ -162,6 +162,8 @@ class InvoiceRepository extends BaseRepository {
                  WHERE ii_prev.quotation_item_id = ii.quotation_item_id
                    AND ii_prev.invoice_id != ii.invoice_id
                    AND inv_prev.id < ii.invoice_id
+                   AND inv_prev.id != COALESCE((SELECT receipt_id FROM invoices WHERE id = ii.invoice_id), 0)
+                   AND COALESCE(inv_prev.receipt_id, 0) != ii.invoice_id
                    AND inv_prev.deleted_at IS NULL
                    AND inv_prev.status != 'cancelada'),
                 0
@@ -218,7 +220,11 @@ class InvoiceRepository extends BaseRepository {
     const payConditions = ['pay.deleted_at IS NULL'];
     const payParams = [id];
     scopeClinic(payConditions, payParams, 'pay');
-    payConditions.push(`pay.invoice_id = $1`);
+    payConditions.push(`(
+      pay.invoice_id = $1 
+      OR pay.invoice_id = COALESCE((SELECT receipt_id FROM invoices WHERE id = $1), 0)
+      OR pay.invoice_id IN (SELECT id FROM invoices WHERE receipt_id = $1)
+    )`);
 
     const paymentsResult = await query(
       `SELECT pay.*,

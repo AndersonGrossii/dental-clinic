@@ -476,14 +476,71 @@ class InvoiceService {
     const total = parseFloat((taxableAmount + taxAmount).toFixed(2));
 
     const docType = documentType === 'recibo' ? 'recibo' : 'factura';
-    const invoiceNumber = docType === 'recibo'
-      ? await invoiceRepository.generateReceiptNumber()
-      : await invoiceRepository.generateNumber();
-
     const isPartial = itemsToBill.length < allItems.length;
+
+    if (docType === 'factura') {
+      // 1. Generar Recibo de Pago (REC)
+      const receiptNumber = await invoiceRepository.generateReceiptNumber();
+      const receiptData = {
+        invoice_number: receiptNumber,
+        document_type: 'recibo',
+        quotation_id: quotation.id,
+        patient_id: quotation.patient_id,
+        doctor_id: quotation.doctor_id,
+        subtotal,
+        tax_rate: taxRate,
+        tax_amount: taxAmount,
+        discount_amount: discountAmount,
+        discount_percentage: discountPct,
+        total,
+        balance: total,
+        amount_paid: 0,
+        status: 'pendiente',
+        notes: `Recibo generado desde cotización ${quotation.quote_number}${isPartial ? ' (Aceptación parcial de ítems)' : ''}`,
+        created_by: userId,
+      };
+      const createdReceipt = await invoiceRepository.createWithItems(receiptData, items);
+
+      // 2. Generar Factura Oficial (FAC) copiando todos los datos del Recibo
+      const invoiceNumber = await invoiceRepository.generateNumber();
+      const invoiceData = {
+        invoice_number: invoiceNumber,
+        document_type: 'factura',
+        receipt_id: createdReceipt.id,
+        quotation_id: createdReceipt.quotation_id,
+        patient_id: createdReceipt.patient_id,
+        doctor_id: createdReceipt.doctor_id,
+        subtotal: createdReceipt.subtotal,
+        tax_rate: createdReceipt.tax_rate,
+        tax_amount: createdReceipt.tax_amount,
+        discount_amount: createdReceipt.discount_amount,
+        discount_percentage: createdReceipt.discount_percentage,
+        total: createdReceipt.total,
+        balance: createdReceipt.balance,
+        amount_paid: createdReceipt.amount_paid,
+        status: createdReceipt.status,
+        notes: `Factura oficial vinculada al Recibo #${createdReceipt.invoice_number} (Cotización ${quotation.quote_number}${isPartial ? ' - Aceptación parcial' : ''})`,
+        created_by: userId,
+      };
+      const createdInvoice = await invoiceRepository.createWithItems(invoiceData, items);
+
+      // Vincular el recibo a la factura generada
+      await invoiceRepository.update(createdReceipt.id, { receipt_id: createdInvoice.id });
+
+      const billedItemIds = itemsToBill.map(i => i.id);
+      if (billedItemIds.length > 0) {
+        await quotationRepository.markItemsInvoiced(billedItemIds, createdInvoice.id);
+      }
+
+      await quotationRepository.recalculateQuotationStatus(quotation.id);
+
+      return createdInvoice;
+    }
+
+    const invoiceNumber = await invoiceRepository.generateReceiptNumber();
     const invoiceData = {
       invoice_number: invoiceNumber,
-      document_type: docType,
+      document_type: 'recibo',
       quotation_id: quotation.id,
       patient_id: quotation.patient_id,
       doctor_id: quotation.doctor_id,

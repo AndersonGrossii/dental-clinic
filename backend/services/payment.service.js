@@ -178,40 +178,106 @@ class PaymentService {
       const status = 'pagada';
 
       let createdDoc = null;
+      let createdReceipt = null;
 
       if (!isSaldoCredito) {
-        // 3. Generar número de comprobante con relleno de huecos solo para pagos en efectivo/tarjeta
-        const documentNumber = await invoiceRepository.generateDocumentNumber(docType);
-
-        // 4. Crear registro de documento (Factura o Recibo) en la tabla invoices
-        const invRes = await client.query(
-          `INSERT INTO invoices
-             (invoice_number, document_type, patient_id, doctor_id, subtotal, tax_rate, tax_amount, discount_amount, discount_percentage, total, amount_paid, balance, status, notes, created_by${clinicId ? ', clinic_id' : ''})
-           VALUES
-             ($1, $2, $3, $4, $5, $6, $7, 0, 0, $8, $9, $10, $11, $12, $13${clinicId ? ', $14' : ''})
-           RETURNING *`,
-          clinicId
-            ? [documentNumber, docType, patient_id, doctorId, subtotal, documentTaxRate, taxAmountVal, total, paymentAmount, balance, status, notes || null, userId, clinicId]
-            : [documentNumber, docType, patient_id, doctorId, subtotal, documentTaxRate, taxAmountVal, total, paymentAmount, balance, status, notes || null, userId]
-        );
-
-        createdDoc = invRes.rows[0];
-
-        // 5. Crear items del documento asignando el valor neto proporcional
-        for (const item of treatmentGrossPrices) {
-          const itemGrossPayment = totalGrossRemaining > 0 ? parseFloat(((item.gross_remaining / totalGrossRemaining) * paymentAmount).toFixed(2)) : paymentAmount;
-          const itemNet = parseFloat((itemGrossPayment / (1 + documentTaxRate / 100.0)).toFixed(2));
-          const itemDesc = item.previously_paid_gross > 0 ? `${item.treatment_name || 'Tratamiento'} (Pago Parcial / Cuota)` : (item.treatment_name || 'Tratamiento');
-
-          await client.query(
-            `INSERT INTO invoice_items
-               (invoice_id, treatment_id, patient_treatment_id, description, quantity, unit_price, total, tooth_number${clinicId ? ', clinic_id' : ''})
+        if (docType === 'factura') {
+          // 1. Generar primero el Recibo de Pago (REC)
+          const receiptNumber = await invoiceRepository.generateDocumentNumber('recibo');
+          const recRes = await client.query(
+            `INSERT INTO invoices
+               (invoice_number, document_type, patient_id, doctor_id, subtotal, tax_rate, tax_amount, discount_amount, discount_percentage, total, amount_paid, balance, status, notes, created_by${clinicId ? ', clinic_id' : ''})
              VALUES
-               ($1, $2, $3, $4, $5, $6, $7, $8${clinicId ? ', $9' : ''})`,
+               ($1, 'recibo', $2, $3, $4, $5, $6, 0, 0, $7, $8, $9, $10, $11, $12${clinicId ? ', $13' : ''})
+             RETURNING *`,
             clinicId
-              ? [createdDoc.id, item.treatment_id || null, item.id, itemDesc, 1, itemNet, itemNet, item.tooth_number || null, clinicId]
-              : [createdDoc.id, item.treatment_id || null, item.id, itemDesc, 1, itemNet, itemNet, item.tooth_number || null]
+              ? [receiptNumber, patient_id, doctorId, subtotal, documentTaxRate, taxAmountVal, total, paymentAmount, balance, status, notes || null, userId, clinicId]
+              : [receiptNumber, patient_id, doctorId, subtotal, documentTaxRate, taxAmountVal, total, paymentAmount, balance, status, notes || null, userId]
           );
+          createdReceipt = recRes.rows[0];
+
+          // Items del Recibo
+          for (const item of treatmentGrossPrices) {
+            const itemGrossPayment = totalGrossRemaining > 0 ? parseFloat(((item.gross_remaining / totalGrossRemaining) * paymentAmount).toFixed(2)) : paymentAmount;
+            const itemNet = parseFloat((itemGrossPayment / (1 + documentTaxRate / 100.0)).toFixed(2));
+            const itemDesc = item.previously_paid_gross > 0 ? `${item.treatment_name || 'Tratamiento'} (Pago Parcial / Cuota)` : (item.treatment_name || 'Tratamiento');
+
+            await client.query(
+              `INSERT INTO invoice_items
+                 (invoice_id, treatment_id, patient_treatment_id, description, quantity, unit_price, total, tooth_number${clinicId ? ', clinic_id' : ''})
+               VALUES
+                 ($1, $2, $3, $4, $5, $6, $7, $8${clinicId ? ', $9' : ''})`,
+              clinicId
+                ? [createdReceipt.id, item.treatment_id || null, item.id, itemDesc, 1, itemNet, itemNet, item.tooth_number || null, clinicId]
+                : [createdReceipt.id, item.treatment_id || null, item.id, itemDesc, 1, itemNet, itemNet, item.tooth_number || null]
+            );
+          }
+
+          // 2. Generar la Factura Oficial (FAC) copiando exactamente los datos del Recibo
+          const documentNumber = await invoiceRepository.generateDocumentNumber('factura');
+          const invoiceNotes = notes ? `${notes} (Vinculada al Recibo #${createdReceipt.invoice_number})` : `Factura oficial vinculada al Recibo #${createdReceipt.invoice_number}`;
+
+          const invRes = await client.query(
+            `INSERT INTO invoices
+               (invoice_number, document_type, receipt_id, patient_id, doctor_id, subtotal, tax_rate, tax_amount, discount_amount, discount_percentage, total, amount_paid, balance, status, notes, created_by${clinicId ? ', clinic_id' : ''})
+             VALUES
+               ($1, 'factura', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15${clinicId ? ', $16' : ''})
+             RETURNING *`,
+            clinicId
+              ? [documentNumber, createdReceipt.id, createdReceipt.patient_id, createdReceipt.doctor_id, createdReceipt.subtotal, createdReceipt.tax_rate, createdReceipt.tax_amount, createdReceipt.discount_amount, createdReceipt.discount_percentage, createdReceipt.total, createdReceipt.amount_paid, createdReceipt.balance, createdReceipt.status, invoiceNotes, userId, clinicId]
+              : [documentNumber, createdReceipt.id, createdReceipt.patient_id, createdReceipt.doctor_id, createdReceipt.subtotal, createdReceipt.tax_rate, createdReceipt.tax_amount, createdReceipt.discount_amount, createdReceipt.discount_percentage, createdReceipt.total, createdReceipt.amount_paid, createdReceipt.balance, createdReceipt.status, invoiceNotes, userId]
+          );
+          createdDoc = invRes.rows[0];
+
+          // Vincular el recibo a la factura generada
+          await client.query(`UPDATE invoices SET receipt_id = $1 WHERE id = $2`, [createdDoc.id, createdReceipt.id]);
+
+          // Items de la Factura copiados exactamente del Recibo
+          const recItemsRes = await client.query(`SELECT * FROM invoice_items WHERE invoice_id = $1`, [createdReceipt.id]);
+          for (const item of recItemsRes.rows) {
+            await client.query(
+              `INSERT INTO invoice_items
+                 (invoice_id, treatment_id, patient_treatment_id, description, quantity, unit_price, total, tooth_number${clinicId ? ', clinic_id' : ''})
+               VALUES
+                 ($1, $2, $3, $4, $5, $6, $7, $8${clinicId ? ', $9' : ''})`,
+              clinicId
+                ? [createdDoc.id, item.treatment_id, item.patient_treatment_id, item.description, item.quantity, item.unit_price, item.total, item.tooth_number, clinicId]
+                : [createdDoc.id, item.treatment_id, item.patient_treatment_id, item.description, item.quantity, item.unit_price, item.total, item.tooth_number]
+            );
+          }
+        } else {
+          // Generar solo Recibo
+          const documentNumber = await invoiceRepository.generateDocumentNumber('recibo');
+
+          const invRes = await client.query(
+            `INSERT INTO invoices
+               (invoice_number, document_type, patient_id, doctor_id, subtotal, tax_rate, tax_amount, discount_amount, discount_percentage, total, amount_paid, balance, status, notes, created_by${clinicId ? ', clinic_id' : ''})
+             VALUES
+               ($1, 'recibo', $2, $3, $4, $5, $6, 0, 0, $7, $8, $9, $10, $11, $12${clinicId ? ', $13' : ''})
+             RETURNING *`,
+            clinicId
+              ? [documentNumber, patient_id, doctorId, subtotal, documentTaxRate, taxAmountVal, total, paymentAmount, balance, status, notes || null, userId, clinicId]
+              : [documentNumber, patient_id, doctorId, subtotal, documentTaxRate, taxAmountVal, total, paymentAmount, balance, status, notes || null, userId]
+          );
+
+          createdDoc = invRes.rows[0];
+          createdReceipt = createdDoc;
+
+          for (const item of treatmentGrossPrices) {
+            const itemGrossPayment = totalGrossRemaining > 0 ? parseFloat(((item.gross_remaining / totalGrossRemaining) * paymentAmount).toFixed(2)) : paymentAmount;
+            const itemNet = parseFloat((itemGrossPayment / (1 + documentTaxRate / 100.0)).toFixed(2));
+            const itemDesc = item.previously_paid_gross > 0 ? `${item.treatment_name || 'Tratamiento'} (Pago Parcial / Cuota)` : (item.treatment_name || 'Tratamiento');
+
+            await client.query(
+              `INSERT INTO invoice_items
+                 (invoice_id, treatment_id, patient_treatment_id, description, quantity, unit_price, total, tooth_number${clinicId ? ', clinic_id' : ''})
+               VALUES
+                 ($1, $2, $3, $4, $5, $6, $7, $8${clinicId ? ', $9' : ''})`,
+              clinicId
+                ? [createdDoc.id, item.treatment_id || null, item.id, itemDesc, 1, itemNet, itemNet, item.tooth_number || null, clinicId]
+                : [createdDoc.id, item.treatment_id || null, item.id, itemDesc, 1, itemNet, itemNet, item.tooth_number || null]
+            );
+          }
         }
       }
 
@@ -230,6 +296,8 @@ class PaymentService {
         }
       }
 
+      const payInvoiceId = createdReceipt ? createdReceipt.id : (createdDoc ? createdDoc.id : null);
+
       const payRes = await client.query(
         `INSERT INTO payments
            (patient_id, invoice_id, quotation_id, quotation_item_id, patient_treatment_id, payment_method_id, amount, credit_used, reference_number, notes, created_by${clinicId ? ', clinic_id' : ''})
@@ -237,8 +305,8 @@ class PaymentService {
            ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11${clinicId ? ', $12' : ''})
          RETURNING *`,
         clinicId
-          ? [patient_id, createdDoc ? createdDoc.id : null, linkedQuotationId, linkedQuotationItemId, mainPtId, payment_method_id, paymentAmount, creditApplied, reference_number || null, notes || null, userId, clinicId]
-          : [patient_id, createdDoc ? createdDoc.id : null, linkedQuotationId, linkedQuotationItemId, mainPtId, payment_method_id, paymentAmount, creditApplied, reference_number || null, notes || null, userId]
+          ? [patient_id, payInvoiceId, linkedQuotationId, linkedQuotationItemId, mainPtId, payment_method_id, paymentAmount, creditApplied, reference_number || null, notes || null, userId, clinicId]
+          : [patient_id, payInvoiceId, linkedQuotationId, linkedQuotationItemId, mainPtId, payment_method_id, paymentAmount, creditApplied, reference_number || null, notes || null, userId]
       );
 
       const createdPayment = payRes.rows[0];
@@ -249,7 +317,7 @@ class PaymentService {
         await client.query(
           `INSERT INTO patient_credits (patient_id, clinic_id, type, amount, source, invoice_id, payment_id, notes, created_by)
            VALUES ($1, $2, 'debit', $3, 'payment_apply', $4, $5, $6, $7)`,
-          [patient_id, clinicId || 1, creditApplied, createdDoc ? createdDoc.id : null, createdPayment.id, 'Uso de saldo a favor en pago de tratamiento', userId]
+          [patient_id, clinicId || 1, creditApplied, payInvoiceId, createdPayment.id, 'Uso de saldo a favor en pago de tratamiento', userId]
         );
       }
       if (cashSurplus > 0 && createdDoc) {
@@ -262,9 +330,10 @@ class PaymentService {
       }
 
       // 7. Vincular el ID del documento (si existe) a los tratamientos pagados
+      const targetTreatmentDocId = createdDoc ? createdDoc.id : (createdReceipt ? createdReceipt.id : null);
       await client.query(
         `UPDATE patient_treatments SET status = 'completado', invoice_id = COALESCE($1, invoice_id), updated_at = NOW() WHERE id = ANY($2::int[])`,
-        [createdDoc ? createdDoc.id : null, treatment_ids]
+        [targetTreatmentDocId, treatment_ids]
       );
 
       // 8. Buscar y asociar quotation_items a los tratamientos pagados
@@ -272,7 +341,7 @@ class PaymentService {
         `UPDATE quotation_items 
          SET invoice_id = COALESCE($1, invoice_id), status = 'aceptado', execution_status = 'realizado' 
          WHERE patient_treatment_id = ANY($2::int[])`,
-        [createdDoc ? createdDoc.id : null, treatment_ids]
+        [targetTreatmentDocId, treatment_ids]
       );
 
       for (const pt of treatments) {
@@ -288,42 +357,46 @@ class PaymentService {
                  AND (q.quote_number ILIKE $3 OR q.quote_number ILIKE $4)
                  AND (qi.patient_treatment_id IS NULL OR qi.patient_treatment_id = $1)
                  AND (qi.treatment_id = $5 OR LOWER(qi.description) = LOWER($6))`,
-              [pt.id, createdDoc.id, `%${quoteRef}%`, quoteRef, pt.treatment_id || null, pt.treatment_name || '']
+              [pt.id, targetTreatmentDocId, `%${quoteRef}%`, quoteRef, pt.treatment_id || null, pt.treatment_name || '']
             );
           }
         }
       }
 
       // 9. Vincular la cotización al comprobante y recalcular el estado del presupuesto
-      const linkedQuotesRes = await client.query(
-        `SELECT DISTINCT q.id AS quotation_id
-         FROM quotation_items qi
-         JOIN quotations q ON qi.quotation_id = q.id
-         WHERE qi.patient_treatment_id = ANY($1::int[]) OR qi.invoice_id = $2`,
-        [treatment_ids, createdDoc.id]
-      );
-
-      if (linkedQuotesRes.rows.length > 0) {
-        const primaryQuoteId = linkedQuotesRes.rows[0].quotation_id;
-        await client.query(
-          `UPDATE invoices SET quotation_id = $1 WHERE id = $2`,
-          [primaryQuoteId, createdDoc.id]
+      if (targetTreatmentDocId) {
+        const linkedQuotesRes = await client.query(
+          `SELECT DISTINCT q.id AS quotation_id
+           FROM quotation_items qi
+           JOIN quotations q ON qi.quotation_id = q.id
+           WHERE qi.patient_treatment_id = ANY($1::int[]) OR qi.invoice_id = $2`,
+          [treatment_ids, targetTreatmentDocId]
         );
 
-        for (const row of linkedQuotesRes.rows) {
-          const qId = row.quotation_id;
-          const itemsResult = await client.query(
-            `SELECT status, execution_status FROM quotation_items WHERE quotation_id = $1`,
-            [qId]
-          );
-          if (itemsResult.rows.length > 0) {
-            const allDone = itemsResult.rows.every(r => r.status === 'aceptado' && r.execution_status === 'realizado');
-            const someDone = itemsResult.rows.some(r => r.status === 'aceptado' || r.execution_status === 'realizado');
-            const newStatus = allDone ? 'aceptada' : someDone ? 'parcial' : 'enviada';
-            await client.query(
-              `UPDATE quotations SET status = $1, updated_at = NOW() WHERE id = $2`,
-              [newStatus, qId]
+        if (linkedQuotesRes.rows.length > 0) {
+          const primaryQuoteId = linkedQuotesRes.rows[0].quotation_id;
+          if (createdDoc) {
+            await client.query(`UPDATE invoices SET quotation_id = $1 WHERE id = $2`, [primaryQuoteId, createdDoc.id]);
+          }
+          if (createdReceipt && createdReceipt.id !== createdDoc?.id) {
+            await client.query(`UPDATE invoices SET quotation_id = $1 WHERE id = $2`, [primaryQuoteId, createdReceipt.id]);
+          }
+
+          for (const row of linkedQuotesRes.rows) {
+            const qId = row.quotation_id;
+            const itemsResult = await client.query(
+              `SELECT status, execution_status FROM quotation_items WHERE quotation_id = $1`,
+              [qId]
             );
+            if (itemsResult.rows.length > 0) {
+              const allDone = itemsResult.rows.every(r => r.status === 'aceptado' && r.execution_status === 'realizado');
+              const someDone = itemsResult.rows.some(r => r.status === 'aceptado' || r.execution_status === 'realizado');
+              const newStatus = allDone ? 'aceptada' : someDone ? 'parcial' : 'enviada';
+              await client.query(
+                `UPDATE quotations SET status = $1, updated_at = NOW() WHERE id = $2`,
+                [newStatus, qId]
+              );
+            }
           }
         }
       }
@@ -331,6 +404,7 @@ class PaymentService {
       return {
         payment: createdPayment,
         document: createdDoc,
+        receipt: createdReceipt,
         credit_applied: creditApplied,
         credit_surplus: cashSurplus,
       };
@@ -522,7 +596,7 @@ class PaymentService {
       const clinicId = store?.clinicId;
 
       const invoiceResult = await client.query(
-        `SELECT id, patient_id, total, amount_paid, balance, status FROM invoices WHERE id = $1${clinicId ? ' AND clinic_id = $2' : ''} AND deleted_at IS NULL FOR UPDATE`,
+        `SELECT id, patient_id, total, amount_paid, balance, status, receipt_id FROM invoices WHERE id = $1${clinicId ? ' AND clinic_id = $2' : ''} AND deleted_at IS NULL FOR UPDATE`,
         clinicId ? [invoice_id, clinicId] : [invoice_id]
       );
       const invoice = invoiceResult.rows[0];
@@ -618,11 +692,12 @@ class PaymentService {
       const newBalance = Math.max(0, parseFloat(invoice.total) - newAmountPaid);
       const newStatus = newBalance <= 0 ? 'pagada' : 'parcial';
 
+      const linkedDocId = invoice.receipt_id || null;
       await client.query(
         `UPDATE invoices
          SET amount_paid = $1, balance = $2, status = $3, updated_at = NOW()
-         WHERE id = $4${clinicId ? ' AND clinic_id = $5' : ''}`,
-        clinicId ? [newAmountPaid, newBalance, newStatus, invoice_id, clinicId] : [newAmountPaid, newBalance, newStatus, invoice_id]
+         WHERE (id = $4 OR id = $5 OR receipt_id = $4)${clinicId ? ' AND clinic_id = $6' : ''}`,
+        clinicId ? [newAmountPaid, newBalance, newStatus, invoice_id, linkedDocId, clinicId] : [newAmountPaid, newBalance, newStatus, invoice_id, linkedDocId]
       );
 
       return payment;
@@ -665,12 +740,18 @@ class PaymentService {
 
       // 3. Obtener el documento asociado
       const invoiceResult = await client.query(
-        `SELECT id, total, amount_paid, status FROM invoices WHERE id = $1${clinicId ? ' AND clinic_id = $2' : ''} AND deleted_at IS NULL FOR UPDATE`,
+        `SELECT id, total, amount_paid, status, receipt_id FROM invoices WHERE id = $1${clinicId ? ' AND clinic_id = $2' : ''} AND deleted_at IS NULL FOR UPDATE`,
         clinicId ? [payment.invoice_id, clinicId] : [payment.invoice_id]
       );
       const invoice = invoiceResult.rows[0];
 
       if (invoice) {
+        const linkedDocRes = await client.query(
+          `SELECT id, total, amount_paid, status FROM invoices WHERE (id = $1 OR receipt_id = $2) AND id != $2 AND deleted_at IS NULL`,
+          [invoice.receipt_id || 0, invoice.id]
+        );
+        const linkedDoc = linkedDocRes.rows[0] || null;
+
         const newAmountPaid = Math.max(0, parseFloat(invoice.amount_paid) - parseFloat(payment.amount));
         const newBalance = parseFloat(invoice.total) - newAmountPaid;
 
@@ -680,17 +761,23 @@ class PaymentService {
             `UPDATE invoices SET status = 'cancelada', balance = total, amount_paid = 0, deleted_at = NOW(), updated_at = NOW() WHERE id = $1`,
             [invoice.id]
           );
+          if (linkedDoc) {
+            await client.query(
+              `UPDATE invoices SET status = 'cancelada', balance = total, amount_paid = 0, deleted_at = NOW(), updated_at = NOW() WHERE id = $1`,
+              [linkedDoc.id]
+            );
+          }
 
           // Desvincular tratamientos en Historial Odontológico (revertir a unpaid)
           await client.query(
-            `UPDATE patient_treatments SET invoice_id = NULL, updated_at = NOW() WHERE invoice_id = $1`,
-            [invoice.id]
+            `UPDATE patient_treatments SET invoice_id = NULL, updated_at = NOW() WHERE invoice_id = $1 OR invoice_id = $2`,
+            [invoice.id, linkedDoc ? linkedDoc.id : 0]
           );
 
           // Desvincular ítems de cotización
           await client.query(
-            `UPDATE quotation_items SET invoice_id = NULL WHERE invoice_id = $1`,
-            [invoice.id]
+            `UPDATE quotation_items SET invoice_id = NULL WHERE invoice_id = $1 OR invoice_id = $2`,
+            [invoice.id, linkedDoc ? linkedDoc.id : 0]
           );
         } else {
           let newStatus = 'parcial';
@@ -700,6 +787,14 @@ class PaymentService {
              WHERE id = $4`,
             [newAmountPaid, newBalance, newStatus, invoice.id]
           );
+          if (linkedDoc) {
+            await client.query(
+              `UPDATE invoices
+               SET amount_paid = $1, balance = $2, status = $3, updated_at = NOW()
+               WHERE id = $4`,
+              [newAmountPaid, newBalance, newStatus, linkedDoc.id]
+            );
+          }
         }
       }
 

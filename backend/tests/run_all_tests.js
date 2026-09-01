@@ -486,9 +486,88 @@ async function runAllTests() {
     await query('DELETE FROM dental_history WHERE id = $1', [dhMulti.id]);
 
     // --------------------------------------------------
-    // TEST 10: Limpieza y Teardown
+    // TEST 10: Generación de Factura vinculada a Recibo & Pago con Saldo (Crédito)
     // --------------------------------------------------
-    console.log('\n🔹 [10/10] Limpieza de Datos de Prueba');
+    console.log('\n🔹 [10/11] Generación de Factura vinculada a Recibo & Saldo (Crédito)');
+    
+    // 10a. Crear tratamiento para prueba de factura
+    const ptInvoiceTest = await treatmentService.addPatientTreatment({
+      patient_id: testPatientId,
+      treatment_id: treatment.id,
+      price: 150.00,
+      status: 'pendiente',
+      notes: 'Tratamiento prueba factura+recibo'
+    });
+
+    const invoicePayRes = await paymentService.processTreatmentPayment({
+      patient_id: testPatientId,
+      treatment_ids: [ptInvoiceTest.id],
+      document_type: 'factura',
+      payment_method_id: methodId,
+      amount: 150.00,
+      notes: 'Cobro con Factura Oficial'
+    }, adminId);
+
+    assert(invoicePayRes.document && invoicePayRes.document.document_type === 'factura', 'Factura oficial (FAC) generada');
+    assert(invoicePayRes.receipt && invoicePayRes.receipt.document_type === 'recibo', 'Recibo de pago (REC) generado');
+    assert(parseFloat(invoicePayRes.receipt.total) === 150.00, 'Recibo tiene total de 150€');
+    assert(parseFloat(invoicePayRes.receipt.amount_paid) === 150.00, 'Recibo tiene amount_paid de 150€ (no 0€)');
+    assert(parseFloat(invoicePayRes.document.total) === 150.00, 'Factura tiene total de 150€ copiado del recibo');
+    assert(parseFloat(invoicePayRes.document.amount_paid) === 150.00, 'Factura tiene amount_paid de 150€ copiado del recibo');
+    assert(invoicePayRes.document.receipt_id === invoicePayRes.receipt.id, 'Factura vinculada al ID del Recibo');
+    
+    const recCheck = await query('SELECT receipt_id FROM invoices WHERE id = $1', [invoicePayRes.receipt.id]);
+    assert(recCheck.rows[0]?.receipt_id === invoicePayRes.document.id, 'Recibo vinculado al ID de la Factura');
+
+    const fullRec = await invoiceService.getById(invoicePayRes.receipt.id);
+    assert(fullRec.payments.length > 0, 'Recibo contiene registro de pago y método de pago disponible');
+
+    const fullInv = await invoiceService.getById(invoicePayRes.document.id);
+    assert(fullInv.payments.length > 0, 'Factura contiene registro de pago');
+
+    // 10b. Pago con Saldo (Crédito) NO debe generar ningún recibo ni factura
+    // Añadir saldo al paciente
+    await query(
+      `INSERT INTO patient_credits (patient_id, clinic_id, type, amount, source, notes, created_by)
+       VALUES ($1, 1, 'credit', 200.00, 'manual', 'Crédito para prueba', $2)`,
+      [testPatientId, adminId]
+    );
+
+    const ptCreditTest = await treatmentService.addPatientTreatment({
+      patient_id: testPatientId,
+      treatment_id: treatment.id,
+      price: 80.00,
+      status: 'pendiente',
+      notes: 'Tratamiento prueba saldo credito'
+    });
+
+    const pmCreditRes = await query(`SELECT id FROM payment_methods WHERE name = 'saldo_credito' LIMIT 1`);
+    const creditMethodId = pmCreditRes.rows[0]?.id || 5;
+
+    const creditPayRes = await paymentService.processTreatmentPayment({
+      patient_id: testPatientId,
+      treatment_ids: [ptCreditTest.id],
+      document_type: 'factura', // even if factura is sent, saldo_credito must NOT generate any document
+      payment_method_id: creditMethodId,
+      amount: 80.00,
+      notes: 'Pago con Saldo Crédito'
+    }, adminId);
+
+    assert(creditPayRes.document === null, 'Pago con Saldo(Crédito) NO genera Factura');
+    assert(creditPayRes.receipt === null, 'Pago con Saldo(Crédito) NO genera Recibo');
+    assert(creditPayRes.payment && creditPayRes.payment.invoice_id === null, 'Registro de pago con Saldo(Crédito) tiene invoice_id = null');
+
+    // Limpieza de tratamientos y comprobantes de prueba 10
+    await query('DELETE FROM patient_credits WHERE patient_id = $1', [testPatientId]);
+    await query('DELETE FROM payments WHERE patient_id = $1', [testPatientId]);
+    await query('DELETE FROM invoice_items WHERE invoice_id IN ($1, $2)', [invoicePayRes.document.id, invoicePayRes.receipt.id]);
+    await query('DELETE FROM invoices WHERE id IN ($1, $2)', [invoicePayRes.document.id, invoicePayRes.receipt.id]);
+    await query('DELETE FROM patient_treatments WHERE id IN ($1, $2)', [ptInvoiceTest.id, ptCreditTest.id]);
+
+    // --------------------------------------------------
+    // TEST 11: Limpieza y Teardown
+    // --------------------------------------------------
+    console.log('\n🔹 [11/11] Limpieza de Datos de Prueba');
     if (testAppointmentId) {
       await appointmentService.delete(testAppointmentId);
       assert(true, 'Cita de prueba eliminada');

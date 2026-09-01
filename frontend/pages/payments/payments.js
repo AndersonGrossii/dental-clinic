@@ -387,7 +387,7 @@ export class Payments {
 
         <!-- MODO B: GENERAR COMPROBANTE DE CERO -->
         <div id="mode-new-section" style="display: none; background: #fff; padding: var(--space-3); border: 1px solid var(--border-color); border-radius: var(--radius-md); margin-bottom: var(--space-4);">
-          <div class="form-group" style="margin-bottom: var(--space-3);">
+          <div id="new-invoice-doc-type-group" class="form-group" style="margin-bottom: var(--space-3);">
             <label class="form-label" style="font-weight: 600;">Tipo de Comprobante a Generar</label>
             <div style="display: flex; gap: 16px; margin-top: 6px;">
               <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; font-weight: 500;">
@@ -399,6 +399,13 @@ export class Payments {
                 📄 Factura Oficial (FAC)
               </label>
             </div>
+            <small style="color: var(--text-secondary); font-size: 11px; margin-top: 4px; display: block;">
+              💡 Al seleccionar <strong>Factura Oficial</strong> se emitirá el Recibo de Pago correspondiente y la Factura vinculada a dicho recibo.
+            </small>
+          </div>
+
+          <div id="new-invoice-credit-notice" style="display: none; background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; border-radius: var(--radius-md); padding: 10px 14px; font-size: 13px; margin-bottom: var(--space-3);">
+            💳 <strong>Pago con Saldo (Crédito)</strong>: Este pago se descontará directamente del saldo a favor del paciente sin emitir un nuevo recibo ni factura.
           </div>
 
           <div class="form-group">
@@ -463,7 +470,7 @@ export class Payments {
             </div>
             <div class="form-group">
               <label class="form-label">Método de Pago <span style="color: var(--danger-500);">*</span></label>
-              <select name="payment_method_id" class="form-select" required>
+              <select name="payment_method_id" id="new-payment-method-select" class="form-select" required>
                 <option value="">Seleccione...</option>
                 ${methodOptions}
               </select>
@@ -595,6 +602,9 @@ export class Payments {
             const documentType = formData.get('document_type') || 'recibo';
             const discountAmount = parseFloat(formData.get('discount_amount') || 0);
 
+            const selectedMethod = methods.find(m => String(m.id) === String(data.payment_method_id));
+            const isSaldoCredito = selectedMethod?.name === 'saldo_credito' || data.payment_method_id === 5 || data.payment_method_id === 'saldo_credito';
+
             const res = await paymentService.processTreatmentPayment({
               patient_id: patientId,
               treatment_ids: treatmentIds,
@@ -608,9 +618,16 @@ export class Payments {
               notes: data.notes || null,
             });
 
-            const docNum = res?.document?.invoice_number || '';
-            const docTypeName = documentType === 'recibo' ? 'Recibo' : 'Factura';
-            toast.success(`¡${docTypeName} #${docNum} generado y pago vinculado en el Historial Odontológico del paciente!`);
+            if (isSaldoCredito) {
+              toast.success('¡Pago registrado con Saldo (Crédito) exitosamente!');
+            } else if (documentType === 'factura') {
+              const invNum = res?.document?.invoice_number || '';
+              const recNum = res?.receipt?.invoice_number || '';
+              toast.success(`¡Recibo #${recNum} y Factura #${invNum} vinculada generados exitosamente!`);
+            } else {
+              const docNum = res?.document?.invoice_number || '';
+              toast.success(`¡Recibo #${docNum} generado exitosamente!`);
+            }
             await this.loadPayments();
             return true;
           } catch (err) {
@@ -638,6 +655,23 @@ export class Payments {
     const creditRow = document.getElementById('patient-credit-row');
     const creditAvailableLabel = document.getElementById('credit-available-label');
     const creditUsedInput = document.getElementById('credit-used-input');
+
+    const methodSelect = document.getElementById('new-payment-method-select') || document.querySelector('select[name="payment_method_id"]');
+    const docTypeGroup = document.getElementById('new-invoice-doc-type-group');
+    const creditNotice = document.getElementById('new-invoice-credit-notice');
+
+    const updateMethodUI = () => {
+      const selectedVal = methodSelect?.value;
+      const selectedMethod = methods.find(m => String(m.id) === String(selectedVal));
+      const isCredit = selectedMethod?.name === 'saldo_credito' || selectedVal === '5' || selectedVal === 'saldo_credito';
+      if (docTypeGroup) docTypeGroup.style.display = isCredit ? 'none' : 'block';
+      if (creditNotice) creditNotice.style.display = isCredit ? 'block' : 'none';
+    };
+
+    if (methodSelect) {
+      methodSelect.addEventListener('change', updateMethodUI);
+      updateMethodUI();
+    }
 
     // Carga el saldo a favor del paciente y muestra la fila para aplicarlo
     const loadPatientCredit = async (patientId) => {

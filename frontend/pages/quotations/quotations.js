@@ -1788,7 +1788,11 @@ export class Quotations {
                   notes: notesVal,
                   payment_date: payDate,
                 });
-                toast.success(`¡Presupuesto guardado y pago registrado! Comprobante #${invObj.invoice_number || ''} emitido.`);
+                if (documentType === 'factura') {
+                  toast.success(`¡Presupuesto guardado y pago registrado! Recibo y Factura #${invObj.invoice_number || ''} emitidos.`);
+                } else {
+                  toast.success(`¡Presupuesto guardado y pago registrado! Recibo #${invObj.invoice_number || ''} emitido.`);
+                }
               }
             }
           } else {
@@ -2493,7 +2497,11 @@ export class Quotations {
 
         const payRes = await paymentService.create(payPayload);
         const invNum = docNum || payRes?.invoice_number || '';
-        toast.success(`¡Pago registrado exitosamente! Comprobante #${invNum} generado.`);
+        if (documentType === 'factura') {
+          toast.success(`¡Pago registrado exitosamente! Recibo y Factura #${invNum} vinculada generados.`);
+        } else {
+          toast.success(`¡Pago registrado exitosamente! Recibo #${invNum} generado.`);
+        }
         Modal.close();
 
         // Automatically open the printed receipt or invoice for the payment just made

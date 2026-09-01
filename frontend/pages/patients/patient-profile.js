@@ -2051,7 +2051,7 @@ export class PatientProfile {
             ${itemsListHtml}
           </div>
 
-          <div class="form-group" style="margin-bottom: var(--space-4);">
+          <div id="treat-pay-doc-type-group" class="form-group" style="margin-bottom: var(--space-4);">
             <label class="form-label" style="font-weight: 600;">Tipo de Comprobante a Generar para este Pago</label>
             <div style="display: flex; gap: 16px; margin-top: 6px;">
               <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; font-weight: 500;">
@@ -2063,6 +2063,13 @@ export class PatientProfile {
                 📄 Factura Oficial (FAC)
               </label>
             </div>
+            <small style="color: var(--text-secondary); font-size: 11px; margin-top: 4px; display: block;">
+              💡 Al seleccionar <strong>Factura Oficial</strong> se emitirá el Recibo de Pago y la Factura vinculada a dicho recibo.
+            </small>
+          </div>
+
+          <div id="treat-pay-credit-notice" style="display: none; background: #e0f2fe; color: #0369a1; border: 1px solid #7dd3fc; border-radius: var(--radius-md); padding: 10px 14px; font-size: 13px; margin-bottom: var(--space-4);">
+            💳 <strong>Pago con Saldo (Crédito)</strong>: Este pago consume saldo a favor existente sin emitir ningún recibo ni factura.
           </div>
 
           ${taxFieldHtml}
@@ -2085,7 +2092,7 @@ export class PatientProfile {
 
           <div class="form-group">
             <label class="form-label">Método de Pago</label>
-            <select name="payment_method_id" class="form-select" required>
+            <select name="payment_method_id" id="treat-pay-method-select" class="form-select" required>
               ${methodOpts}
             </select>
           </div>
@@ -2130,6 +2137,19 @@ export class PatientProfile {
       const discAmtInput = document.getElementById('pay-modal-disc-amt');
       const amountInput = document.getElementById('pay-modal-amount');
       const noticeDiv = document.getElementById('partial-pay-notice');
+      const methodSelect = document.getElementById('treat-pay-method-select');
+      const docTypeGroup = document.getElementById('treat-pay-doc-type-group');
+      const creditNotice = document.getElementById('treat-pay-credit-notice');
+
+      const updateMethodUI = () => {
+        const selectedVal = methodSelect?.value;
+        const isCredit = selectedVal === 'saldo_credito' || selectedVal === '5';
+        if (docTypeGroup) docTypeGroup.style.display = isCredit ? 'none' : 'block';
+        if (creditNotice) creditNotice.style.display = isCredit ? 'block' : 'none';
+      };
+
+      methodSelect?.addEventListener('change', updateMethodUI);
+      updateMethodUI();
 
       const recalc = () => {
         const P = parseFloat(amountInput?.value || 0);
@@ -2173,9 +2193,20 @@ export class PatientProfile {
         };
 
         try {
+          const isCredit = payload.payment_method_id === 5 || payload.payment_method_id === 'saldo_credito';
           const res = await paymentService.processTreatmentPayment(payload);
-          const docNum = res?.document?.invoice_number || '';
-          toast.success(`¡Pago registrado exitosamente! Comprobante #${docNum} generado.`);
+
+          if (isCredit) {
+            toast.success('¡Pago registrado con Saldo (Crédito) exitosamente!');
+          } else if (payload.document_type === 'factura') {
+            const invNum = res?.document?.invoice_number || '';
+            const recNum = res?.receipt?.invoice_number || '';
+            toast.success(`¡Pago registrado! Recibo #${recNum} y Factura #${invNum} vinculada generados exitosamente.`);
+          } else {
+            const docNum = res?.document?.invoice_number || '';
+            toast.success(`¡Pago registrado exitosamente! Recibo #${docNum} generado.`);
+          }
+
           Modal.close();
           await this.render();
           this.mount();
