@@ -12,6 +12,8 @@ export class Treatments {
     this.treatmentsList = [];
     this.categoriesList = [];
     this.searchQuery = '';
+    this.currentPage = 1;
+    this.pageSize = 15;
   }
 
   async render() {
@@ -74,6 +76,7 @@ export class Treatments {
             </tbody>
           </table>
         </div>
+        <div id="pagination-controls" style="display: flex; justify-content: space-between; align-items: center; padding: var(--space-4); border-top: 1px solid var(--border-color);"></div>
       </div>
     `;
   }
@@ -88,7 +91,13 @@ export class Treatments {
       (t.code || '').toLowerCase().includes(query)
     );
 
-    let rows = filtered.map(t => `
+    const totalPages = Math.max(1, Math.ceil(filtered.length / this.pageSize));
+    if (this.currentPage > totalPages) this.currentPage = totalPages;
+
+    const startIndex = (this.currentPage - 1) * this.pageSize;
+    const paged = filtered.slice(startIndex, startIndex + this.pageSize);
+
+    let rows = paged.map(t => `
       <tr>
         <td><strong>${t.code || 'N/A'}</strong></td>
         <td>${t.name}</td>
@@ -113,6 +122,24 @@ export class Treatments {
     }
 
     tbody.innerHTML = rows;
+
+    // Render pagination controls
+    const paginationContainer = this.container.querySelector('#pagination-controls');
+    if (paginationContainer) {
+      const startItem = filtered.length === 0 ? 0 : startIndex + 1;
+      const endItem = Math.min(startIndex + this.pageSize, filtered.length);
+
+      paginationContainer.innerHTML = `
+        <span style="color: var(--text-secondary); font-size: 0.875rem;">
+          Mostrando ${startItem}–${endItem} de ${filtered.length} tratamientos
+        </span>
+        <div style="display: flex; gap: var(--space-2); align-items: center;">
+          <button id="prev-page-btn" class="btn btn-sm btn-secondary" ${this.currentPage <= 1 ? 'disabled' : ''}>← Anterior</button>
+          <span style="font-size: 0.875rem; min-width: 80px; text-align: center;">Página ${this.currentPage} de ${totalPages}</span>
+          <button id="next-page-btn" class="btn btn-sm btn-secondary" ${this.currentPage >= totalPages ? 'disabled' : ''}>Siguiente →</button>
+        </div>
+      `;
+    }
   }
 
   mount() {
@@ -120,9 +147,30 @@ export class Treatments {
     if (searchInput) {
       searchInput.addEventListener('input', () => {
         this.searchQuery = searchInput.value;
+        this.currentPage = 1;
         this.renderView();
       });
     }
+
+    // Pagination button clicks (delegated)
+    this.container.addEventListener('click', (e) => {
+      if (e.target.id === 'prev-page-btn' && this.currentPage > 1) {
+        this.currentPage--;
+        this.renderView();
+      }
+      if (e.target.id === 'next-page-btn') {
+        const query = (this.searchQuery || '').toLowerCase().trim();
+        const filtered = this.treatmentsList.filter(t =>
+          t.name.toLowerCase().includes(query) ||
+          (t.code || '').toLowerCase().includes(query)
+        );
+        const totalPages = Math.ceil(filtered.length / this.pageSize);
+        if (this.currentPage < totalPages) {
+          this.currentPage++;
+          this.renderView();
+        }
+      }
+    });
 
     const addBtn = this.container.querySelector('#add-treatment-btn');
     if (addBtn) {
