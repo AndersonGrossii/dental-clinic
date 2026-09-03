@@ -19,7 +19,7 @@ class TreatmentRepository extends BaseRepository {
    * @param {object} options - Opciones de paginación y filtros
    * @returns {Promise<{ rows: Array, total: number }>}
    */
-  async findAllWithCategory({ limit = 20, offset = 0, sortBy = 't.name', sortOrder = 'ASC', filters = {} } = {}) {
+  async findAllWithCategory({ limit = 100, offset = 0, sortBy = 't.name', sortOrder = 'ASC', filters = {} } = {}) {
     const conditions = ['t.deleted_at IS NULL'];
     const params = [];
     scopeClinic(conditions, params, 't');
