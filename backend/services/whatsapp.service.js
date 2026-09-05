@@ -4,6 +4,7 @@
 import crypto from 'crypto';
 import config from '../config/app.js';
 import { logger } from '../utils/logger.js';
+import { AppError } from '../utils/errors.js';
 
 class WhatsAppService {
   constructor() {
@@ -189,7 +190,12 @@ class WhatsAppService {
 
       if (!response.ok) {
         logger.error('Error al enviar WhatsApp a Meta Graph API:', data);
-        throw new Error(data.error?.message || 'Error en WhatsApp Cloud API');
+        const fbMsg = data.error?.message || 'Error en WhatsApp Cloud API';
+        const isAuth = data.error?.code === 190 || data.error?.type === 'OAuthException';
+        const errorText = isAuth
+          ? `El token de acceso de Meta WhatsApp ha caducado (${fbMsg}). Es necesario actualizar WHATSAPP_TOKEN.`
+          : `Error de Meta WhatsApp API: ${fbMsg}`;
+        throw new AppError(errorText, 400);
       }
 
       return {
@@ -197,8 +203,9 @@ class WhatsAppService {
         messages: data.messages || [],
       };
     } catch (err) {
+      if (err instanceof AppError) throw err;
       logger.error('Error de red al conectar con WhatsApp Cloud API:', err);
-      throw err;
+      throw new AppError(`Error al enviar mensaje por WhatsApp: ${err.message}`, 502);
     }
   }
 
@@ -206,7 +213,6 @@ class WhatsAppService {
    * Envía una plantilla (Template) pre-aprobada de Meta.
    */
   async sendTemplateMessage(toPhone, templateName, languageCode = 'es', parameters = [], phoneId = null) {
-    const targetPhoneId = phoneId || this.defaultPhoneId;
     const cleanPhone = toPhone.replace(/[\s\-+]/g, '');
 
     const components = [];
@@ -229,7 +235,10 @@ class WhatsAppService {
       },
     };
 
-    if (process.env.NODE_ENV === 'test' || !this.accessToken || !targetPhoneId) {
+    const token = (process.env.WHATSAPP_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || this.accessToken || '').trim().replace(/\s+/g, '');
+    const targetPhoneId = (phoneId || process.env.WHATSAPP_PHONE_NUMBER_ID || this.defaultPhoneId || '').trim().replace(/\s+/g, '');
+
+    if (process.env.NODE_ENV === 'test' || !token || !targetPhoneId) {
       logger.info(`[MOCK WHATSAPP TEMPLATE] Enviando plantilla "${templateName}" a ${cleanPhone} con params:`, parameters);
       return {
         success: true,
@@ -242,7 +251,7 @@ class WhatsAppService {
       const response = await fetch(`${this.baseUrl}/${targetPhoneId}/messages`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.accessToken}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
@@ -252,7 +261,12 @@ class WhatsAppService {
 
       if (!response.ok) {
         logger.error('Error al enviar Plantilla WhatsApp a Meta:', data);
-        throw new Error(data.error?.message || 'Error en plantilla WhatsApp Cloud API');
+        const fbMsg = data.error?.message || 'Error en plantilla WhatsApp Cloud API';
+        const isAuth = data.error?.code === 190 || data.error?.type === 'OAuthException';
+        const errorText = isAuth
+          ? `El token de acceso de Meta WhatsApp ha caducado (${fbMsg}). Es necesario actualizar WHATSAPP_TOKEN.`
+          : `Error de Meta WhatsApp API: ${fbMsg}`;
+        throw new AppError(errorText, 400);
       }
 
       return {
@@ -260,8 +274,9 @@ class WhatsAppService {
         messages: data.messages || [],
       };
     } catch (err) {
+      if (err instanceof AppError) throw err;
       logger.error('Error de red al enviar Plantilla WhatsApp:', err);
-      throw err;
+      throw new AppError(`Error al enviar plantilla por WhatsApp: ${err.message}`, 502);
     }
   }
 }

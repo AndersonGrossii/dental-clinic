@@ -394,12 +394,12 @@ export class Messages {
       const text = inputField.value.trim();
       if (!text || !this.activeConversationId) return;
 
-      inputField.value = '';
       try {
         const sent = await messagingService.sendMessage(this.activeConversationId, {
           message_type: 'TEXT',
           body: text,
         });
+        inputField.value = '';
         this.activeMessages.push(sent);
         this.renderMessagesTimeline();
         // Si estaba en auto, ahora se cambió a human
