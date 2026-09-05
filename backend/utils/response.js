@@ -74,3 +74,13 @@ export class ApiResponse {
     return res.status(204).send();
   }
 }
+
+export const sendSuccess = (res, data = null, message = 'Operación exitosa', statusCode = 200) => {
+  return ApiResponse.success(res, data, message, statusCode);
+};
+
+export const sendError = (res, message = 'Error interno del servidor', statusCode = 500, errors = []) => {
+  return ApiResponse.error(res, message, statusCode, errors);
+};
+
+export default ApiResponse;

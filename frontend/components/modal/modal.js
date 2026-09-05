@@ -15,6 +15,10 @@ class Modal {
     this.closeAll();
   }
 
+  static hide() {
+    this.closeAll();
+  }
+
   /**
    * Muestra un modal dinámico.
    */

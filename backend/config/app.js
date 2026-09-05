@@ -61,6 +61,11 @@ const config = {
     level: process.env.LOG_LEVEL || 'debug',
     file: process.env.LOG_FILE || './logs/app.log',
   },
+  features: {
+    aiAutomations: process.env.FEATURE_AI_AUTOMATIONS === 'true',
+    omnichannelMessaging: process.env.FEATURE_OMNICHANNEL_MESSAGING === 'true',
+    notesAndOdontogram: true,
+  },
 };
 
 export default config;

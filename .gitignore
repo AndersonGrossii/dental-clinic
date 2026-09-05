@@ -9,3 +9,6 @@ logs/*
 Thumbs.db
 coverage/
 dist/
+*.md
+agents/
+docs/

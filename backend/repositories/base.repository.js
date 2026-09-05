@@ -284,3 +284,5 @@ export class BaseRepository {
     return transaction(callback);
   }
 }
+
+export default BaseRepository;

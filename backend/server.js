@@ -6,6 +6,7 @@ import config from './config/app.js';
 import { testConnection } from './database/pool.js';
 import { runMigrations } from './database/migrations/runner.js';
 import { runSeeders } from './database/seeders/runner.js';
+import cronService from './services/cron.service.js';
 import { logger } from './utils/logger.js';
 
 /**
@@ -14,6 +15,7 @@ import { logger } from './utils/logger.js';
  * 2. Ejecuta migraciones pendientes
  * 3. Ejecuta seeders si es necesario
  * 4. Inicia el servidor HTTP
+ * 5. Inicia el motor cron autónomo
  */
 const startServer = async () => {
   try {
@@ -46,6 +48,13 @@ const startServer = async () => {
 ║  API: http://localhost:${config.app.port}/api/v1              ║
 ╚══════════════════════════════════════════════════╝
       `);
+
+      // 5. Iniciar motor autónomo de cron para confirmaciones y recall si está habilitado
+      if (config.features.aiAutomations) {
+        cronService.start();
+      } else {
+        logger.info('ℹ️ [FEATURE FLAG] Módulo de Automatizaciones & IA en segundo plano desactivado.');
+      }
     });
   } catch (error) {
     logger.error('Error fatal al iniciar el servidor:', error);
@@ -56,11 +65,13 @@ const startServer = async () => {
 // Manejo de señales para cierre limpio
 process.on('SIGTERM', () => {
   logger.info('SIGTERM recibido. Cerrando servidor...');
+  cronService.stop();
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
   logger.info('SIGINT recibido. Cerrando servidor...');
+  cronService.stop();
   process.exit(0);
 });
 

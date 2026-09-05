@@ -37,6 +37,33 @@ export const getAll = async (req, res, next) => {
 };
 
 /**
+ * Obtiene la lista de personal activo para selección de destinatarios.
+ * @access Autenticado (todos los roles)
+ */
+export const getStaff = async (req, res, next) => {
+  try {
+    const { rows } = await userService.getAll({
+      limit: 100,
+      offset: 0,
+      filters: { isActive: true },
+      sortBy: 'u.first_name',
+      sortOrder: 'ASC'
+    });
+    const staff = rows.map(u => ({
+      id: u.id,
+      first_name: u.first_name,
+      last_name: u.last_name,
+      email: u.email,
+      role_name: u.role_name,
+      phone: u.phone
+    }));
+    return ApiResponse.success(res, staff, 'Personal de clínica obtenido exitosamente.');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Obtiene un usuario por ID.
  * @param {import('express').Request} req
  * @param {import('express').Response} res

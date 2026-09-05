@@ -9,11 +9,16 @@ import { createPatientRules, updatePatientRules } from '../validators/patient.va
 import { auditMiddleware } from '../middlewares/audit.middleware.js';
 import * as patientController from '../controllers/patient.controller.js';
 import * as prescriptionController from '../controllers/prescription.controller.js';
+import odontogramRoutes from './odontogram.routes.js';
 
 const router = Router();
 
 // Todas las rutas requieren autenticación
 router.use(authMiddleware);
+
+// Odontograma del paciente
+router.use('/:patientId/odontogram', odontogramRoutes);
+router.use('/odontogram', odontogramRoutes);
 
 /**
  * @route   GET /api/v1/patients

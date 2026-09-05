@@ -87,3 +87,6 @@ export function formatPaymentMethods(doc) {
   return 'N/A';
 }
 
+// Re-exportar formateadores de fecha y hora desde helpers.js para compatibilidad
+export { formatDate, formatTime, formatDateTime } from './helpers.js';
+

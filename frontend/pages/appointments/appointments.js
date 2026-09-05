@@ -1,6 +1,7 @@
 import appointmentService from '../../services/appointment.service.js';
 import doctorService from '../../services/doctor.service.js';
 import patientService from '../../services/patient.service.js';
+import aiService from '../../services/ai.service.js';
 import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
 import state from '../../scripts/state.js';
@@ -11,6 +12,9 @@ export class Appointments {
     this.container = container;
     this.appointmentsList = [];
     this.doctorsList = [];
+    this.tasksList = [];
+    this.notesList = [];
+    this.followupsList = [];
     this.filters = {};
     this.viewMode = 'month';
     this.currentDate = new Date();
@@ -26,16 +30,22 @@ export class Appointments {
     // Bind handlers
     this.handleContainerClick = this._handleContainerClick.bind(this);
     this.handleContainerChange = this._handleContainerChange.bind(this);
+    this.handleLiveUpdate = async () => {
+      await this.loadAppointments();
+      this.renderView();
+    };
   }
 
   mount() {
     this.container.addEventListener('click', this.handleContainerClick);
     this.container.addEventListener('change', this.handleContainerChange);
+    window.addEventListener('dental:appointment_updated', this.handleLiveUpdate);
   }
 
   destroy() {
     this.container.removeEventListener('click', this.handleContainerClick);
     this.container.removeEventListener('change', this.handleContainerChange);
+    window.removeEventListener('dental:appointment_updated', this.handleLiveUpdate);
   }
 
   _handleContainerChange(e) {
@@ -86,6 +96,24 @@ export class Appointments {
         return;
       }
       if (e.target.id === 'add-appointment-btn') this.showAddAppointmentModal();
+
+      if (e.target.id === 'ai-briefing-btn') {
+        this.showAIBriefingModal();
+        return;
+      }
+      if (e.target.id === 'ai-trigger-confirmations-btn') {
+        this.triggerConfirmations();
+        return;
+      }
+      if (e.target.id === 'ai-trigger-recall-btn') {
+        this.triggerRecall();
+        return;
+      }
+      if (e.target.id === 'ai-stats-modal-btn') {
+        this.showAIStatsModal();
+        return;
+      }
+
       if (e.target.id === 'apply-filters-btn') this.applyFilters();
       if (e.target.id === 'clear-filters-btn') this.clearFilters();
       if (e.target.id === 'cal-prev-btn') this.navigate(-1);
@@ -396,6 +424,23 @@ export class Appointments {
       </div>
     `;
 
+    const features = state.get('features') || {};
+    const aiBarHtml = features.aiAutomations ? `
+      <!-- Barra de AI Copilot & Automatizaciones Clínicas -->
+      <div class="cal-ai-automation-bar" style="display:flex;justify-content:space-between;align-items:center;background:linear-gradient(90deg, #f0fdf4 0%, #ecfeff 100%);border:1px solid #bbf7d0;border-radius:var(--radius-md, 8px);padding:8px 14px;margin-bottom:var(--space-3);flex-wrap:wrap;gap:8px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:1.1rem;">🤖</span>
+          <span style="font-size:var(--text-xs);font-weight:700;color:#166534;text-transform:uppercase;">Copilot & Automatizaciones:</span>
+          <button id="ai-briefing-btn" class="btn btn-xs" style="background:#dcfce7;color:#15803d;border:1px solid #86efac;font-weight:600;">☀️ Briefing del Día</button>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <button id="ai-trigger-confirmations-btn" class="btn btn-xs btn-outline" style="background:#ffffff;color:#0284c7;border-color:#7dd3fc;" title="Escanear y enviar confirmaciones de citas 24h">📲 Enviar Confirmaciones 24h</button>
+          <button id="ai-trigger-recall-btn" class="btn btn-xs btn-outline" style="background:#ffffff;color:#7c3aed;border-color:#c4b5fd;" title="Escanear limpiezas (+180d) y post-quirúrgicos (+7d)">🔄 Recall de Pacientes</button>
+          <a href="#/automations" class="btn btn-xs btn-outline" style="background:#ffffff;color:#059669;border-color:#6ee7b7;text-decoration:none;">🚀 Panel de Automatizaciones ➔</a>
+        </div>
+      </div>
+    ` : '';
+
     this.container.innerHTML = `
       <style>
         .print-dropdown-btn-item {
@@ -437,6 +482,8 @@ export class Appointments {
           <button id="add-appointment-btn" class="btn btn-primary">+ Nueva Cita</button>
         </div>
       </div>
+
+      ${aiBarHtml}
 
       <div class="card" style="margin-bottom: var(--space-4);">
         <div class="card-body" style="padding: var(--space-3) var(--space-4);">
@@ -1988,5 +2035,123 @@ export class Appointments {
         });
       });
     }
+  }
+
+  async showAIBriefingModal() {
+    Modal.show({
+      title: '🤖 Briefing Operativo IA — Recepción',
+      content: '<div style="text-align: center; padding: 20px;">Cargando briefing del día...</div>',
+      cancelText: 'Cerrar',
+      confirmText: 'Entendido',
+    });
+
+    try {
+      const data = await aiService.getBriefing();
+      const briefing = data?.data || data || {};
+      const modalEl = document.querySelector('.modal-body');
+      if (modalEl) {
+        modalEl.innerHTML = `
+          <div style="display: flex; flex-direction: column; gap: 12px;">
+            <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 12px; font-size: 0.88rem; line-height: 1.5; color: #166534;">
+              ${(briefing.summary || '').replace(/\n/g, '<br/>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; text-align: center;">
+              <div style="background: #eff6ff; padding: 8px; border-radius: 6px;">
+                <div style="font-size: 1.2rem; font-weight: 700; color: #1e40af;">${briefing.metrics?.totalAppointments || 0}</div>
+                <div style="font-size: 0.72rem; color: #3b82f6;">Citas Hoy</div>
+              </div>
+              <div style="background: #fefce8; padding: 8px; border-radius: 6px;">
+                <div style="font-size: 1.2rem; font-weight: 700; color: #854d0e;">${briefing.metrics?.pendingConfirmations || 0}</div>
+                <div style="font-size: 0.72rem; color: #ca8a04;">Pendientes Conf.</div>
+              </div>
+              <div style="background: #fdf2f8; padding: 8px; border-radius: 6px;">
+                <div style="font-size: 1.2rem; font-weight: 700; color: #9d174d;">${briefing.metrics?.recallsAvailable || 0}</div>
+                <div style="font-size: 0.72rem; color: #db2777;">Recalls Listos</div>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+    } catch (err) {
+      toast.error('Error al cargar briefing IA');
+    }
+  }
+
+  async triggerConfirmations() {
+    try {
+      toast.info('Iniciando escaneo de confirmaciones 24h...');
+      const res = await aiService.trigger24hConfirmations();
+      const count = res?.data?.sent || res?.sent || 0;
+      toast.success(`✅ ${count} recordatorios de confirmación enviados por WhatsApp.`);
+      await this.loadData();
+      this.renderView();
+    } catch (err) {
+      toast.error('Error al ejecutar confirmaciones 24h');
+    }
+  }
+
+  async triggerRecall() {
+    try {
+      toast.info('Iniciando barrido de recall y retención...');
+      const res = await aiService.triggerRecallSweep();
+      const total = res?.data?.total || res?.total || 0;
+      toast.success(`✅ ${total} pacientes de recall contactados por WhatsApp.`);
+      await this.loadData();
+      this.renderView();
+    } catch (err) {
+      toast.error('Error al ejecutar recall de pacientes');
+    }
+  }
+
+  async showAIStatsModal() {
+    Modal.show({
+      title: '📊 Historial de Automações & Retenção',
+      content: '<div style="text-align: center; padding: 20px;">Cargando historial...</div>',
+      cancelText: 'Cerrar',
+    });
+
+    try {
+      const res = await aiService.getAutomationStats();
+      const data = res?.data || res || {};
+      const logs = data.recentLogs || [];
+
+      const modalEl = document.querySelector('.modal-body');
+      if (modalEl) {
+        if (logs.length === 0) {
+          modalEl.innerHTML = `<div style="text-align: center; color: var(--text-tertiary); padding: 20px;">No hay ejecuciones registradas todavía.</div>`;
+          return;
+        }
+
+        modalEl.innerHTML = `
+          <div style="max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;">
+            ${logs.map(l => {
+              const dateStr = new Date(l.executed_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+              const badgeClass = l.status === 'CONFIRMED' ? 'badge-success' : l.status === 'CANCELLED' ? 'badge-danger' : 'badge-primary';
+              return `
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.82rem;">
+                  <div>
+                    <strong>${l.rule_type}</strong> • <span>${l.first_name || 'Paciente'} ${l.last_name || ''}</span>
+                    <div style="font-size: 0.72rem; color: var(--text-tertiary);">📅 ${dateStr}</div>
+                  </div>
+                  <span class="badge ${badgeClass}">${l.status}</span>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `;
+      }
+    } catch {
+      toast.error('Error al cargar historial de automatizaciones');
+    }
+  }
+
+  escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
 }

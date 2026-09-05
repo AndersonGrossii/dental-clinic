@@ -11,7 +11,10 @@ import * as userController from '../controllers/user.controller.js';
 
 const router = Router();
 
-// Todas las rutas requieren autenticación y rol de dirección/propietario
+// Ruta para obtener la lista del personal de la clínica (accesible por todos los roles autenticados)
+router.get('/staff', authMiddleware, userController.getStaff);
+
+// Todas las demás rutas de gestión de usuarios requieren rol de dirección/propietario
 router.use(authMiddleware, managementOnly);
 
 /**

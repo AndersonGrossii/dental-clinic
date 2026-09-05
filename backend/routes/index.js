@@ -17,6 +17,14 @@ import settingsRoutes from './settings.routes.js';
 import searchRoutes from './search.routes.js';
 import clinicRoutes from './clinic.routes.js';
 import prescriptionRoutes from './prescription.routes.js';
+import messagingRoutes from './messaging.routes.js';
+import webhookRoutes from './webhook.routes.js';
+import taskRoutes from './task.routes.js';
+import calendarNoteRoutes from './calendar-note.routes.js';
+import followupRoutes from './followup.routes.js';
+import aiRoutes from './ai.routes.js';
+import eventsRoutes from './events.routes.js';
+import internalChatRoutes from './internal-chat.routes.js';
 
 const router = Router();
 
@@ -36,5 +44,13 @@ router.use('/settings', settingsRoutes);
 router.use('/search', searchRoutes);
 router.use('/clinics', clinicRoutes);
 router.use('/prescriptions', prescriptionRoutes);
+router.use('/messaging', messagingRoutes);
+router.use('/webhooks', webhookRoutes);
+router.use('/tasks', taskRoutes);
+router.use('/calendar-notes', calendarNoteRoutes);
+router.use('/followups', followupRoutes);
+router.use('/ai', aiRoutes);
+router.use('/events', eventsRoutes);
+router.use('/internal-chat', internalChatRoutes);
 
 export default router;

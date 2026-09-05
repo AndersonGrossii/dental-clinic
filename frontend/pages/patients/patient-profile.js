@@ -14,6 +14,7 @@ import Modal from '../../components/modal/modal.js';
 import state from '../../scripts/state.js';
 import { formatDate, formatCurrency } from '../../utils/helpers.js';
 import { formatPaymentMethods } from '../../utils/formatters.js';
+import { OdontogramComponent } from '../../components/odontogram/odontogram.js';
 
 export class PatientProfile {
   constructor(container, params) {
@@ -99,7 +100,7 @@ export class PatientProfile {
     const userRole = (state.get('user')?.role_name || '').toLowerCase();
     const isClinicalStaff = ['doctor', 'higienista'].includes(userRole);
 
-    const allowedClinicalTabs = ['info', 'treatments', 'appointments', 'notes', 'prescriptions'];
+    const allowedClinicalTabs = ['info', 'odontogram', 'treatments', 'appointments', 'notes', 'prescriptions'];
     if (isClinicalStaff && !allowedClinicalTabs.includes(this.activeTab)) {
       this.activeTab = 'info';
     }
@@ -261,6 +262,10 @@ export class PatientProfile {
             </tbody>
           </table>
         </div>
+      `;
+    } else if (this.activeTab === 'odontogram') {
+      tabContent = `
+        <div id="odontogram-mount-container"></div>
       `;
     } else if (this.activeTab === 'treatments') {
       const userRole = state.get('user')?.role_name;
@@ -752,6 +757,7 @@ export class PatientProfile {
 
       <div class="tabs" style="display: flex; gap: var(--space-2); margin-bottom: var(--space-4); border-bottom: 1px solid var(--border-color); padding-bottom: var(--space-2); flex-wrap: wrap;">
         ${tabLink('info', 'Ficha Técnica')}
+        ${tabLink('odontogram', '🦷 Odontograma')}
         ${isClinicalStaff ? '' : tabLink('payments', 'Pagos y Saldo')}
         ${tabLink('treatments', 'Historial Odontológico')}
         ${tabLink('appointments', 'Historial de Citas')}
@@ -782,6 +788,18 @@ export class PatientProfile {
         this.mount();
       }, { signal });
     });
+
+    // Montar Odontograma Clínico si la pestaña activa es odontogram
+    if (this.activeTab === 'odontogram') {
+      const odontoComponent = new OdontogramComponent({
+        patientId: this.patientId,
+        containerId: 'odontogram-mount-container',
+        onUpdate: async () => {
+          // Opcional: recargar historial si fuera necesario
+        }
+      });
+      odontoComponent.init();
+    }
 
     // Registrar Adelanto / Depósito
     const depositBtns = [

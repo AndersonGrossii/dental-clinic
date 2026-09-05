@@ -44,6 +44,11 @@ export const managementOnly = roleMiddleware('propietario', 'direccion');
 export const staffOnly = roleMiddleware('propietario', 'direccion', 'recepcionista');
 
 /**
+ * Personal clínico (propietario, dirección, doctores e higienistas).
+ */
+export const clinicalStaff = roleMiddleware('propietario', 'direccion', 'doctor', 'higienista');
+
+/**
  * Todos los roles autenticados.
  */
 export const allRoles = roleMiddleware('propietario', 'direccion', 'recepcionista', 'doctor', 'higienista');

@@ -9,6 +9,16 @@ import invoiceService from '../services/invoice.service.js';
 import paymentService from '../services/payment.service.js';
 import treatmentService from '../services/treatment.service.js';
 import doctorService from '../services/doctor.service.js';
+import whatsappService from '../services/whatsapp.service.js';
+import messagingService from '../services/messaging.service.js';
+import taskService from '../services/task.service.js';
+import calendarNoteService from '../services/calendar-note.service.js';
+import followupService from '../services/followup.service.js';
+import odontogramService from '../services/odontogram.service.js';
+import instagramService from '../services/instagram.service.js';
+import aiService from '../services/ai.service.js';
+import automationSchedulerService from '../services/automation-scheduler.service.js';
+import cronService from '../services/cron.service.js';
 
 let passed = 0;
 let failed = 0;
@@ -565,9 +575,443 @@ async function runAllTests() {
     await query('DELETE FROM patient_treatments WHERE id IN ($1, $2)', [ptInvoiceTest.id, ptCreditTest.id]);
 
     // --------------------------------------------------
-    // TEST 11: Limpieza y Teardown
+    // TEST 11: WhatsApp Business Cloud API & Mensajería Unificada
     // --------------------------------------------------
-    console.log('\n🔹 [11/11] Limpieza de Datos de Prueba');
+    console.log('\n🔹 [11/12] WhatsApp Business Cloud API & Mensajería Unificada (MVP)');
+    
+    // 11a. Verificación de Handshake Webhook
+    const validChallenge = whatsappService.verifyWebhookChallenge('subscribe', 'vides_dental_webhook_token_2026', 'challenge_meta_test_9988');
+    assert(validChallenge === 'challenge_meta_test_9988', 'Handshake de verificación de Meta Webhook valida token correcto');
+
+    const invalidChallenge = whatsappService.verifyWebhookChallenge('subscribe', 'wrong_token', 'challenge_meta_test_9988');
+    assert(invalidChallenge === null, 'Handshake de Meta Webhook rechaza token inválido');
+
+    // 11b. Ingesta de Mensaje Entrante desde Webhook
+    const testWaPhone = '34699887766';
+    const mockWebhookPayload = {
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          id: 'WABA_TEST_ACCOUNT',
+          changes: [
+            {
+              field: 'messages',
+              value: {
+                messaging_product: 'whatsapp',
+                metadata: {
+                  display_phone_number: '34912345678',
+                  phone_number_id: 'PHONE_ID_TEST'
+                },
+                contacts: [
+                  {
+                    profile: { name: 'Laura Gómez Test' },
+                    wa_id: testWaPhone
+                  }
+                ],
+                messages: [
+                  {
+                    from: testWaPhone,
+                    id: `wamid.test_${Date.now()}`,
+                    timestamp: Math.floor(Date.now() / 1000).toString(),
+                    text: { body: 'Hola, quisiera agendar una cita de valoración dental' },
+                    type: 'text'
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    };
+
+    const webhookResults = await messagingService.processInboundWebhook(mockWebhookPayload);
+    assert(webhookResults.length > 0 && webhookResults[0].success === true, 'Webhook procesó exitosamente el mensaje entrante de WhatsApp');
+
+    // Verificar que se haya creado el contacto y la conversación
+    const convsRes = await messagingService.getConversations({ search: testWaPhone });
+    assert(convsRes.rows.length > 0, 'Conversación registrada en bandeja de mensajería para el contacto de WhatsApp');
+    const testConv = convsRes.rows[0];
+    assert(testConv.contact_phone === testWaPhone, 'Teléfono del contacto coincide con el remitente de WhatsApp');
+    assert(testConv.channel === 'WHATSAPP', "Canal asignado como 'WHATSAPP'");
+
+    // Verificar mensajes de la conversación (Inbound + Auto-reply saliente)
+    const threadData = await messagingService.getConversationMessages(testConv.id);
+    assert(threadData.messages.length >= 2, 'Conversación contiene mensaje entrante y respuesta automática inicial');
+    const inboundMsg = threadData.messages.find(m => m.direction === 'INBOUND');
+    const autoOutboundMsg = threadData.messages.find(m => m.direction === 'OUTBOUND');
+    assert(inboundMsg && inboundMsg.body.includes('cita de valoración'), 'Mensaje entrante guardado con texto íntegro');
+    assert(autoOutboundMsg && autoOutboundMsg.body.includes('Vides Dental'), 'Auto-reply de bienvenida generado automáticamente');
+
+    // 11c. Respuesta Manual de Staff (Human Takeover)
+    const staffOutbound = await messagingService.sendOutboundMessage({
+      conversationId: testConv.id,
+      userId: adminId,
+      messageType: 'TEXT',
+      body: '¡Hola Laura! Tenemos disponibilidad este jueves a las 11:00 con el Dr. Juan.'
+    });
+    assert(staffOutbound && staffOutbound.direction === 'OUTBOUND', 'Staff puede enviar mensaje saliente de WhatsApp');
+
+    const updatedConv = await messagingService.getConversationDetail(testConv.id);
+    assert(updatedConv.automation_enabled === false, 'Al responder el staff, se desactiva el Auto-Bot y se activa el Modo Atención Humana');
+
+    // 11d. Envío de Plantilla Pre-Aprobada (Template)
+    const templateMsg = await messagingService.sendOutboundMessage({
+      conversationId: testConv.id,
+      userId: adminId,
+      messageType: 'TEMPLATE',
+      templateName: 'recordatorio_cita',
+      templateParams: ['Laura', 'Jueves 17 de Octubre', '11:00']
+    });
+    assert(templateMsg && templateMsg.message_type === 'TEMPLATE', 'Plantilla de WhatsApp enviada con parámetros dinámicos');
+
+    // 11e. Vinculación de Contacto de WhatsApp a Expediente de Paciente
+    const linkRes = await messagingService.linkPatient(testConv.id, testPatientId);
+    assert(linkRes && Number(linkRes.contact.patient_id) === Number(testPatientId), 'Contacto de WhatsApp vinculado exitosamente al expediente del paciente');
+
+    const convAfterLink = await messagingService.getConversationDetail(testConv.id);
+    assert(Number(convAfterLink.patient_id) === Number(testPatientId), 'Conversación refleja el ID del paciente vinculado');
+
+    // 11f. Estadísticas de Mensajería
+    const msgStats = await messagingService.getStats();
+    assert(parseInt(msgStats.total_conversations, 10) >= 1, 'Estadísticas del centro de mensajería calculadas correctamente');
+
+    // Limpieza de datos de mensajería de prueba
+    await query('DELETE FROM messages WHERE conversation_id = $1', [testConv.id]);
+    await query('DELETE FROM conversations WHERE id = $1', [testConv.id]);
+    await query('DELETE FROM messaging_contacts WHERE phone = $1', [testWaPhone]);
+
+    // --------------------------------------------------
+    // TEST 12: Productividad en Calendario (Tareas, Notas y Seguimientos)
+    // --------------------------------------------------
+    console.log('\n🔹 [12/13] Productividad en Calendario (Tareas, Notas y Seguimientos)');
+
+    // 12a. Creación de Tarea de Equipo
+    const testTask = await taskService.createTask({
+      title: 'Pedir corona de zirconio a laboratorio',
+      description: 'Molar 46 para paciente de prueba',
+      due_date: '2026-11-25',
+      due_time: '10:30:00',
+      priority: 'HIGH',
+      patient_id: testPatientId,
+    }, adminId, 1);
+
+    assert(testTask && testTask.id, 'Tarea creada con éxito');
+    assert(testTask.status === 'PENDING', 'Tarea inicializada con estado PENDING');
+    assert(testTask.priority === 'HIGH', 'Prioridad asignada como HIGH');
+    assert(Number(testTask.patient_id) === Number(testPatientId), 'Tarea vinculada correctamente al paciente de prueba');
+
+    // 12b. Consulta y Filtrado de Tareas
+    const tasksList = await taskService.getTasks({
+      clinicId: 1,
+      startDate: '2026-11-01',
+      endDate: '2026-11-30',
+      status: 'PENDING',
+    });
+    assert(tasksList.some(t => t.id === testTask.id), 'Tarea listada dentro del rango de fechas del calendario');
+
+    // 12c. Actualización de Estado (Completar Tarea)
+    const updatedTask = await taskService.updateStatus(testTask.id, 'COMPLETED', 1);
+    assert(updatedTask.status === 'COMPLETED', 'Tarea marcada exitosamente como COMPLETED');
+
+    // 12d. Creación y Consulta de Notas Adhesivas de Calendario (Sticky Notes)
+    const testNote = await calendarNoteService.createNote({
+      note_date: '2026-11-25',
+      title: 'Mantenimiento Preventivo',
+      content: 'Revisión semestral del compresor y equipo de rayos X.',
+      color: '#bfdbfe',
+      is_pinned: true,
+      is_team_visible: true,
+    }, adminId, 1);
+
+    assert(testNote && testNote.id, 'Nota adhesiva de calendario creada');
+    assert(testNote.is_pinned === true, 'Nota marcada como fijada (pinned)');
+
+    const notesList = await calendarNoteService.getNotes({
+      clinicId: 1,
+      startDate: '2026-11-01',
+      endDate: '2026-11-30',
+    });
+    assert(notesList.some(n => n.id === testNote.id), 'Nota adhesiva recuperada para la vista de calendario');
+
+    // 12e. Creación y Seguimiento de Paciente (Follow-up)
+    const testFollowup = await followupService.createFollowup({
+      patient_id: testPatientId,
+      followup_date: '2026-11-28',
+      reason: 'Control dolor post-extracción molar 48',
+      notes: 'Llamar por la mañana para evaluar inflamación.',
+    }, adminId, 1);
+
+    assert(testFollowup && testFollowup.id, 'Seguimiento de paciente programado');
+    assert(testFollowup.status === 'PENDING', 'Seguimiento inicializado con estado PENDING');
+
+    const updatedFollowup = await followupService.updateStatus(testFollowup.id, 'CONTACTED', 1);
+    assert(updatedFollowup.status === 'CONTACTED', 'Estado de seguimiento actualizado a CONTACTED');
+
+    const followupsList = await followupService.getFollowups({
+      clinicId: 1,
+      patientId: testPatientId,
+    });
+    assert(followupsList.length > 0, 'Seguimientos recuperados para el paciente');
+
+    // Limpieza de datos de productividad de prueba
+    await taskService.deleteTask(testTask.id, 1);
+    await calendarNoteService.deleteNote(testNote.id, adminId, 1);
+    await followupService.deleteFollowup(testFollowup.id, 1);
+
+    // --------------------------------------------------
+    // TEST 13: Odontograma Dental Clínico (Anotaciones por Pieza y Superficies FDI)
+    // --------------------------------------------------
+    console.log('\n🔹 [13/14] Odontograma Dental Clínico (Anotaciones por Pieza y Superficies FDI)');
+
+    // 13a. Registro de Caries en Superficies Oclusal y Mesial de Pieza 16
+    const entry16 = await odontogramService.saveEntry(
+      testPatientId,
+      {
+        tooth_number: '16',
+        surfaces: ['O', 'M'],
+        condition: 'CARIES',
+        state: 'DIAGNOSED',
+        severity: 'MODERATE',
+        notes: 'Caries de esmalte y dentina en fosa mesio-oclusal.',
+      },
+      adminId,
+      1
+    );
+
+    assert(entry16 && entry16.id, 'Entrada de odontograma para pieza #16 creada exitosamente');
+    assert(entry16.tooth_number === '16', 'Número de pieza FDI registrado como 16');
+    assert(entry16.condition === 'CARIES', 'Condición asignada como CARIES');
+    assert(Array.isArray(entry16.surfaces) && entry16.surfaces.includes('O') && entry16.surfaces.includes('M'), 'Superficies O y M registradas');
+    assert(entry16.state === 'DIAGNOSED', 'Estado inicial registrado como DIAGNOSED');
+
+    // 13b. Registro de Implante en Pieza 46 (Diente Completo)
+    const entry46 = await odontogramService.saveEntry(
+      testPatientId,
+      {
+        tooth_number: '46',
+        surfaces: [],
+        condition: 'IMPLANTE',
+        state: 'COMPLETED',
+        severity: 'MODERATE',
+        notes: 'Implante osteointegrado con corona sobre implante.',
+      },
+      adminId,
+      1
+    );
+
+    assert(entry46 && entry46.id, 'Entrada de implante en pieza #46 creada');
+    assert(entry46.condition === 'IMPLANTE', 'Condición registrada como IMPLANTE');
+
+    // 13c. Consulta del Odontograma del Paciente y Mapeo por Piezas
+    const odontoData = await odontogramService.getPatientOdontogram(testPatientId, 1);
+    assert(odontoData && Array.isArray(odontoData.entries), 'Odontograma recuperado como estructura de datos válida');
+    assert(odontoData.teethMap['16'] && odontoData.teethMap['16'].length >= 1, 'Mapeo rápido de pieza #16 contiene los hallazgos');
+    assert(odontoData.teethMap['46'] && odontoData.teethMap['46'].length >= 1, 'Mapeo rápido de pieza #46 contiene el implante');
+
+    // 13d. Actualización de Entrada (Caries curada con Obturación / Realizado)
+    const updatedEntry16 = await odontogramService.updateEntry(
+      entry16.id,
+      {
+        condition: 'OBTURACION',
+        state: 'COMPLETED',
+        notes: 'Restauración con resina compuesta fotopolimerizable realizada.',
+      },
+      1
+    );
+
+    assert(updatedEntry16.condition === 'OBTURACION', 'Condición actualizada a OBTURACION tras realizar tratamiento');
+    assert(updatedEntry16.state === 'COMPLETED', 'Estado actualizado a COMPLETED');
+
+    // 13e. Eliminación (Soft Delete) de Entrada de Odontograma
+    const deleteRes = await odontogramService.deleteEntry(entry46.id, 1);
+    assert(deleteRes.success === true, 'Entrada de odontograma eliminada mediante soft delete');
+
+    const odontoAfterDelete = await odontogramService.getPatientOdontogram(testPatientId, 1);
+    assert(!odontoAfterDelete.teethMap['46'], 'Pieza #46 ya no figura con registros activos en el mapa dental');
+
+    // Limpieza de entrada restante
+    await odontogramService.deleteEntry(entry16.id, 1);
+
+    // --------------------------------------------------
+    // TEST 14: Instagram Direct Messaging (Meta Graph API & Omnicanal)
+    // --------------------------------------------------
+    console.log('\n🔹 [14/15] Instagram Direct Messaging (Meta Graph API & Omnicanal)');
+
+    // 14a. Handshake de Verificación de Webhook de Instagram
+    const igChallengeResult = instagramService.verifyWebhookChallenge('subscribe', 'vides_dental_webhook_token_2026', 'challenge_test_code_ig_7788');
+    assert(igChallengeResult === 'challenge_test_code_ig_7788', 'Handshake de verificación de Meta Instagram Webhook valida token correcto');
+
+    const igFailedChallenge = instagramService.verifyWebhookChallenge('subscribe', 'wrong_token', 'challenge_test_code_ig_7788');
+    assert(igFailedChallenge === null, 'Handshake de Meta Instagram Webhook rechaza token inválido');
+
+    // 14b. Ingesta de Mensaje Entrante por Webhook de Instagram
+    const testIgSenderId = '1784140099887766';
+    const mockIgPayload = {
+      object: 'instagram',
+      entry: [{
+        id: '17841400000000000',
+        time: Date.now(),
+        messaging: [{
+          sender: { id: testIgSenderId },
+          recipient: { id: '17841400000000000' },
+          timestamp: Date.now(),
+          message: {
+            mid: `m_ig_${Date.now()}`,
+            text: '¡Hola! Quisiera saber el precio de una limpieza dental y blanqueamiento.',
+          }
+        }]
+      }]
+    };
+
+    const igWebhookRes = await messagingService.processInboundInstagramWebhook(mockIgPayload);
+    assert(Array.isArray(igWebhookRes) && igWebhookRes.length > 0 && igWebhookRes[0].success, 'Webhook procesó exitosamente el mensaje entrante de Instagram');
+
+    // 14c. Verificación de Conversación y Canal 'INSTAGRAM'
+    const igConvsRes = await messagingService.getConversations({ search: testIgSenderId });
+    assert(igConvsRes && igConvsRes.rows && igConvsRes.rows.length > 0, 'Conversación registrada en bandeja omnicanal para el usuario de Instagram');
+
+    const testIgConv = igConvsRes.rows[0];
+    assert(testIgConv.channel === 'INSTAGRAM', 'Canal asignado correctamente como INSTAGRAM');
+
+    // 14d. Respuesta Automática en Instagram
+    const igMessagesData = await messagingService.getConversationMessages(testIgConv.id);
+    const igMessages = igMessagesData?.messages || [];
+    assert(igMessages.length >= 2, 'Conversación contiene mensaje entrante y auto-reply de Instagram');
+    assert(igMessages.some(m => m.direction === 'OUTBOUND'), 'Auto-reply de bienvenida para Instagram generado automáticamente');
+
+    // 14e. Envío de Mensaje Saliente por parte del Staff (Modo Mock / Sandboxed)
+    const outboundIgReply = await messagingService.sendOutboundMessage({
+      conversationId: testIgConv.id,
+      userId: adminId,
+      body: '¡Hola! La limpieza dental tiene un costo de 50€ y el blanqueamiento 180€. ¿Deseas agendar?',
+    });
+
+    assert(outboundIgReply && outboundIgReply.id, 'Staff puede enviar mensaje directo saliente de Instagram');
+
+    const convAfterIgStaffReply = await messagingService.getConversationDetail(testIgConv.id);
+    assert(convAfterIgStaffReply.automation_enabled === false, 'Al responder el staff por Instagram, se activa el Modo Atención Humana');
+
+    // 14f. Vinculación del Usuario de Instagram al Expediente del Paciente
+    const linkIgRes = await messagingService.linkPatient(testIgConv.id, testPatientId);
+    assert(linkIgRes && Number(linkIgRes.contact.patient_id) === Number(testPatientId), 'Contacto de Instagram vinculado exitosamente al paciente');
+
+    // Limpieza de datos de prueba de Instagram
+    await query('DELETE FROM messages WHERE conversation_id = $1', [testIgConv.id]);
+    await query('DELETE FROM conversations WHERE id = $1', [testIgConv.id]);
+    await query('DELETE FROM messaging_contacts WHERE phone = $1', [testIgSenderId]);
+
+    // --------------------------------------------------
+    // TEST 15: AI Structured Copilot & Motor de Automações Clínicas
+    // --------------------------------------------------
+    console.log('\n🔹 [15/16] AI Structured Copilot & Motor de Automações Clínicas');
+
+    // 15a. Clasificador de Intención de IA (Heurístico / Free LLM)
+    const intentConfirm = await aiService.classifyIntent('1');
+    assert(intentConfirm.intent === 'CONFIRM', 'IA clasifica "1" como confirmación de cita (CONFIRM)');
+
+    const intentTextConfirm = await aiService.classifyIntent('Sim, estarei presente amanhã às 10h');
+    assert(intentTextConfirm.intent === 'CONFIRM', 'IA clasifica texto afirmativo como CONFIRM');
+
+    const intentCancel = await aiService.classifyIntent('2');
+    assert(intentCancel.intent === 'CANCEL', 'IA clasifica "2" como cancelación/reagendamiento (CANCEL)');
+
+    const intentUrgent = await aiService.classifyIntent('Tengo un dolor muy fuerte en la muela y sangrado');
+    assert(intentUrgent.intent === 'URGENT', 'IA clasifica síntomas agudos como urgencia (URGENT)');
+
+    // 15b. Escaneo de Confirmaciones 24h
+    // Crear una cita de prueba para mañana en estado 'programada'
+    const tomorrowStr = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+    const statusProgRes = await query(`SELECT id FROM appointment_status WHERE name = 'programada' LIMIT 1`);
+    const progStatusId = statusProgRes.rows[0]?.id;
+
+    const testAppt24hRes = await query(
+      `INSERT INTO appointments (clinic_id, patient_id, doctor_id, appointment_date, start_time, end_time, status_id)
+       VALUES (1, $1, $2, $3, '11:00:00', '11:30:00', $4)
+       RETURNING id`,
+      [testPatientId, docId, tomorrowStr, progStatusId]
+    );
+    const testAppt24hId = testAppt24hRes.rows[0].id;
+
+    const scanResult = await automationSchedulerService.run24hAppointmentConfirmationScan(1);
+    assert(scanResult && scanResult.sent >= 1, 'Escaneo 24h detecta y envía recordatorio de confirmación por WhatsApp');
+
+    // 15c. Procesamiento de Confirmación Inbound en Webhook ("1")
+    const patientPhone = '600000999';
+    const confirmInboundRes = await automationSchedulerService.processInboundConfirmation(patientPhone, '1', 1);
+    assert(confirmInboundRes.handled === true && confirmInboundRes.action === 'CONFIRMED', 'Respuesta "1" en WhatsApp procesada como confirmación exitosa');
+
+    const verifiedApptRes = await query(`SELECT s.name AS status_name FROM appointments a JOIN appointment_status s ON a.status_id = s.id WHERE a.id = $1`, [testAppt24hId]);
+    assert(verifiedApptRes.rows[0]?.status_name === 'confirmada', 'Estado de la cita actualizado automáticamente a "confirmada" en base de datos');
+
+    // 15d. Procesamiento de Cancelación Inbound en Webhook ("2")
+    const cancelInboundRes = await automationSchedulerService.processInboundConfirmation(patientPhone, '2', 1);
+    assert(cancelInboundRes.handled === true && cancelInboundRes.action === 'CANCELLED', 'Respuesta "2" en WhatsApp procesada como cancelación');
+
+    const verifiedCancelRes = await query(`SELECT s.name AS status_name FROM appointments a JOIN appointment_status s ON a.status_id = s.id WHERE a.id = $1`, [testAppt24hId]);
+    assert(verifiedCancelRes.rows[0]?.status_name === 'cancelada', 'Estado de la cita actualizado automáticamente a "cancelada"');
+
+    const createdTaskRes = await query(`SELECT * FROM tasks WHERE appointment_id = $1 AND priority = 'URGENT'`, [testAppt24hId]);
+    assert(createdTaskRes.rows.length > 0, 'Tarea urgente creada automáticamente para la recepción para liberar el hueco de agenda');
+
+    // 15e. Motor de Recall & Retención de Pacientes (1x al día)
+    const recallPatient = await patientService.create({
+      first_name: 'Maria',
+      last_name: 'Recall',
+      dni: `R${Date.now().toString().slice(-8)}`,
+      phone: '600111222',
+      email: `recall.${Date.now()}@clinic.com`
+    }, adminId);
+
+    const past190Date = new Date(Date.now() - 190 * 86400000).toISOString().split('T')[0];
+    const statusCompRes = await query(`SELECT id FROM appointment_status WHERE name = 'completada' LIMIT 1`);
+    const compStatusId = statusCompRes.rows[0]?.id;
+
+    const oldApptRes = await query(
+      `INSERT INTO appointments (clinic_id, patient_id, doctor_id, appointment_date, start_time, end_time, status_id)
+       VALUES (1, $1, $2, $3, '10:00:00', '10:30:00', $4)
+       RETURNING id`,
+      [recallPatient.id, docId, past190Date, compStatusId]
+    );
+    const oldApptId = oldApptRes.rows[0].id;
+
+    // Eliminar cita 24h de prueba
+    await query(`DELETE FROM appointments WHERE id = $1`, [testAppt24hId]);
+
+    const recallResult = await automationSchedulerService.runDailyRecallSweep(1);
+    assert(recallResult && recallResult.hygieneSent >= 1, 'Motor de recall detecta paciente con profilaxis >180d y envía mensaje de retención');
+
+    const followupsRes = await query(`SELECT * FROM patient_followups WHERE patient_id = $1 AND reason LIKE '%Recall%'`, [recallPatient.id]);
+    assert(followupsRes.rows.length > 0, 'Llamada de seguimiento registrada en patient_followups para la recepción');
+
+    // 15f. Briefing Operativo Matinal de IA
+    const briefing = await aiService.generateReceptionBriefing({
+      date: new Date().toISOString().split('T')[0],
+      appointments: [{ status_name: 'confirmada' }, { status_name: 'programada' }],
+      pendingConfirmations: [{ id: 1 }],
+      recalls: followupsRes.rows,
+    });
+    assert(briefing && briefing.summary && briefing.metrics.totalAppointments === 2, 'Briefing inteligente de recepción generado con métricas precisas');
+
+    // 15g. Motor de Cron Autónomo en Segundo Plano
+    const cronStatus = cronService.getStatus();
+    assert(cronStatus && typeof cronStatus === 'object', 'Motor de cron responde con estado operativo');
+    await cronService.executeAllClinicsConfirmations();
+    assert(true, 'Cron ejecuta escaneo multi-clínica de confirmaciones 24h sin errores');
+    await cronService.executeAllClinicsRecall();
+    assert(true, 'Cron ejecuta barrido multi-clínica de recall preventivo sin errores');
+
+    // Limpieza de datos específicos de automatizaciones
+    await query(`DELETE FROM automation_logs WHERE patient_id = $1`, [recallPatient.id]);
+    await query(`DELETE FROM patient_followups WHERE patient_id = $1`, [recallPatient.id]);
+    await query(`DELETE FROM appointments WHERE id = $1`, [oldApptId]);
+    await query(`DELETE FROM patients WHERE id = $1`, [recallPatient.id]);
+    await query(`DELETE FROM automation_logs WHERE patient_id = $1`, [testPatientId]);
+    await query(`DELETE FROM tasks WHERE patient_id = $1`, [testPatientId]);
+
+    // --------------------------------------------------
+    // TEST 16: Limpieza y Teardown
+    // --------------------------------------------------
+    console.log('\n🔹 [16/16] Limpieza de Datos de Prueba');
     if (testAppointmentId) {
       await appointmentService.delete(testAppointmentId);
       assert(true, 'Cita de prueba eliminada');

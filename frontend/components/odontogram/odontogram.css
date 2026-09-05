@@ -1,0 +1,324 @@
+/* ============================================
+   Estilos del Odontograma Clínico Anatómico Realista
+   ============================================ */
+
+.odontogram-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background: var(--bg-card, #ffffff);
+  border-radius: var(--radius-lg, 12px);
+  padding: 24px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+}
+
+.odontogram-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-light, #f3f4f6);
+}
+
+.odontogram-title-group h3 {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text-primary, #111827);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.odontogram-view-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.arch-type-btn {
+  padding: 8px 16px;
+  border-radius: var(--radius-md, 8px);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border-color, #e5e7eb);
+  background: var(--bg-primary, #f9fafb);
+  color: var(--text-secondary, #4b5563);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.arch-type-btn:hover {
+  background: var(--bg-secondary, #f3f4f6);
+  color: var(--text-primary, #111827);
+}
+
+.arch-type-btn.active {
+  background: var(--primary-600, #2563eb);
+  color: #ffffff;
+  border-color: var(--primary-600, #2563eb);
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+
+/* Leyenda Clínica de Convenciones */
+.odontogram-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  background: #f8fafc;
+  padding: 12px 18px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  align-items: center;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.legend-color-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  display: inline-block;
+  border: 1px solid rgba(0,0,0,0.15);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+}
+
+/* Contenedor del Arco Dental */
+.dental-arch-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 0;
+  overflow-x: auto;
+  background: #fafaf9;
+  border-radius: 12px;
+  border: 1px solid #f0efed;
+}
+
+.arch-row {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  padding: 0 12px;
+}
+
+.arch-quadrant {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.arch-divider {
+  width: 2px;
+  background: linear-gradient(to bottom, transparent, #cbd5e1, transparent);
+  height: 90px;
+  align-self: center;
+}
+
+.occlusal-plane-banner {
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #94a3b8;
+  letter-spacing: 0.15em;
+  padding: 4px 0;
+  position: relative;
+}
+
+.occlusal-plane-banner::before,
+.occlusal-plane-banner::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 25%;
+  height: 1px;
+  background: #e2e8f0;
+}
+
+.occlusal-plane-banner::before { left: 5%; }
+.occlusal-plane-banner::after { right: 5%; }
+
+/* Diente Individual Realista */
+.tooth-unit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.15s ease, filter 0.15s ease;
+  padding: 4px 2px;
+  border-radius: 8px;
+}
+
+.tooth-unit:hover {
+  transform: translateY(-3px);
+  filter: drop-shadow(0 6px 12px rgba(37, 99, 235, 0.18));
+}
+
+.tooth-unit:hover .tooth-label {
+  color: #2563eb;
+  font-weight: 800;
+}
+
+.tooth-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #475569;
+  transition: color 0.15s;
+}
+
+.tooth-svg-box {
+  width: 48px;
+  height: 94px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tooth-sketch-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* Estilos de Dibujo / Boceto Realista */
+.sketch-root-fill {
+  fill: #fef3c7;
+  stroke: #64748b;
+  stroke-width: 1.1;
+  stroke-linejoin: round;
+}
+
+.sketch-crown-fill {
+  fill: #ffffff;
+  stroke: #475569;
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+
+.sketch-shading-line {
+  stroke: #94a3b8;
+  stroke-width: 0.8;
+  stroke-linecap: round;
+  fill: none;
+}
+
+.sketch-cej-line {
+  stroke: #64748b;
+  stroke-width: 1;
+  stroke-dasharray: 2,1;
+  fill: none;
+}
+
+.sketch-canal-line {
+  stroke: #cbd5e1;
+  stroke-width: 1.2;
+  stroke-dasharray: 2,2;
+  fill: none;
+}
+
+/* Superficies Anatómicas Clicables */
+.tooth-surface {
+  fill: #ffffff;
+  stroke: #64748b;
+  stroke-width: 1.1;
+  stroke-linejoin: round;
+  transition: fill 0.2s, stroke 0.2s;
+  cursor: pointer;
+}
+
+.tooth-surface:hover {
+  fill: #e0e7ff !important;
+  stroke: #2563eb !important;
+  stroke-width: 1.6 !important;
+}
+
+/* Clases de Condición en Superficie */
+.tooth-surface.has-caries { fill: #ef4444 !important; stroke: #b91c1c !important; }
+.tooth-surface.has-obturacion { fill: #3b82f6 !important; stroke: #1d4ed8 !important; }
+.tooth-surface.has-corona { fill: #eab308 !important; stroke: #a16207 !important; }
+.tooth-surface.has-endodoncia { fill: #a855f7 !important; stroke: #7e22ce !important; }
+.tooth-surface.has-implante { fill: #64748b !important; stroke: #334155 !important; }
+.tooth-surface.has-fractura { fill: #f97316 !important; stroke: #c2410c !important; }
+.tooth-surface.has-sellador { fill: #10b981 !important; stroke: #047857 !important; }
+
+/* Overlays Anatómicos de Diente Completo */
+.tooth-svg-box.is-ausente {
+  opacity: 0.35;
+}
+
+.tooth-svg-box.is-ausente::after {
+  content: "✕";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 38px;
+  font-weight: 900;
+  color: #dc2626;
+  line-height: 1;
+  pointer-events: none;
+  text-shadow: 0 0 4px #ffffff;
+}
+
+.tooth-svg-box.is-implante .sketch-root-fill {
+  fill: #94a3b8 !important;
+  stroke: #334155 !important;
+}
+
+.tooth-svg-box.is-implante .sketch-canal-line {
+  stroke: #1e293b !important;
+  stroke-width: 2 !important;
+}
+
+.tooth-svg-box.is-corona .sketch-crown-fill {
+  fill: #fef08a !important;
+  stroke: #ca8a04 !important;
+  stroke-width: 1.6 !important;
+}
+
+.tooth-svg-box.is-endodoncia .sketch-canal-line {
+  stroke: #a855f7 !important;
+  stroke-width: 2.2 !important;
+  stroke-dasharray: none !important;
+}
+
+/* Tabla de Hallazgos y Diagnósticos del Odontograma */
+.odontogram-findings-table {
+  margin-top: 14px;
+}
+
+.finding-status-badge {
+  font-size: 0.72rem;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.finding-status-badge.DIAGNOSED {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.finding-status-badge.PLANNED {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.finding-status-badge.COMPLETED {
+  background: #dcfce7;
+  color: #166534;
+}

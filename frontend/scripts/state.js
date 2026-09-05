@@ -13,6 +13,11 @@ class Store {
       unreadNotificationsCount: 0,
       clinics: [],
       activeClinicId: localStorage.getItem('activeClinicId') || null,
+      features: {
+        aiAutomations: false,
+        omnichannelMessaging: false,
+        notesAndOdontogram: true,
+      },
     };
     this.subscribers = {};
   }
@@ -82,9 +87,9 @@ class Store {
   setAuth(user, token, refreshToken) {
     localStorage.setItem('token', token);
     localStorage.setItem('refreshToken', refreshToken);
+    this.set('user', user);
     this.set('token', token);
     this.set('refreshToken', refreshToken);
-    this.set('user', user);
     if (user?.clinic_id) {
       if (user.role_name === 'propietario') {
         if (!this.state.activeClinicId) {
