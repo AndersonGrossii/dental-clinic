@@ -14,6 +14,7 @@ import routes from './routes/index.js';
 
 const __dirname = new URL('.', import.meta.url).pathname;
 const app = express();
+app.set('trust proxy', 1);
 
 // ---- Seguridad ----
 app.use(helmet({
