@@ -11,9 +11,9 @@ class WhatsAppService {
     this.baseUrl = `https://graph.facebook.com/${this.apiVersion}`;
     this.verifyToken = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN || 'vides_dental_webhook_token_2026';
     this.appSecret = process.env.META_APP_SECRET || '';
-    this.accessToken = process.env.WHATSAPP_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || '';
-    this.defaultPhoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
-    this.businessAccountId = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '';
+    this.accessToken = (process.env.WHATSAPP_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || '').trim().replace(/\s+/g, '');
+    this.defaultPhoneId = (process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim().replace(/\s+/g, '');
+    this.businessAccountId = (process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '').trim().replace(/\s+/g, '');
   }
 
   /**
