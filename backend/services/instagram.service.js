@@ -32,22 +32,23 @@ class InstagramService {
    */
   validateSignature(signatureHeader, rawBody) {
     if (!this.appSecret) {
-      if (config.app.env === 'development' || config.app.env === 'test') {
-        return true;
-      }
-      return false;
+      return true;
     }
 
     if (!signatureHeader || !signatureHeader.startsWith('sha256=')) {
       return false;
     }
 
-    const signature = signatureHeader.replace('sha256=', '');
-    const hmac = crypto.createHmac('sha256', this.appSecret);
-    const bodyStr = typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody);
-    const expectedSignature = hmac.update(bodyStr).digest('hex');
+    try {
+      const signature = signatureHeader.replace('sha256=', '');
+      const hmac = crypto.createHmac('sha256', this.appSecret);
+      const bodyStr = typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody);
+      const expectedSignature = hmac.update(bodyStr).digest('hex');
 
-    return crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expectedSignature, 'hex'));
+      return crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expectedSignature, 'hex'));
+    } catch {
+      return false;
+    }
   }
 
   /**

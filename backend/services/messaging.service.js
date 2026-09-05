@@ -142,7 +142,7 @@ class MessagingService {
         } else if (confirmResult.action === 'CANCELLED') {
           replyBody = `🗓️ Hemos registrado la cancelación de su cita. Un asesor de nuestro equipo se pondrá en contacto para ayudarle a reprogramar. ¡Gracias por avisarnos!`;
         }
-      } else if (text.includes('hola') || text.includes('buenas') || text.includes('informacion') || text.includes('cita')) {
+      } else {
         const contactFirstName = (contact.name || '').split(' ')[0] || 'Estimado/a';
         replyBody = `¡Hola ${contactFirstName}! Gracias por contactar a Clínica Vides Dental. 🦷✨\n\n¿En qué podemos ayudarte hoy?\n1️⃣ Agendar o consultar una cita\n2️⃣ Información sobre tratamientos\n3️⃣ Consultar presupuesto\n\nUn miembro de nuestro equipo te atenderá a la brevedad.`;
       }

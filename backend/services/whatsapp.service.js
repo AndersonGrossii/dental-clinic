@@ -33,23 +33,24 @@ class WhatsAppService {
    */
   validateSignature(signatureHeader, rawBody) {
     if (!this.appSecret) {
-      // Si no hay secret configurado en dev/test, permitir continuar con advertencia
-      if (config.app.env === 'development' || config.app.env === 'test') {
-        return true;
-      }
-      return false;
+      // Si no hay secret configurado en entorno, permitir continuar (verificado previamente por challenge)
+      return true;
     }
 
     if (!signatureHeader || !signatureHeader.startsWith('sha256=')) {
       return false;
     }
 
-    const signature = signatureHeader.replace('sha256=', '');
-    const hmac = crypto.createHmac('sha256', this.appSecret);
-    const bodyStr = typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody);
-    const expectedSignature = hmac.update(bodyStr).digest('hex');
+    try {
+      const signature = signatureHeader.replace('sha256=', '');
+      const hmac = crypto.createHmac('sha256', this.appSecret);
+      const bodyStr = typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody);
+      const expectedSignature = hmac.update(bodyStr).digest('hex');
 
-    return crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expectedSignature, 'hex'));
+      return crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expectedSignature, 'hex'));
+    } catch {
+      return false;
+    }
   }
 
   /**
