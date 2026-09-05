@@ -170,11 +170,16 @@ class WhatsAppService {
       };
     }
 
+    const token = (process.env.WHATSAPP_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || this.accessToken || '').trim().replace(/\s+/g, '');
+    const finalPhoneId = (targetPhoneId || process.env.WHATSAPP_PHONE_NUMBER_ID || this.defaultPhoneId || '').trim().replace(/\s+/g, '');
+
+    logger.info(`[WHATSAPP SEND] PhoneID: "${finalPhoneId}", To: "${cleanPhone}", TokenPrefix: "${token.substring(0, 15)}...", Length: ${token.length}`);
+
     try {
-      const response = await fetch(`${this.baseUrl}/${targetPhoneId}/messages`, {
+      const response = await fetch(`${this.baseUrl}/${finalPhoneId}/messages`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${this.accessToken}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
