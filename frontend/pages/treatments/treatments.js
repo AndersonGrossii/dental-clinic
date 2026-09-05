@@ -24,7 +24,7 @@ export class Treatments {
 
   async loadData() {
     try {
-      const response = await treatmentService.getAll({ limit: 100 });
+      const response = await treatmentService.getAll();
       this.treatmentsList = response || [];
       this.categoriesList = await treatmentService.getCategories();
     } catch (err) {
