@@ -1,6 +1,7 @@
 // ============================================
 // Suite Completa de Pruebas Automatizadas (E2E) — Clínica Dental
 // ============================================
+process.env.NODE_ENV = 'test';
 import { query, als } from '../database/pool.js';
 import appointmentService from '../services/appointment.service.js';
 import patientService from '../services/patient.service.js';

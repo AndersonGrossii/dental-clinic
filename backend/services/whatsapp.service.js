@@ -7,12 +7,13 @@ import { logger } from '../utils/logger.js';
 
 class WhatsAppService {
   constructor() {
-    this.apiVersion = process.env.WHATSAPP_API_VERSION || 'v19.0';
+    this.apiVersion = process.env.WHATSAPP_API_VERSION || 'v20.0';
     this.baseUrl = `https://graph.facebook.com/${this.apiVersion}`;
-    this.verifyToken = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || 'vides_dental_webhook_token_2026';
+    this.verifyToken = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN || 'vides_dental_webhook_token_2026';
     this.appSecret = process.env.META_APP_SECRET || '';
-    this.accessToken = process.env.WHATSAPP_ACCESS_TOKEN || '';
+    this.accessToken = process.env.WHATSAPP_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || '';
     this.defaultPhoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
+    this.businessAccountId = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '';
   }
 
   /**
@@ -158,8 +159,8 @@ class WhatsAppService {
       },
     };
 
-    // Si no hay token de Meta configurado en entorno local/test, simular envío exitoso
-    if (!this.accessToken || !targetPhoneId) {
+    // Si estamos en entorno de tests automatizados o no hay token de Meta configurado, simular envío exitoso
+    if (process.env.NODE_ENV === 'test' || !this.accessToken || !targetPhoneId) {
       logger.info(`[MOCK WHATSAPP] Enviando mensaje a ${cleanPhone}: "${textBody}"`);
       return {
         success: true,
@@ -222,7 +223,7 @@ class WhatsAppService {
       },
     };
 
-    if (!this.accessToken || !targetPhoneId) {
+    if (process.env.NODE_ENV === 'test' || !this.accessToken || !targetPhoneId) {
       logger.info(`[MOCK WHATSAPP TEMPLATE] Enviando plantilla "${templateName}" a ${cleanPhone} con params:`, parameters);
       return {
         success: true,
