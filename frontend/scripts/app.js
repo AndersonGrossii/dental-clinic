@@ -45,13 +45,8 @@ router.addRoute('#/payments', Payments);
 router.addRoute('#/reports', Reports);
 router.addRoute('#/settings', Settings);
 
-const features = state.get('features') || {};
-if (features.omnichannelMessaging) {
-  router.addRoute('#/messages', Messages);
-}
-if (features.aiAutomations) {
-  router.addRoute('#/automations', Automations);
-}
+router.addRoute('#/messages', Messages);
+router.addRoute('#/automations', Automations);
 
 let sidebarInstance = null;
 let navbarInstance = null;

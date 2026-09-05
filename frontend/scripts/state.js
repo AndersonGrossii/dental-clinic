@@ -14,8 +14,8 @@ class Store {
       clinics: [],
       activeClinicId: localStorage.getItem('activeClinicId') || null,
       features: {
-        aiAutomations: false,
-        omnichannelMessaging: false,
+        aiAutomations: true,
+        omnichannelMessaging: true,
         notesAndOdontogram: true,
       },
     };
