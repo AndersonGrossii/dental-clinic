@@ -1,6 +1,6 @@
 // ============================================
 // Servicio de Mensajería Unificada (WhatsApp & Instagram Omnichannel)
-// ============================================
+import config from '../config/app.js';
 import messagingRepository from '../repositories/messaging.repository.js';
 import whatsappService from './whatsapp.service.js';
 import instagramService from './instagram.service.js';
@@ -56,7 +56,7 @@ class MessagingService {
           messageId: message.id,
         });
 
-        if (conversation.automation_enabled) {
+        if (config.features.aiAutomations && conversation.automation_enabled) {
           await this.handleAutoReply(conversation, contact, evt.body);
         }
 
@@ -110,7 +110,7 @@ class MessagingService {
           rawPayload: { ...evt.raw, isStoryReply: evt.isStoryReply, storyId: evt.storyId },
         });
 
-        if (conversation.automation_enabled) {
+        if (config.features.aiAutomations && conversation.automation_enabled) {
           await this.handleInstagramAutoReply(conversation, contact, evt.text);
         }
 
