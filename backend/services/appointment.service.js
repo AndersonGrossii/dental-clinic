@@ -8,6 +8,7 @@ import { AppError } from '../utils/errors.js';
 import { toAppointmentDTO, toCalendarEventDTO } from '../dtos/appointment.dto.js';
 import { formatDateSQL } from '../utils/date.js';
 import { logger } from '../utils/logger.js';
+import holidayService from './holiday.service.js';
 
 /**
  * Servicio que encapsula la lógica de negocio para la gestión de citas.
@@ -77,6 +78,27 @@ class AppointmentService {
     );
     if (doctorResult.rows.length === 0) {
       throw new AppError('El doctor seleccionado no existe.', 404);
+    }
+
+    // Verificar si la fecha seleccionada es un día festivo o fin de semana
+    const clinicId = als.getStore()?.clinicId || 1;
+    let userRole = null;
+    if (userId) {
+      const userRoleRes = await query('SELECT r.name as role_name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = $1', [userId]);
+      userRole = userRoleRes.rows[0]?.role_name?.toLowerCase();
+    }
+    const isOwnerOrDirector = userRole === 'propietario' || userRole === 'direccion';
+
+    const holiday = await holidayService.isHoliday(clinicId, data.appointment_date);
+    if (holiday && !isOwnerOrDirector) {
+      throw new AppError(`No es posible agendar citas en el día festivo: "${holiday.name}". La clínica permanece cerrada.`, 400);
+    }
+
+    const apptDateObj = new Date(data.appointment_date + 'T12:00:00');
+    const dow = apptDateObj.getDay();
+    const isWeekend = dow === 0 || dow === 6;
+    if (isWeekend && !isOwnerOrDirector) {
+      throw new AppError('Solo el propietario o dirección pueden agendar citas en fin de semana.', 403);
     }
 
     // Verificar conflicto de gabinete (un gabinete no puede tener dos citas a la vez)
@@ -179,6 +201,28 @@ class AppointmentService {
 
     const timeChanged =
       data.doctor_id || data.appointment_date || data.start_time || data.end_time;
+
+    if (data.appointment_date) {
+      const clinicId = als.getStore()?.clinicId || 1;
+      let userRole = null;
+      if (userId) {
+        const userRoleRes = await query('SELECT r.name as role_name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = $1', [userId]);
+        userRole = userRoleRes.rows[0]?.role_name?.toLowerCase();
+      }
+      const isOwnerOrDirector = userRole === 'propietario' || userRole === 'direccion';
+
+      const holiday = await holidayService.isHoliday(clinicId, data.appointment_date);
+      if (holiday && !isOwnerOrDirector) {
+        throw new AppError(`No es posible reagendar la cita al día festivo: "${holiday.name}". La clínica permanece cerrada.`, 400);
+      }
+
+      const apptDateObj = new Date(data.appointment_date + 'T12:00:00');
+      const dow = apptDateObj.getDay();
+      const isWeekend = dow === 0 || dow === 6;
+      if (isWeekend && !isOwnerOrDirector) {
+        throw new AppError('Solo el propietario o dirección pueden reagendar citas en fin de semana.', 403);
+      }
+    }
 
     const cabinetChanged = timeChanged || data.gabinete;
     if (cabinetChanged) {

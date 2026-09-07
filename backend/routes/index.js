@@ -25,6 +25,7 @@ import followupRoutes from './followup.routes.js';
 import aiRoutes from './ai.routes.js';
 import eventsRoutes from './events.routes.js';
 import internalChatRoutes from './internal-chat.routes.js';
+import holidayRoutes from './holiday.routes.js';
 
 const router = Router();
 
@@ -52,5 +53,6 @@ router.use('/followups', followupRoutes);
 router.use('/ai', aiRoutes);
 router.use('/events', eventsRoutes);
 router.use('/internal-chat', internalChatRoutes);
+router.use('/holidays', holidayRoutes);
 
 export default router;

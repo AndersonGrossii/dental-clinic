@@ -246,7 +246,7 @@ class DoctorService {
     let daySchedule = null;
 
     if (workdays && workdays.length > 0) {
-      // Si el doctor utiliza días específicos de atención, buscar si trabaja en esta fecha exacta
+      // Si el doctor tiene días específicos de atención asignados, verificar si coincide con esta fecha exacta
       const targetYMD = dateString.split('T')[0];
       const matchWorkday = workdays.find(w => {
         const wDate = w.work_date;
@@ -264,12 +264,13 @@ class DoctorService {
         return wYMD === targetYMD;
       });
 
-      if (!matchWorkday) {
-        return []; // No atiende en esta fecha específica
+      if (matchWorkday) {
+        daySchedule = matchWorkday;
       }
-      daySchedule = matchWorkday;
-    } else {
-      // Si no tiene días específicos, usar la agenda semanal recurrente por día de la semana
+    }
+
+    // Si no tiene día específico para esta fecha, usar su agenda semanal recurrente
+    if (!daySchedule) {
       const dayOfWeek = date.getDay(); // 0 = Domingo, 1 = Lunes, ...
       const schedules = await doctorRepository.getSchedule(doctorId);
       daySchedule = schedules.find(s => s.day_of_week === dayOfWeek);

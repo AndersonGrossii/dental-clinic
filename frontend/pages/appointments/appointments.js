@@ -2,6 +2,7 @@ import appointmentService from '../../services/appointment.service.js';
 import doctorService from '../../services/doctor.service.js';
 import patientService from '../../services/patient.service.js';
 import aiService from '../../services/ai.service.js';
+import holidayService from '../../services/holiday.service.js';
 import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
 import state from '../../scripts/state.js';
@@ -12,6 +13,7 @@ export class Appointments {
     this.container = container;
     this.appointmentsList = [];
     this.doctorsList = [];
+    this.clinicHolidays = [];
     this.tasksList = [];
     this.notesList = [];
     this.followupsList = [];
@@ -114,6 +116,17 @@ export class Appointments {
         return;
       }
 
+      if (e.target.id === 'btn-manage-holidays' || e.target.closest('#btn-manage-holidays')) {
+        this.showHolidaysModal();
+        return;
+      }
+      const enableWkBtn = e.target.closest('.btn-enable-weekend-day');
+      if (enableWkBtn) {
+        const dStr = enableWkBtn.dataset.date || this.toDateStr(this.currentDate);
+        this.showEnableWeekendModal(dStr);
+        return;
+      }
+
       if (e.target.id === 'apply-filters-btn') this.applyFilters();
       if (e.target.id === 'clear-filters-btn') this.clearFilters();
       if (e.target.id === 'cal-prev-btn') this.navigate(-1);
@@ -155,8 +168,12 @@ export class Appointments {
       if (this.filters.doctor_id) params.doctor_id = this.filters.doctor_id;
       if (this.filters.search) params.search = this.filters.search;
 
-      const apptsResponse = await appointmentService.getAll(params);
+      const [apptsResponse, holidaysResponse] = await Promise.all([
+        appointmentService.getAll(params),
+        holidayService.getHolidays({ date_from: range.start, date_to: range.end }).catch(() => []),
+      ]);
       this.appointmentsList = (apptsResponse || []).filter(a => a.status_name !== 'cancelada');
+      this.clinicHolidays = Array.isArray(holidaysResponse) ? holidaysResponse : (holidaysResponse?.data || []);
 
       if (onlyRefreshAppointments) {
         return;
@@ -230,6 +247,14 @@ export class Appointments {
     }
   }
 
+  getHolidayForDate(dateStr) {
+    if (!this.clinicHolidays || this.clinicHolidays.length === 0) return null;
+    return this.clinicHolidays.find(h => {
+      const hDate = typeof h.holiday_date === 'string' ? h.holiday_date.slice(0, 10) : new Date(h.holiday_date).toISOString().slice(0, 10);
+      return hDate === dateStr;
+    }) || null;
+  }
+
   getDoctorDaySchedule(doctorId, dateStr) {
     const workdays = this.filters.doctor_id ? this.doctorWorkdays : (this.allDoctorWorkdays ? this.allDoctorWorkdays[doctorId] : []);
     if (Array.isArray(workdays) && workdays.length > 0) {
@@ -257,7 +282,6 @@ export class Appointments {
           is_active: true
         };
       }
-      return null;
     }
 
     const dow = new Date(dateStr + 'T12:00:00').getDay();
@@ -479,6 +503,9 @@ export class Appointments {
               <button id="print-weekly-btn" class="btn print-dropdown-btn-item">📋 Imprimir Agenda Semanal</button>
             </div>
           </div>
+          ${(state.get('user')?.role_name === 'propietario' || state.get('user')?.role_name === 'direccion') ? `
+            <button id="btn-manage-holidays" class="btn btn-outline" style="display: flex; align-items: center; gap: 4px; font-weight: 600;" title="Gestionar Días Festivos y Bloqueos de Agenda">🎉 Festivos</button>
+          ` : ''}
           <button id="add-appointment-btn" class="btn btn-primary">+ Nueva Cita</button>
         </div>
       </div>
@@ -553,10 +580,25 @@ export class Appointments {
       const events = cellDate ? this.getEventsForDate(cellDate) : [];
       const maxVisible = window.innerWidth < 480 ? 1 : 3;
 
-      html += `<div class="calendar-cell ${isOtherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''} ${isWeekend ? 'weekend' : ''}" ${cellDate ? `data-date="${cellDate}"` : ''}>`;
-      html += `<div class="calendar-day-number">${isOtherMonth ? '' : dayNum}</div>`;
+      const holiday = cellDate ? this.getHolidayForDate(cellDate) : null;
+      const hasWorkingDoctor = cellDate && this.doctorsList.some(d => !!this.getDoctorDaySchedule(d.id, cellDate));
+
+      html += `<div class="calendar-cell ${isOtherMonth ? 'other-month' : ''} ${isToday ? 'today' : ''} ${isWeekend ? 'weekend' : ''} ${holiday ? 'holiday-day' : ''}" ${cellDate ? `data-date="${cellDate}"` : ''} ${holiday ? 'style="background: #fffdf5;"' : ''}>`;
+      html += `<div class="calendar-day-number" style="display: flex; justify-content: space-between; align-items: center;">
+        <span>${isOtherMonth ? '' : dayNum}</span>
+        ${holiday ? `<span style="font-size: 9px; font-weight: 700; color: #b45309; background: #fde68a; padding: 1px 4px; border-radius: 3px;" title="${this.escapeHtml(holiday.name)}">🎉 Festivo</span>` : ''}
+      </div>`;
+      if (holiday && !isOtherMonth) {
+        html += `<div class="holiday-pill" style="font-size: 8.5px; font-weight: 600; color: #92400e; background: #fef3c7; border: 1px solid #fde68a; border-radius: 3px; padding: 1px 3px; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="Festivo: ${this.escapeHtml(holiday.name)}">${this.escapeHtml(holiday.name)}</div>`;
+      }
       if (isWeekend && !isOtherMonth && events.length === 0) {
-        html += `<div class="weekend-badge" style="font-size: 9px; color: var(--color-danger, #e53e3e); text-align: center; padding: 4px 0;">Cerrado</div>`;
+        if (hasWorkingDoctor) {
+          html += `<div class="weekend-badge" style="font-size: 9px; color: #16a34a; background: #dcfce7; font-weight: 600; text-align: center; padding: 1px 4px; border-radius: 3px; margin-bottom: 2px;">🟢 Abierto</div>`;
+        } else {
+          html += `<div class="weekend-badge" style="font-size: 9px; color: var(--color-danger, #e53e3e); text-align: center; padding: 4px 0;">Cerrado</div>`;
+        }
+      } else if (isWeekend && !isOtherMonth && events.length > 0 && hasWorkingDoctor) {
+        html += `<div class="weekend-badge" style="font-size: 8px; color: #16a34a; font-weight: 600; margin-bottom: 1px;">🟢 Abierto</div>`;
       }
       events.slice(0, maxVisible).forEach(ev => {
         html += `<div class="calendar-event ${ev.status_name || ''}" title="${ev.patient_name} — ${formatTime(ev.start_time)}" data-id="${ev.id}" data-patient-id="${ev.patient_id}" style="background-color: ${ev.status_color}; color: #fff; border-radius: 4px; padding: 1px 6px; margin: 1px 0; font-size: 11px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
@@ -595,9 +637,14 @@ export class Appointments {
       const dateStr = this.toDateStr(date);
       const isToday = dateStr === todayStr;
       const isWeekend = i >= 5;
-      cells += `<div class="db-wg-day-header ${isToday ? 'today' : ''} ${isWeekend ? 'weekend' : ''}">
+      const holiday = this.getHolidayForDate(dateStr);
+      const hasWorkingDoctor = this.doctorsList.some(d => !!this.getDoctorDaySchedule(d.id, dateStr));
+
+      cells += `<div class="db-wg-day-header ${isToday ? 'today' : ''} ${isWeekend ? 'weekend' : ''} ${holiday ? 'holiday-header' : ''}" style="${holiday ? 'background: #fffbeb; border-bottom: 2px solid #fde68a;' : ''}">
         <div class="db-wg-day-name">${dayNames[i]}</div>
         <div class="db-wg-day-num ${isToday ? 'today' : ''}">${date.getDate()}</div>
+        ${holiday ? `<div style="font-size: 7.5px; font-weight: 700; color: #b45309; background: #fde68a; border-radius: 2px; padding: 1px 3px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${this.escapeHtml(holiday.name)}">🎉 ${this.escapeHtml(holiday.name)}</div>` : ''}
+        ${isWeekend && hasWorkingDoctor ? `<div style="font-size: 7.5px; font-weight: 700; color: #16a34a; background: #dcfce7; border-radius: 2px; padding: 1px 3px; margin-top: 2px;">🟢 Abierto</div>` : ''}
       </div>`;
     }
 
@@ -646,7 +693,10 @@ export class Appointments {
         });
 
         if (activeDoctors.length === 0) {
-          if (isWeekend) {
+          const holiday = this.getHolidayForDate(dateStr);
+          if (holiday) {
+            cells += `<div class="db-wg-cell holiday" title="Festivo: ${this.escapeHtml(holiday.name)}" data-date="${dateStr}" data-time="${slot}" style="background: #fffdf5; background-image: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(251, 191, 36, 0.08) 10px, rgba(251, 191, 36, 0.08) 20px);"></div>`;
+          } else if (isWeekend) {
             cells += `<div class="db-wg-cell weekend" data-date="${dateStr}" data-time="${slot}"></div>`;
           } else if (isBreak) {
             cells += `<div class="db-wg-cell break" data-date="${dateStr}" data-time="${slot}"><span class="cal-dg-cell-label">Descanso</span></div>`;
@@ -738,24 +788,77 @@ export class Appointments {
 
     const getDocName = (a) => a.doctor_name || a.doctor?.fullName || '';
 
+    const holiday = this.getHolidayForDate(dateStr);
+    const userRole = state.get('user')?.role_name;
+    const isOwnerOrDirector = userRole === 'propietario' || userRole === 'direccion';
+
     let html = `<div style="margin-bottom: var(--space-3); text-align: center;">
-      <h3 style="margin: 0; font-size: var(--text-lg); font-weight: var(--font-bold); color: ${isToday ? 'var(--primary-600)' : 'var(--color-text)'};">${dayName}, ${dayNum} ${monthName}</h3>
+      <h3 style="margin: 0; font-size: var(--text-lg); font-weight: var(--font-bold); color: ${isToday ? 'var(--primary-600)' : 'var(--color-text)'};">${dayName}, ${dayNum} de ${monthName}</h3>
     </div>`;
 
-    if (isWeekendDay) {
-      html += `<div style="text-align: center; padding: var(--space-3); background: #fff5f5; border: 1px solid #fecaca; border-radius: var(--radius-lg); margin-bottom: var(--space-4);">
-        <span style="color: var(--color-danger, #e53e3e); font-weight: var(--font-semibold); font-size: var(--text-sm);">Este día es fin de semana — solo el propietario puede agendar citas.</span>
-      </div>`;
-      const singleDate = new Date(this.currentDate);
-      html += `<div class="cal-dg-grid">`;
-      html += `<div class="cal-dg-time-label"></div><div class="cal-dg-cell weekend" style="text-align:center;padding:12px 4px;color:var(--color-danger,#e53e3e);font-weight:var(--font-medium);font-size:10px;">Cerrado</div>`;
-      html += `</div>`;
-      return html;
+    if (holiday) {
+      html += `
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: #fffbeb; border: 1px solid #fde68a; border-radius: var(--radius-md); margin-bottom: var(--space-4); flex-wrap: wrap; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 1.4rem;">🎉</span>
+            <div>
+              <div style="font-weight: 700; color: #92400e; font-size: var(--text-sm);">Día Festivo: ${this.escapeHtml(holiday.name)}</div>
+              <div style="font-size: var(--text-xs); color: #b45309;">${this.escapeHtml(holiday.description || 'Festivo Oficial')} — Agenda bloqueada para personal regular.</div>
+            </div>
+          </div>
+          ${isOwnerOrDirector ? `
+            <span class="badge" style="background: #f59e0b; color: #fff; font-weight: 600; padding: 4px 8px; font-size: 11px;">Permiso Especial: Dirección puede agendar</span>
+          ` : `
+            <span class="badge" style="background: #fee2e2; color: #991b1b; padding: 4px 8px; font-size: 11px;">Bloqueado por Festivo</span>
+          `}
+        </div>
+      `;
     }
 
     const displayedDoctors = this.filters.doctor_id
       ? this.doctorsList.filter(d => String(d.id) === String(this.filters.doctor_id))
       : this.doctorsList;
+
+    const workingDoctorsToday = displayedDoctors.filter(d => {
+      const sched = this.getDoctorDaySchedule(d.id, dateStr);
+      return !!sched;
+    });
+
+    if (isWeekendDay) {
+      if (workingDoctorsToday.length === 0) {
+        html += `
+          <div class="card" style="padding: var(--space-6) var(--space-4); text-align: center; border: 1.5px dashed var(--color-border); border-radius: var(--radius-lg); background: var(--color-bg-secondary, #fafafa); margin-bottom: var(--space-4);">
+            <div style="font-size: 2.2rem; margin-bottom: var(--space-2);">🗓️</div>
+            <h4 style="margin: 0 0 var(--space-2) 0; font-size: var(--text-base); font-weight: 600; color: var(--color-text);">Fin de semana cerrado</h4>
+            <p style="margin: 0 auto var(--space-4) auto; max-width: 480px; font-size: var(--text-sm); color: var(--color-text-secondary);">
+              La clínica no tiene doctores programados para este día de fin de semana.
+            </p>
+            ${isOwnerOrDirector ? `
+              <button class="btn btn-primary btn-enable-weekend-day" data-date="${dateStr}" style="display: inline-flex; align-items: center; gap: 6px; font-weight: 600;">
+                🟢 Habilitar este fin de semana para trabajar
+              </button>
+            ` : `
+              <span class="badge" style="background: #fee2e2; color: #991b1b; padding: 6px 12px; font-size: var(--text-sm);">Cerrado los fines de semana</span>
+            `}
+          </div>
+        `;
+        return html;
+      } else {
+        html += `
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: var(--radius-md); margin-bottom: var(--space-3); flex-wrap: wrap; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 1.1rem;">🟢</span>
+              <span style="font-size: var(--text-sm); font-weight: 600; color: #166534;">Jornada de fin de semana habilitada (${workingDoctorsToday.length} doctor(es) asignado(s))</span>
+            </div>
+            ${isOwnerOrDirector ? `
+              <button class="btn btn-xs btn-outline btn-enable-weekend-day" data-date="${dateStr}" style="background: #fff; color: #15803d; border-color: #86efac; font-weight: 600;">
+                ⚙️ Configurar doctores / horario
+              </button>
+            ` : ''}
+          </div>
+        `;
+      }
+    }
 
     html += `<div class="cal-dg-grid">`;
 
@@ -1392,8 +1495,16 @@ export class Appointments {
     const targetDate = date || this.toDateStr(this.currentDate);
     const targetDow = new Date(targetDate + 'T12:00:00').getDay();
     const isWeekendDay = targetDow === 0 || targetDow === 6;
-    if (isWeekendDay && userRole !== 'propietario' && userRole !== 'direccion') {
+    const isOwnerOrDirector = userRole === 'propietario' || userRole === 'direccion';
+
+    if (isWeekendDay && !isOwnerOrDirector) {
       toast.error('Solo el propietario puede agendar citas en fin de semana.');
+      return;
+    }
+
+    const holiday = this.getHolidayForDate(targetDate);
+    if (holiday && !isOwnerOrDirector) {
+      toast.error(`No se pueden agendar citas en días festivos (${holiday.name}). Agenda bloqueada.`);
       return;
     }
 
@@ -1405,6 +1516,11 @@ export class Appointments {
 
     const content = `
       <form id="add-appointment-form">
+        ${holiday ? `
+          <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: var(--radius-sm); padding: 8px 12px; margin-bottom: 12px; font-size: var(--text-xs); color: #92400e;">
+            🎉 <strong>Aviso de Día Festivo:</strong> ${this.escapeHtml(holiday.name)}. Agendando con permisos especiales de Dirección.
+          </div>
+        ` : ''}
         <div style="display: flex; gap: 8px; margin-bottom: var(--space-4); background: var(--color-bg-secondary); padding: 4px; border-radius: var(--radius-md); border: 1px solid var(--color-border-light);">
           <button type="button" id="tab-mode-registered" class="btn btn-sm btn-primary" style="flex:1;">👤 Paciente Registrado</button>
           <button type="button" id="tab-mode-guest" class="btn btn-sm btn-outline" style="flex:1;">✨ Primera Visita / Invitado</button>
@@ -1516,8 +1632,17 @@ export class Appointments {
         if (!data.doctor_id) { toast.error('Seleccione un doctor'); return false; }
         const selDate = new Date(data.appointment_date + 'T12:00:00');
         const selDow = selDate.getDay();
-        if ((selDow === 0 || selDow === 6) && state.get('user')?.role_name !== 'propietario' && state.get('user')?.role_name !== 'direccion') {
+        const userRoleName = state.get('user')?.role_name;
+        const isOwnerOrDirectorSubmit = userRoleName === 'propietario' || userRoleName === 'direccion';
+
+        if ((selDow === 0 || selDow === 6) && !isOwnerOrDirectorSubmit) {
           toast.error('Solo el propietario puede agendar citas en fin de semana.');
+          return false;
+        }
+
+        const dateHoliday = this.getHolidayForDate(data.appointment_date);
+        if (dateHoliday && !isOwnerOrDirectorSubmit) {
+          toast.error(`No se pueden programar citas en días festivos (${dateHoliday.name}). Agenda bloqueada.`);
           return false;
         }
         try {
@@ -2143,6 +2268,355 @@ export class Appointments {
     } catch {
       toast.error('Error al cargar historial de automatizaciones');
     }
+  }
+
+  async showHolidaysModal() {
+    const userRole = state.get('user')?.role_name;
+    const isManager = userRole === 'propietario' || userRole === 'direccion';
+
+    const renderHolidaysTable = (holidays) => {
+      if (!holidays || holidays.length === 0) {
+        return `<tr><td colspan="5" style="text-align: center; color: var(--color-text-secondary); padding: 20px;">No hay días festivos registrados para el año seleccionado.</td></tr>`;
+      }
+      const sorted = [...holidays].sort((a, b) => {
+        const da = typeof a.holiday_date === 'string' ? a.holiday_date.slice(0, 10) : '';
+        const db = typeof b.holiday_date === 'string' ? b.holiday_date.slice(0, 10) : '';
+        return da.localeCompare(db);
+      });
+
+      return sorted.map(h => {
+        const dStr = typeof h.holiday_date === 'string' ? h.holiday_date.slice(0, 10) : new Date(h.holiday_date).toISOString().slice(0, 10);
+        const parts = dStr.split('-');
+        const formattedDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
+        const scope = (h.scope || 'LOCAL').toUpperCase();
+        let badgeStyle = 'background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd;';
+        let scopeLabel = 'Nacional (España)';
+        if (scope === 'AUTONOMICO') {
+          badgeStyle = 'background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0;';
+          scopeLabel = 'Comunitat Valenciana';
+        } else if (scope === 'LOCAL') {
+          badgeStyle = 'background: #ffedd5; color: #c2410c; border: 1px solid #fed7aa;';
+          scopeLabel = 'Alcàntera de Xúquer (Local)';
+        } else if (scope === 'CLINICA') {
+          badgeStyle = 'background: #f3e8ff; color: #7e22ce; border: 1px solid #e9d5ff;';
+          scopeLabel = 'Cierre Clínica';
+        }
+
+        return `
+          <tr data-holiday-id="${h.id}" style="border-bottom: 1px solid var(--color-border-light, #eee);">
+            <td style="padding: 10px 12px; font-weight: 600; white-space: nowrap;">📅 ${formattedDate}</td>
+            <td style="padding: 10px 12px; font-weight: 600; color: var(--color-text);">${this.escapeHtml(h.name)}</td>
+            <td style="padding: 10px 12px;">
+              <span class="badge" style="${badgeStyle} font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: 600;">${scopeLabel}</span>
+            </td>
+            <td style="padding: 10px 12px; font-size: 12px; color: var(--color-text-secondary);">${this.escapeHtml(h.description || '—')}</td>
+            <td style="padding: 10px 12px; text-align: right;">
+              ${isManager ? `
+                <button class="btn btn-xs btn-outline btn-delete-holiday" data-id="${h.id}" data-name="${this.escapeHtml(h.name)}" style="color: #dc2626; border-color: #fca5a5; padding: 3px 8px;" title="Eliminar Festivo">🗑️ Eliminar</button>
+              ` : ''}
+            </td>
+          </tr>
+        `;
+      }).join('');
+    };
+
+    const currentYear = new Date().getFullYear();
+
+    const content = `
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; background: #fffbeb; border: 1px solid #fde68a; border-radius: var(--radius-md); padding: 12px 16px; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <div style="font-weight: 700; color: #92400e; font-size: 13.5px;">🛡️ Bloqueo Automático de Agenda en Festivos</div>
+            <div style="font-size: 12px; color: #b45309; margin-top: 2px;">
+              Los días festivos bloquean la agenda regular impidiendo agendar citas a recepción o doctores. La Dirección conserva permiso para agendar excepcionalmente.
+            </div>
+          </div>
+          ${isManager ? `
+            <button id="btn-sync-official-holidays" class="btn btn-sm" style="background: #f59e0b; color: #fff; font-weight: 600; border: none; padding: 6px 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
+              🔄 Sincronizar Festivos Oficiales (Alcàntera / C. Valenciana / España)
+            </button>
+          ` : ''}
+        </div>
+
+        ${isManager ? `
+          <div style="border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 14px; background: var(--color-bg-secondary, #fafafa);">
+            <div style="font-size: 13px; font-weight: 700; margin-bottom: 10px; color: var(--color-text);">➕ Registrar Día Festivo o Bloqueo Personalizado</div>
+            <form id="form-create-holiday" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) auto; gap: 10px; align-items: flex-end;">
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" style="font-size: 11px;">Fecha <span style="color: red;">*</span></label>
+                <input type="date" name="holiday_date" class="form-input" style="padding: 6px 8px; font-size: 12px;" required />
+              </div>
+              <div class="form-group" style="margin: 0; min-width: 160px;">
+                <label class="form-label" style="font-size: 11px;">Nombre Festivo <span style="color: red;">*</span></label>
+                <input type="text" name="name" class="form-input" placeholder="Ej: Fiestas Mayores" style="padding: 6px 8px; font-size: 12px;" required />
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" style="font-size: 11px;">Ámbito</label>
+                <select name="scope" class="form-select" style="padding: 6px 8px; font-size: 12px;">
+                  <option value="LOCAL" selected>Local (Alcàntera de Xúquer)</option>
+                  <option value="AUTONOMICO">Comunitat Valenciana</option>
+                  <option value="NACIONAL">Nacional (España)</option>
+                  <option value="CLINICA">Cierre Interno Clínica</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin: 0; min-width: 150px;">
+                <label class="form-label" style="font-size: 11px;">Descripción</label>
+                <input type="text" name="description" class="form-input" placeholder="Opcional..." style="padding: 6px 8px; font-size: 12px;" />
+              </div>
+              <button type="submit" class="btn btn-primary btn-sm" style="padding: 7px 14px; font-weight: 600; white-space: nowrap;">Guardar Festivo</button>
+            </form>
+          </div>
+        ` : ''}
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+          <div style="font-size: 13px; font-weight: 700; color: var(--color-text);">Festivos Registrados</div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <label style="font-size: 12px; color: var(--color-text-secondary); margin: 0;">Año:</label>
+            <select id="select-holiday-year" class="form-select" style="padding: 3px 8px; font-size: 12px; width: auto;">
+              <option value="all">Todos los años</option>
+              <option value="${currentYear}" selected>${currentYear}</option>
+              <option value="${currentYear + 1}">${currentYear + 1}</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="table-container" style="max-height: 340px; overflow-y: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md);">
+          <table style="width: 100%; border-collapse: collapse; font-size: 12.5px;">
+            <thead>
+              <tr style="background: var(--color-bg-secondary, #f8fafc); border-bottom: 2px solid var(--color-border); text-align: left;">
+                <th style="padding: 10px 12px; font-weight: 700;">Fecha</th>
+                <th style="padding: 10px 12px; font-weight: 700;">Nombre</th>
+                <th style="padding: 10px 12px; font-weight: 700;">Ámbito</th>
+                <th style="padding: 10px 12px; font-weight: 700;">Descripción</th>
+                <th style="padding: 10px 12px; text-align: right; font-weight: 700;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="holidays-table-body">
+              ${renderHolidaysTable(this.clinicHolidays.filter(h => {
+                const y = (h.holiday_date || '').slice(0, 4);
+                return y === String(currentYear);
+              }))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    Modal.show({
+      title: '🎉 Calendario Oficial de Festivos y Bloqueos de Agenda',
+      content,
+      confirmText: 'Cerrar',
+      size: 'lg'
+    });
+
+    const overlay = document.querySelector('.modal-overlay');
+    if (!overlay) return;
+
+    const tbody = overlay.querySelector('#holidays-table-body');
+    const yearSelect = overlay.querySelector('#select-holiday-year');
+    const createForm = overlay.querySelector('#form-create-holiday');
+    const syncBtn = overlay.querySelector('#btn-sync-official-holidays');
+
+    const refreshTable = () => {
+      if (!tbody) return;
+      const selYear = yearSelect?.value;
+      const list = selYear === 'all' 
+        ? this.clinicHolidays 
+        : this.clinicHolidays.filter(h => (h.holiday_date || '').slice(0, 4) === selYear);
+      tbody.innerHTML = renderHolidaysTable(list);
+    };
+
+    if (yearSelect) {
+      yearSelect.addEventListener('change', refreshTable);
+    }
+
+    if (createForm) {
+      createForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(createForm);
+        const data = Object.fromEntries(fd.entries());
+        try {
+          await holidayService.createHoliday(data);
+          toast.success('Día festivo registrado correctamente');
+          createForm.reset();
+          const range = this.getVisibleRange();
+          const updated = await holidayService.getHolidays({ date_from: range.start, date_to: range.end });
+          this.clinicHolidays = Array.isArray(updated) ? updated : (updated?.data || []);
+          refreshTable();
+          this.renderView();
+        } catch (err) {
+          toast.error(err.message || 'Error al registrar festivo');
+        }
+      });
+    }
+
+    if (syncBtn) {
+      syncBtn.addEventListener('click', async () => {
+        try {
+          syncBtn.disabled = true;
+          syncBtn.textContent = 'Sincronizando festivos oficiales...';
+          await Promise.all([
+            holidayService.seedOfficialHolidays(currentYear),
+            holidayService.seedOfficialHolidays(currentYear + 1)
+          ]);
+          toast.success(`Festivos oficiales de Alcàntera de Xúquer, Comunitat Valenciana y España sincronizados para ${currentYear} y ${currentYear + 1}`);
+          const range = this.getVisibleRange();
+          const updated = await holidayService.getHolidays({ date_from: range.start, date_to: range.end });
+          this.clinicHolidays = Array.isArray(updated) ? updated : (updated?.data || []);
+          refreshTable();
+          this.renderView();
+        } catch (err) {
+          toast.error(err.message || 'Error al sincronizar festivos');
+        } finally {
+          if (syncBtn) {
+            syncBtn.disabled = false;
+            syncBtn.textContent = '🔄 Sincronizar Festivos Oficiales (Alcàntera / C. Valenciana / España)';
+          }
+        }
+      });
+    }
+
+    if (tbody) {
+      tbody.addEventListener('click', async (e) => {
+        const delBtn = e.target.closest('.btn-delete-holiday');
+        if (!delBtn) return;
+        const hId = delBtn.dataset.id;
+        const hName = delBtn.dataset.name;
+        if (!confirm(`¿Eliminar el festivo "${hName}"? La agenda volverá a quedar disponible para citas en esa fecha.`)) {
+          return;
+        }
+        try {
+          await holidayService.deleteHoliday(hId);
+          toast.success('Festivo eliminado');
+          this.clinicHolidays = this.clinicHolidays.filter(h => String(h.id) !== String(hId));
+          refreshTable();
+          this.renderView();
+        } catch (err) {
+          toast.error(err.message || 'Error al eliminar festivo');
+        }
+      });
+    }
+  }
+
+  async showEnableWeekendModal(dateStr) {
+    const userRole = state.get('user')?.role_name;
+    if (userRole !== 'propietario' && userRole !== 'direccion') {
+      toast.error('Solo el propietario o dirección pueden habilitar jornadas de fin de semana.');
+      return;
+    }
+
+    const dParts = dateStr.split('-');
+    const dateObj = new Date(parseInt(dParts[0]), parseInt(dParts[1]) - 1, parseInt(dParts[2]), 12, 0, 0);
+    const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    const monthNames = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+    const dayLabel = `${dayNames[dateObj.getDay()]}, ${dateObj.getDate()} de ${monthNames[dateObj.getMonth()]} de ${dateObj.getFullYear()}`;
+
+    // Get current workday assignments for this date
+    const assignedDoctors = {};
+    for (const doc of this.doctorsList) {
+      const daySched = this.getDoctorDaySchedule(doc.id, dateStr);
+      const workdays = this.filters.doctor_id ? this.doctorWorkdays : (this.allDoctorWorkdays ? this.allDoctorWorkdays[doc.id] : []);
+      const match = (workdays || []).find(w => {
+        const wYMD = typeof w.work_date === 'string' ? w.work_date.slice(0, 10) : '';
+        return wYMD === dateStr;
+      });
+      if (match || daySched) {
+        assignedDoctors[doc.id] = match || daySched;
+      }
+    }
+
+    const docCheckboxes = this.doctorsList.map(d => {
+      const isAssigned = !!assignedDoctors[d.id];
+      const startT = assignedDoctors[d.id]?.start_time ? assignedDoctors[d.id].start_time.slice(0, 5) : '09:00';
+      const endT = assignedDoctors[d.id]?.end_time ? assignedDoctors[d.id].end_time.slice(0, 5) : '14:00';
+      return `
+        <div class="doctor-weekend-row" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: ${isAssigned ? '#f0fdf4' : 'var(--color-surface)'}; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin: 0; flex: 1; min-width: 180px;">
+            <input type="checkbox" class="doc-enable-cb" data-doctor-id="${d.id}" ${isAssigned ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer;" />
+            <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: ${d.color || '#0891b2'};"></span>
+            <span style="font-weight: 600; font-size: 13px; color: var(--color-text);">Dr/a. ${d.first_name} ${d.last_name}</span>
+            <span style="font-size: 11px; color: var(--color-text-secondary);">(${d.specialty || 'General'})</span>
+          </label>
+          <div class="doc-hours-container" style="display: flex; align-items: center; gap: 6px;">
+            <span style="font-size: 12px; color: var(--color-text-secondary);">Horario:</span>
+            <input type="time" class="doc-start-time form-input" data-doctor-id="${d.id}" value="${startT}" style="width: 90px; padding: 4px 6px; font-size: 12px;" />
+            <span style="font-size: 12px; color: var(--color-text-secondary);">a</span>
+            <input type="time" class="doc-end-time form-input" data-doctor-id="${d.id}" value="${endT}" style="width: 90px; padding: 4px 6px; font-size: 12px;" />
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const content = `
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: var(--radius-md); padding: 12px 14px;">
+          <div style="font-weight: 700; color: #1e40af; font-size: 13.5px;">🗓️ ${dayLabel}</div>
+          <div style="font-size: 12px; color: #3b82f6; margin-top: 2px;">
+            Como propietario, selecciona qué doctores prestarán servicio este fin de semana y su horario de atención. La agenda se abrirá automáticamente para agendar citas.
+          </div>
+        </div>
+
+        <div>
+          <div style="font-size: 12.5px; font-weight: 700; margin-bottom: 8px; color: var(--color-text);">Doctores Disponibles para esta Jornada:</div>
+          <div style="max-height: 280px; overflow-y: auto;">
+            ${docCheckboxes}
+          </div>
+        </div>
+
+        <div style="border-top: 1px solid var(--color-border-light); padding-top: 10px;">
+          <label class="form-label" style="font-size: 11.5px;">Nota de la Jornada (Opcional):</label>
+          <input type="text" id="weekend-workday-notes" class="form-input" placeholder="Ej: Jornada especial fin de semana / guardia" value="${assignedDoctors[Object.keys(assignedDoctors)[0]]?.notes || ''}" style="font-size: 12px;" />
+        </div>
+      </div>
+    `;
+
+    Modal.show({
+      title: '🟢 Habilitar Jornada de Fin de Semana',
+      content,
+      confirmText: 'Guardar y Habilitar',
+      cancelText: 'Cancelar',
+      size: 'md',
+      onConfirm: async (modalBody) => {
+        const checkboxes = modalBody.querySelectorAll('.doc-enable-cb');
+        const notes = modalBody.querySelector('#weekend-workday-notes')?.value?.trim() || null;
+
+        try {
+          for (const cb of checkboxes) {
+            const docId = Number(cb.dataset.doctorId);
+            const isChecked = cb.checked;
+            const startInput = modalBody.querySelector(`.doc-start-time[data-doctor-id="${docId}"]`);
+            const endInput = modalBody.querySelector(`.doc-end-time[data-doctor-id="${docId}"]`);
+            const startTime = startInput?.value || '09:00';
+            const endTime = endInput?.value || '14:00';
+
+            const workdays = this.filters.doctor_id ? this.doctorWorkdays : (this.allDoctorWorkdays ? this.allDoctorWorkdays[docId] : []);
+            const existing = (workdays || []).find(w => {
+              const wYMD = typeof w.work_date === 'string' ? w.work_date.slice(0, 10) : '';
+              return wYMD === dateStr;
+            });
+
+            if (isChecked) {
+              await doctorService.addWorkday(docId, {
+                work_date: dateStr,
+                start_time: startTime,
+                end_time: endTime,
+                notes: notes || 'Jornada especial fin de semana',
+              });
+            } else if (existing) {
+              await doctorService.removeWorkday(docId, existing.id);
+            }
+          }
+
+          toast.success('Jornada de fin de semana actualizada correctamente');
+          await this.loadData();
+          this.renderView();
+          return true;
+        } catch (err) {
+          toast.error(err.message || 'Error al configurar jornada de fin de semana');
+          return false;
+        }
+      }
+    });
   }
 
   escapeHtml(str) {

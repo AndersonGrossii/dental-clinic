@@ -5,6 +5,7 @@ import settingsService from '../../services/settings.service.js';
 import userService from '../../services/user.service.js';
 import authService from '../../services/auth.service.js';
 import doctorService from '../../services/doctor.service.js';
+import holidayService from '../../services/holiday.service.js';
 import toast from '../../components/toast/toast.js';
 import state from '../../scripts/state.js';
 import Modal from '../../components/modal/modal.js';
@@ -16,6 +17,7 @@ export class Settings {
     this.clinicInfo = null;
     this.auditLogs = [];
     this.usersList = [];
+    this.holidaysList = [];
     this.doctorSchedule = [];
     this.activeTab = 'clinic';
     this.isManager = false;
@@ -33,13 +35,18 @@ export class Settings {
       this.clinicInfo = await settingsService.getClinicInfo();
       
       if (this.isManager) {
-        const logsResponse = await settingsService.getAuditLogs({ limit: 15 });
+        const [logsResponse, usersResponse, holidaysResponse] = await Promise.all([
+          settingsService.getAuditLogs({ limit: 15 }).catch(() => ({ logs: [] })),
+          userService.getAll({ limit: 100 }).catch(() => []),
+          holidayService.getHolidays().catch(() => []),
+        ]);
         this.auditLogs = logsResponse.logs || [];
-        const usersResponse = await userService.getAll({ limit: 100 });
         this.usersList = usersResponse || [];
+        this.holidaysList = Array.isArray(holidaysResponse) ? holidaysResponse : (holidaysResponse?.data || []);
       } else {
         this.auditLogs = [];
         this.usersList = [];
+        this.holidaysList = [];
       }
 
       if (userRole === 'doctor') {
@@ -62,6 +69,7 @@ export class Settings {
         ${this.isManager ? `
           <button class="btn btn-sm ${this.activeTab === 'clinic' ? 'btn-primary' : 'btn-ghost'} tab-btn" data-tab="clinic">Datos de la Clínica</button>
           <button class="btn btn-sm ${this.activeTab === 'users' ? 'btn-primary' : 'btn-ghost'} tab-btn" data-tab="users">Gestión de Usuarios</button>
+          <button class="btn btn-sm ${this.activeTab === 'holidays' ? 'btn-primary' : 'btn-ghost'} tab-btn" data-tab="holidays">🎉 Festivos y Bloqueos</button>
           <button class="btn btn-sm ${this.activeTab === 'logs' ? 'btn-primary' : 'btn-ghost'} tab-btn" data-tab="logs">Registro de Auditoría</button>
         ` : ''}
         ${userRole === 'doctor' ? `
@@ -78,6 +86,8 @@ export class Settings {
       contentHtml = this.renderClinicTab();
     } else if (this.activeTab === 'users') {
       contentHtml = this.renderUsersTab();
+    } else if (this.activeTab === 'holidays') {
+      contentHtml = this.renderHolidaysTab();
     } else if (this.activeTab === 'logs') {
       contentHtml = this.renderLogsTab();
     } else if (this.activeTab === 'account') {
@@ -409,6 +419,105 @@ export class Settings {
     `;
   }
 
+  renderHolidaysTab() {
+    const currentYear = new Date().getFullYear();
+    const sorted = [...(this.holidaysList || [])].sort((a, b) => {
+      const da = typeof a.holiday_date === 'string' ? a.holiday_date.slice(0, 10) : '';
+      const db = typeof b.holiday_date === 'string' ? b.holiday_date.slice(0, 10) : '';
+      return da.localeCompare(db);
+    });
+
+    const rows = sorted.length ? sorted.map(h => {
+      const dStr = typeof h.holiday_date === 'string' ? h.holiday_date.slice(0, 10) : new Date(h.holiday_date).toISOString().slice(0, 10);
+      const parts = dStr.split('-');
+      const formattedDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
+      const scope = (h.scope || 'LOCAL').toUpperCase();
+      let badgeStyle = 'background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd;';
+      let scopeLabel = 'Nacional (España)';
+      if (scope === 'AUTONOMICO') {
+        badgeStyle = 'background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0;';
+        scopeLabel = 'Comunitat Valenciana';
+      } else if (scope === 'LOCAL') {
+        badgeStyle = 'background: #ffedd5; color: #c2410c; border: 1px solid #fed7aa;';
+        scopeLabel = 'Alcàntera de Xúquer (Local)';
+      } else if (scope === 'CLINICA') {
+        badgeStyle = 'background: #f3e8ff; color: #7e22ce; border: 1px solid #e9d5ff;';
+        scopeLabel = 'Cierre Clínica';
+      }
+
+      return `
+        <tr data-holiday-id="${h.id}">
+          <td style="font-weight: 600; white-space: nowrap;">📅 ${formattedDate}</td>
+          <td style="font-weight: 600;">${h.name}</td>
+          <td><span class="badge" style="${badgeStyle} font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: 600;">${scopeLabel}</span></td>
+          <td style="font-size: 12px; color: var(--color-text-secondary);">${h.description || '—'}</td>
+          <td style="text-align: right;">
+            <button class="btn btn-xs btn-outline settings-delete-holiday-btn" data-id="${h.id}" data-name="${h.name}" style="color: #dc2626; border-color: #fca5a5; padding: 2px 6px;" title="Eliminar Festivo">🗑️</button>
+          </td>
+        </tr>
+      `;
+    }).join('') : `<tr><td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 20px;">No hay días festivos registrados.</td></tr>`;
+
+    return `
+      <div class="card" style="padding: var(--space-6);">
+        <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4); border-bottom: 2px solid var(--gray-100); padding-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+          <div>
+            <h3 style="margin: 0;">🎉 Calendario de Festivos y Bloqueos de Agenda</h3>
+            <p style="margin: 2px 0 0; font-size: 12px; color: var(--text-secondary);">Festivos oficiales de España, Comunitat Valenciana y Alcàntera de Xúquer que bloquean la agenda médica.</p>
+          </div>
+          <button id="btn-settings-sync-holidays" class="btn btn-sm btn-outline" style="font-weight: 600; border-color: #f59e0b; color: #b45309;">
+            🔄 Sincronizar Oficiales (${currentYear}-${currentYear + 1})
+          </button>
+        </div>
+
+        <div style="background: #fafafa; border: 1px solid var(--color-border-light); border-radius: var(--radius-md); padding: 14px; margin-bottom: var(--space-4);">
+          <h4 style="margin: 0 0 8px; font-size: 13px; font-weight: 700; color: var(--color-text);">➕ Añadir Festivo Personalizado o Cierre</h4>
+          <form id="form-settings-create-holiday" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) auto; gap: 10px; align-items: flex-end;">
+            <div class="form-group" style="margin: 0;">
+              <label class="form-label" style="font-size: 11px;">Fecha <span style="color: red;">*</span></label>
+              <input type="date" name="holiday_date" class="form-input" style="padding: 6px 8px; font-size: 12px;" required />
+            </div>
+            <div class="form-group" style="margin: 0; min-width: 160px;">
+              <label class="form-label" style="font-size: 11px;">Nombre Festivo <span style="color: red;">*</span></label>
+              <input type="text" name="name" class="form-input" placeholder="Ej: Fiestas Mayores" style="padding: 6px 8px; font-size: 12px;" required />
+            </div>
+            <div class="form-group" style="margin: 0;">
+              <label class="form-label" style="font-size: 11px;">Ámbito</label>
+              <select name="scope" class="form-select" style="padding: 6px 8px; font-size: 12px;">
+                <option value="LOCAL" selected>Local (Alcàntera de Xúquer)</option>
+                <option value="AUTONOMICO">Comunitat Valenciana</option>
+                <option value="NACIONAL">Nacional (España)</option>
+                <option value="CLINICA">Cierre Interno Clínica</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin: 0; min-width: 140px;">
+              <label class="form-label" style="font-size: 11px;">Descripción</label>
+              <input type="text" name="description" class="form-input" placeholder="Opcional..." style="padding: 6px 8px; font-size: 12px;" />
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm" style="padding: 7px 14px; font-weight: 600; white-space: nowrap;">Guardar</button>
+          </form>
+        </div>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Nombre</th>
+                <th>Ámbito</th>
+                <th>Descripción</th>
+                <th style="text-align: right;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
   mount() {
     // Listen for tab switching
     const tabContainer = this.container.querySelector('.settings-tabs');
@@ -561,6 +670,63 @@ export class Settings {
         }
       });
     }
+
+    // Holiday Tab handlers
+    const createHolidayForm = this.container.querySelector('#form-settings-create-holiday');
+    if (createHolidayForm) {
+      createHolidayForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(createHolidayForm);
+        const data = Object.fromEntries(fd.entries());
+        try {
+          await holidayService.createHoliday(data);
+          toast.success('Día festivo registrado correctamente');
+          await this.render();
+        } catch (err) {
+          toast.error(err.message || 'Error al crear festivo');
+        }
+      });
+    }
+
+    const syncHolidaysBtn = this.container.querySelector('#btn-settings-sync-holidays');
+    if (syncHolidaysBtn) {
+      syncHolidaysBtn.addEventListener('click', async () => {
+        try {
+          syncHolidaysBtn.disabled = true;
+          syncHolidaysBtn.textContent = 'Sincronizando...';
+          const curY = new Date().getFullYear();
+          await Promise.all([
+            holidayService.seedOfficialHolidays(curY),
+            holidayService.seedOfficialHolidays(curY + 1)
+          ]);
+          toast.success('Festivos oficiales sincronizados con éxito');
+          await this.render();
+        } catch (err) {
+          toast.error(err.message || 'Error al sincronizar festivos');
+        } finally {
+          if (syncHolidaysBtn) {
+            syncHolidaysBtn.disabled = false;
+            syncHolidaysBtn.textContent = '🔄 Sincronizar Oficiales';
+          }
+        }
+      });
+    }
+
+    const deleteHolidayBtns = this.container.querySelectorAll('.settings-delete-holiday-btn');
+    deleteHolidayBtns.forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-id');
+        const name = btn.getAttribute('data-name');
+        if (!confirm(`¿Eliminar el día festivo "${name}"?`)) return;
+        try {
+          await holidayService.deleteHoliday(id);
+          toast.success('Festivo eliminado');
+          await this.render();
+        } catch (err) {
+          toast.error(err.message || 'Error al eliminar festivo');
+        }
+      });
+    });
   }
 
   showUserModal(userId = null) {
