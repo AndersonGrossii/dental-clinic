@@ -1,0 +1,13 @@
+﻿{
+  "name": "dental-clinic",
+  "version": "1.0.0",
+  "description": "Sistema de Gestión de Clínica Dental (Vides Dental) - Monorepo",
+  "scripts": {
+    "test": "node backend/tests/run_test_suite.js",
+    "dev": "node --watch backend/server.js",
+    "start": "node backend/server.js",
+    "migrate": "node backend/database/migrations/runner.js",
+    "seed": "node backend/database/seeders/runner.js",
+    "setup": "node backend/database/migrations/runner.js && node backend/database/seeders/runner.js"
+  }
+}

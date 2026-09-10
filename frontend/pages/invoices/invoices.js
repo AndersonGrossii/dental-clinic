@@ -12,6 +12,7 @@ import Modal from '../../components/modal/modal.js';
 import state from '../../scripts/state.js';
 import { formatDate, formatCurrency } from '../../utils/helpers.js';
 import { getInvoiceStatusInfo, formatPaymentMethods } from '../../utils/formatters.js';
+import pdfService from '../../services/pdf.service.js';
 
 export class Invoices {
   constructor(container) {
@@ -64,6 +65,7 @@ export class Invoices {
                 🧾 Opciones para Factura #${inv.invoice_number}:
               </div>
               <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="btn btn-sm btn-outline download-pdf-invoice-btn" data-id="${inv.id}" data-number="${inv.invoice_number}" style="border-color: var(--primary-600); color: var(--primary-700); font-weight: 600;">📥 Descargar PDF</button>
                 <button class="btn btn-sm btn-outline print-invoice-btn" data-id="${inv.id}">🖨️ Ver / Imprimir Factura</button>
                 <button class="btn btn-sm btn-primary edit-invoice-btn" data-id="${inv.id}">✏️ Editar Factura</button>
                 <button class="btn btn-sm btn-danger delete-invoice-btn" data-id="${inv.id}">✕ Eliminar Factura</button>
@@ -122,9 +124,13 @@ export class Invoices {
         return;
       }
 
-      const actionBtn = e.target.closest('.print-invoice-btn, .edit-invoice-btn, .delete-invoice-btn');
+      const actionBtn = e.target.closest('.print-invoice-btn, .edit-invoice-btn, .delete-invoice-btn, .download-pdf-invoice-btn');
       if (actionBtn) {
         const id = actionBtn.getAttribute('data-id');
+        if (actionBtn.classList.contains('download-pdf-invoice-btn')) {
+          const num = actionBtn.getAttribute('data-number');
+          pdfService.downloadInvoice(id, num);
+        }
         if (actionBtn.classList.contains('print-invoice-btn')) {
           this.printInvoice(id);
         }
@@ -840,7 +846,10 @@ export class Invoices {
           </style>
         </head>
         <body>
-          <button class="print-btn" id="print-btn">🖨️ Imprimir / Guardar PDF</button>
+          <div style="display: flex; justify-content: center; gap: 12px; margin: 20px auto;" class="no-print">
+            <button class="print-btn" id="print-btn" style="margin: 0;">🖨️ Imprimir</button>
+            <button class="print-btn download-btn" id="download-pdf-btn" style="margin: 0; background: #16a34a;">📥 Descargar PDF Oficial</button>
+          </div>
 
           <div class="header">
             <img src="${logoUrl}" alt="Logo" style="height: 60px; width: auto; object-fit: contain;" id="print-logo" />
@@ -915,8 +924,10 @@ export class Invoices {
         </html>
       `);
       printWindow.document.close();
-      const printBtn = printWindow.document.querySelector('.print-btn');
+      const printBtn = printWindow.document.querySelector('#print-btn');
       if (printBtn) printBtn.addEventListener('click', () => printWindow.print());
+      const dlBtn = printWindow.document.querySelector('#download-pdf-btn');
+      if (dlBtn) dlBtn.addEventListener('click', () => pdfService.downloadInvoice(id, invoice.invoice_number));
       const logo = printWindow.document.querySelector('#print-logo');
       if (logo) logo.addEventListener('error', () => { logo.style.display = 'none'; });
     } catch {

@@ -26,6 +26,7 @@ import aiRoutes from './ai.routes.js';
 import eventsRoutes from './events.routes.js';
 import internalChatRoutes from './internal-chat.routes.js';
 import holidayRoutes from './holiday.routes.js';
+import pdfRoutes from './pdf.routes.js';
 
 const router = Router();
 
@@ -54,5 +55,6 @@ router.use('/ai', aiRoutes);
 router.use('/events', eventsRoutes);
 router.use('/internal-chat', internalChatRoutes);
 router.use('/holidays', holidayRoutes);
+router.use('/pdf', pdfRoutes);
 
 export default router;

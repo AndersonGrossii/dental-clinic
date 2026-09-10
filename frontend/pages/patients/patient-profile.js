@@ -9,10 +9,12 @@ import invoiceService from '../../services/invoice.service.js';
 import paymentService from '../../services/payment.service.js';
 import prescriptionService from '../../services/prescription.service.js';
 import doctorService from '../../services/doctor.service.js';
+import documentService from '../../services/document.service.js';
+import pdfService from '../../services/pdf.service.js';
 import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
 import state from '../../scripts/state.js';
-import { formatDate, formatCurrency } from '../../utils/helpers.js';
+import { formatDate, formatCurrency, escapeHtml } from '../../utils/helpers.js';
 import { formatPaymentMethods } from '../../utils/formatters.js';
 import { OdontogramComponent } from '../../components/odontogram/odontogram.js';
 
@@ -30,6 +32,10 @@ export class PatientProfile {
     this.acceptedTreatments = [];
     this.paymentsList = [];
     this.dentalHistory = [];
+    this.patientImages = [];
+    this.patientDocuments = [];
+    this.selectedImageCategory = '';
+    this.selectedDocumentCategory = '';
     this.activeTab = 'info';
     this.patientCredit = null;
     this.abortController = null;
@@ -84,6 +90,14 @@ export class PatientProfile {
       const payRaw = Array.isArray(payRes) ? payRes : (payRes?.data || payRes?.rows || []);
       this.paymentsList = payRaw.filter(item => !item.patient_id || Number(item.patient_id) === pId);
 
+      const [imgRes, docRes] = await Promise.all([
+        documentService.getImages(this.patientId).catch(() => []),
+        documentService.getDocuments(this.patientId, { limit: 999 }).catch(() => ({ rows: [] })),
+      ]);
+      this.patientImages = (Array.isArray(imgRes) ? imgRes : []).filter(item => !item.patient_id || Number(item.patient_id) === pId);
+      const docsArr = Array.isArray(docRes) ? docRes : (docRes?.rows || []);
+      this.patientDocuments = docsArr.filter(item => !item.patient_id || Number(item.patient_id) === pId);
+
       const creditRes = await patientService.getCredit(this.patientId).catch(() => null);
       this.patientCredit = creditRes && creditRes.balance !== undefined ? creditRes : null;
       
@@ -100,7 +114,7 @@ export class PatientProfile {
     const userRole = (state.get('user')?.role_name || '').toLowerCase();
     const isClinicalStaff = ['doctor', 'higienista'].includes(userRole);
 
-    const allowedClinicalTabs = ['info', 'odontogram', 'treatments', 'appointments', 'notes', 'prescriptions'];
+    const allowedClinicalTabs = ['info', 'odontogram', 'treatments', 'appointments', 'documents', 'notes', 'prescriptions'];
     if (isClinicalStaff && !allowedClinicalTabs.includes(this.activeTab)) {
       this.activeTab = 'info';
     }
@@ -507,6 +521,7 @@ export class PatientProfile {
                 🧾 Opciones para Recibo #${rec.invoice_number}:
               </div>
               <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="btn btn-sm btn-outline download-pdf-profile-receipt-btn" data-id="${rec.id}" data-number="${rec.invoice_number}" style="border-color: var(--primary-600); color: var(--primary-700); font-weight: 600;">📥 Descargar PDF</button>
                 <button class="btn btn-sm btn-outline view-profile-receipt-btn" data-id="${rec.id}">🖨️ Ver / Imprimir Recibo</button>
                 ${parseFloat(rec.balance || 0) > 0 ? `<button class="btn btn-sm btn-success pay-profile-receipt-btn" data-id="${rec.id}">💳 Registrar Pago Restante</button>` : ''}
                 <button class="btn btn-sm btn-danger delete-profile-receipt-btn" data-id="${rec.id}">✕ Anular Recibo</button>
@@ -590,6 +605,9 @@ export class PatientProfile {
             <div style="display: inline-flex; gap: 6px;">
               <button type="button" class="btn btn-sm btn-primary manage-profile-quotation-btn" data-id="${q.id}" title="Gestionar ítems, estados y pagos del presupuesto">
                 ⚙️ Gestionar / Cobrar
+              </button>
+              <button type="button" class="btn btn-sm btn-outline download-pdf-profile-quote-btn" data-id="${q.id}" data-number="${q.quote_number}" title="Descargar Presupuesto en PDF" style="border-color: var(--primary-600); color: var(--primary-700); font-weight: 600;">
+                📥 PDF
               </button>
               <button type="button" class="btn btn-sm btn-outline print-profile-quotation-btn" data-id="${q.id}" title="Ver / Imprimir Cotización">
                 👁 Imprimir
@@ -682,6 +700,7 @@ export class PatientProfile {
           <td>${p.issued_date ? formatDate(p.issued_date) : 'N/A'}</td>
           <td>Dr/a. ${p.doctor_name || 'N/A'}</td>
           <td>
+            <button class="btn btn-sm btn-outline download-pdf-presc-btn" data-id="${p.id}" data-number="${p.prescription_number}" style="border-color: var(--primary-600); color: var(--primary-700); font-weight: 600;">📥 PDF</button>
             <button class="btn btn-sm btn-outline view-prescription-btn" data-id="${p.id}">Ver / Imprimir</button>
             <button class="btn btn-sm btn-danger delete-prescription-btn" data-id="${p.id}">Eliminar</button>
           </td>
@@ -719,7 +738,257 @@ export class PatientProfile {
           </table>
         </div>
       `;
+    } else if (this.activeTab === 'documents') {
+      const imgCategory = this.selectedImageCategory || '';
+      const docCategory = this.selectedDocumentCategory || '';
+
+      const filteredImages = (this.patientImages || []).filter(img => {
+        if (imgCategory && img.category !== imgCategory) return false;
+        return true;
+      });
+
+      const filteredDocs = (this.patientDocuments || []).filter(doc => {
+        if (docCategory && doc.category !== docCategory) return false;
+        return true;
+      });
+
+      const imgCategoryLabel = {
+        'panoramica': 'Panorámica',
+        'periapical': 'Periapical',
+        'radiografia': 'Radiografía',
+        'fotografia': 'Fotografía',
+        'otro': 'Otro'
+      };
+
+      const docCategoryLabel = {
+        'consentimiento': 'Consentimiento',
+        'receta': 'Receta',
+        'referencia': 'Referencia / Informe',
+        'laboratorio': 'Laboratorio',
+        'otro': 'Otro'
+      };
+
+      let imagesGridHtml = '';
+      if (filteredImages.length === 0) {
+        imagesGridHtml = `
+          <div style="grid-column: 1 / -1; text-align: center; padding: var(--space-8); background: var(--gray-50); border: 1px dashed var(--border-color); border-radius: var(--radius-md); color: var(--text-secondary);">
+            <p style="font-size: 32px; margin-bottom: 8px;">🖼️</p>
+            <p style="font-weight: 500; margin-bottom: 4px;">No hay radiografías ni imágenes registradas</p>
+            <p style="font-size: 13px;">Haga clic en "+ Subir Radiografía / Imagen" para adjuntar estudios visuales del paciente.</p>
+          </div>
+        `;
+      } else {
+        imagesGridHtml = filteredImages.map(img => `
+          <div class="card patient-image-card" style="overflow: hidden; border: 1px solid var(--border-color); border-radius: var(--radius-md); transition: transform 0.2s, box-shadow 0.2s; display: flex; flex-direction: column;">
+            <div style="position: relative; height: 160px; background: #000; cursor: pointer;" class="view-rx-thumb" data-url="${img.file_path}" data-title="${escapeHtml(img.original_name)}">
+              <img src="${img.file_path}" alt="${escapeHtml(img.original_name)}" style="width: 100%; height: 100%; object-fit: contain;" />
+              <span class="badge" style="position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.75); color: #fff; font-size: 10px; text-transform: uppercase;">
+                ${imgCategoryLabel[img.category] || img.category}
+              </span>
+              ${img.tooth_number ? `
+                <span class="badge" style="position: absolute; top: 8px; right: 8px; background: var(--primary-600); color: #fff; font-size: 10px; font-weight: 700;">
+                  🦷 Pieza ${img.tooth_number}
+                </span>
+              ` : ''}
+            </div>
+            <div style="padding: 10px; display: flex; flex-direction: column; justify-content: space-between; flex: 1; background: #fff;">
+              <div>
+                <div style="font-weight: 600; font-size: 13px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${escapeHtml(img.original_name)}">
+                  ${escapeHtml(img.original_name)}
+                </div>
+                ${img.description ? `<p style="font-size: 12px; color: var(--text-secondary); margin: 4px 0; max-height: 36px; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(img.description)}</p>` : ''}
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--gray-100);">
+                <span style="font-size: 11px; color: var(--text-secondary);">${img.created_at ? formatDate(img.created_at) : ''}</span>
+                <div style="display: flex; gap: 4px;">
+                  <button class="btn btn-xs btn-outline view-rx-btn" data-url="${img.file_path}" data-title="${escapeHtml(img.original_name)}" title="Ver en tamaño completo">🔍 Ver</button>
+                  <button class="btn btn-xs btn-danger delete-rx-btn" data-id="${img.id}" title="Eliminar radiografía">🗑️</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        `).join('');
+      }
+
+      let docRowsHtml = '';
+      if (filteredDocs.length === 0) {
+        docRowsHtml = `
+          <tr>
+            <td colspan="6" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">
+              No se han registrado documentos clínicos para este paciente.
+            </td>
+          </tr>
+        `;
+      } else {
+        docRowsHtml = filteredDocs.map(doc => {
+          const isPdf = doc.mime_type?.includes('pdf') || doc.file_name?.endsWith('.pdf');
+          const isDoc = doc.mime_type?.includes('word') || doc.file_name?.endsWith('.doc') || doc.file_name?.endsWith('.docx');
+          const fileIcon = isPdf ? '📄' : isDoc ? '📝' : '📎';
+          const sizeKb = doc.file_size ? `${(doc.file_size / 1024).toFixed(0)} KB` : 'N/A';
+
+          return `
+            <tr>
+              <td>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 18px;">${fileIcon}</span>
+                  <div>
+                    <div style="font-weight: 600; font-size: 13px;">${escapeHtml(doc.original_name)}</div>
+                    ${doc.description ? `<div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(doc.description)}</div>` : ''}
+                  </div>
+                </div>
+              </td>
+              <td>
+                <span class="badge badge-info" style="font-size: 11px;">
+                  ${docCategoryLabel[doc.category] || doc.category}
+                </span>
+              </td>
+              <td>${sizeKb}</td>
+              <td>${doc.created_at ? formatDate(doc.created_at) : 'N/A'}</td>
+              <td>${doc.uploader_first_name ? `${doc.uploader_first_name} ${doc.uploader_last_name || ''}` : 'Personal'}</td>
+              <td style="text-align: right;">
+                <a href="${doc.file_path}" target="_blank" class="btn btn-xs btn-outline" style="text-decoration: none;">📥 Abrir / Descargar</a>
+                <button class="btn btn-xs btn-danger delete-doc-btn" data-id="${doc.id}" style="margin-left: 4px;">🗑️</button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      }
+
+      tabContent = `
+        <div style="display: flex; flex-direction: column; gap: var(--space-6);">
+          <!-- SECCIÓN 1: RADIOGRAFÍAS E IMÁGENES -->
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-3); flex-wrap: wrap; gap: 8px;">
+              <div>
+                <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                  <span>📸</span> Radiografías e Imágenes Dentales
+                  <span class="badge badge-secondary" style="font-size: 12px;">${(this.patientImages || []).length}</span>
+                </h3>
+                <p style="margin: 2px 0 0 0; font-size: 12px; color: var(--text-secondary);">Panorámicas, periapicales, fotografías clínicas y aletas de mordida</p>
+              </div>
+              <button id="btn-upload-image" class="btn btn-primary btn-sm" style="font-weight: 600;">
+                + Subir Radiografía / Imagen
+              </button>
+            </div>
+
+            <!-- Chips de Filtro de Imágenes -->
+            <div style="display: flex; gap: 6px; margin-bottom: var(--space-4); flex-wrap: wrap; align-items: center;">
+              <span style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-right: 4px;">Categoría:</span>
+              <button class="btn btn-xs ${!imgCategory ? 'btn-primary' : 'btn-outline'} img-filter-chip" data-category="">Todas (${(this.patientImages || []).length})</button>
+              <button class="btn btn-xs ${imgCategory === 'panoramica' ? 'btn-primary' : 'btn-outline'} img-filter-chip" data-category="panoramica">Panorámicas</button>
+              <button class="btn btn-xs ${imgCategory === 'periapical' ? 'btn-primary' : 'btn-outline'} img-filter-chip" data-category="periapical">Periapicales</button>
+              <button class="btn btn-xs ${imgCategory === 'radiografia' ? 'btn-primary' : 'btn-outline'} img-filter-chip" data-category="radiografia">Otras Rx</button>
+              <button class="btn btn-xs ${imgCategory === 'fotografia' ? 'btn-primary' : 'btn-outline'} img-filter-chip" data-category="fotografia">Fotografías</button>
+            </div>
+
+            <!-- Grid de Galería -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-4);">
+              ${imagesGridHtml}
+            </div>
+          </div>
+
+          <hr style="border: 0; border-top: 1px solid var(--border-color); margin: var(--space-2) 0;" />
+
+          <!-- SECCIÓN 2: DOCUMENTOS CLÍNICOS -->
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-3); flex-wrap: wrap; gap: 8px;">
+              <div>
+                <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                  <span>📄</span> Documentos Clínicos & Consentimientos
+                  <span class="badge badge-secondary" style="font-size: 12px;">${(this.patientDocuments || []).length}</span>
+                </h3>
+                <p style="margin: 2px 0 0 0; font-size: 12px; color: var(--text-secondary);">Consentimientos informados, recetas externas, análisis de laboratorio e informes</p>
+              </div>
+              <button id="btn-upload-document" class="btn btn-outline-primary btn-sm" style="font-weight: 600;">
+                + Subir Documento Clínico
+              </button>
+            </div>
+
+            <!-- Chips de Filtro de Documentos -->
+            <div style="display: flex; gap: 6px; margin-bottom: var(--space-3); flex-wrap: wrap; align-items: center;">
+              <span style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-right: 4px;">Tipo:</span>
+              <button class="btn btn-xs ${!docCategory ? 'btn-primary' : 'btn-outline'} doc-filter-chip" data-category="">Todos (${(this.patientDocuments || []).length})</button>
+              <button class="btn btn-xs ${docCategory === 'consentimiento' ? 'btn-primary' : 'btn-outline'} doc-filter-chip" data-category="consentimiento">Consentimientos</button>
+              <button class="btn btn-xs ${docCategory === 'receta' ? 'btn-primary' : 'btn-outline'} doc-filter-chip" data-category="receta">Recetas</button>
+              <button class="btn btn-xs ${docCategory === 'referencia' ? 'btn-primary' : 'btn-outline'} doc-filter-chip" data-category="referencia">Informes / Referencias</button>
+              <button class="btn btn-xs ${docCategory === 'laboratorio' ? 'btn-primary' : 'btn-outline'} doc-filter-chip" data-category="laboratorio">Laboratorio</button>
+            </div>
+
+            <!-- Tabla de Documentos -->
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Documento</th>
+                    <th>Tipo</th>
+                    <th>Tamaño</th>
+                    <th>Fecha</th>
+                    <th>Subido por</th>
+                    <th style="text-align: right;">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${docRowsHtml}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      `;
     }
+
+    const allergies = (pat.allergies || pat.medical?.allergies || '').trim();
+    const conditions = (pat.medical_conditions || pat.medical?.conditions || '').trim();
+    const medications = (pat.current_medications || pat.medical?.medications || '').trim();
+    const hasMedicalAlerts = Boolean(allergies || conditions || medications);
+
+    const medicalAlertBannerHtml = hasMedicalAlerts ? `
+      <div class="medical-alert-sticky-banner" style="position: sticky; top: 0; z-index: 20; background: #fef2f2; border: 2px solid #ef4444; border-radius: var(--radius-md); padding: 12px 18px; margin-bottom: var(--space-4); box-shadow: 0 4px 12px rgba(239, 68, 68, 0.15); display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: flex-start; gap: 12px; flex: 1; min-width: 280px;">
+          <span style="font-size: 28px; line-height: 1;">🚨</span>
+          <div style="flex: 1;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+              <strong style="color: #991b1b; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px;">⚠️ Alerta Médica Clínica</strong>
+              <span style="background: #ef4444; color: #fff; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; text-transform: uppercase;">Atención Requerida</span>
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px;">
+              ${allergies ? `
+                <div style="background: #fee2e2; border: 1px solid #f87171; border-radius: 4px; padding: 2px 8px; color: #991b1b;">
+                  <strong>Alergias:</strong> ${escapeHtml(allergies)}
+                </div>
+              ` : ''}
+              ${conditions ? `
+                <div style="background: #fef3c7; border: 1px solid #fcd34d; border-radius: 4px; padding: 2px 8px; color: #92400e;">
+                  <strong>Condiciones / Patologías:</strong> ${escapeHtml(conditions)}
+                </div>
+              ` : ''}
+              ${medications ? `
+                <div style="background: #e0f2fe; border: 1px solid #7dd3fc; border-radius: 4px; padding: 2px 8px; color: #0369a1;">
+                  <strong>Medicación Actual:</strong> ${escapeHtml(medications)}
+                </div>
+              ` : ''}
+            </div>
+          </div>
+        </div>
+        <div>
+          <button id="quick-edit-medical-alerts-btn" class="btn btn-sm btn-outline-danger" style="font-weight: 600; white-space: nowrap; background: #fff;">
+            ✏️ Editar Alertas
+          </button>
+        </div>
+      </div>
+    ` : `
+      <div class="medical-alert-sticky-banner" style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: var(--radius-md); padding: 8px 16px; margin-bottom: var(--space-4); display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 8px; color: #64748b; font-size: 13px;">
+          <span style="font-size: 16px;">🩺</span>
+          <span>Sin alertas médicas registradas para este paciente.</span>
+        </div>
+        <div>
+          <button id="quick-edit-medical-alerts-btn" class="btn btn-sm btn-outline" style="font-size: 12px; padding: 3px 10px;">
+            + Registrar Alertas Médicas
+          </button>
+        </div>
+      </div>
+    `;
 
     this.container.innerHTML = `
       <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-6);">
@@ -755,12 +1024,15 @@ export class PatientProfile {
         </div>
       </div>
 
+      ${medicalAlertBannerHtml}
+
       <div class="tabs" style="display: flex; gap: var(--space-2); margin-bottom: var(--space-4); border-bottom: 1px solid var(--border-color); padding-bottom: var(--space-2); flex-wrap: wrap;">
         ${tabLink('info', 'Ficha Técnica')}
         ${tabLink('odontogram', '🦷 Odontograma')}
         ${isClinicalStaff ? '' : tabLink('payments', 'Pagos y Saldo')}
         ${tabLink('treatments', 'Historial Odontológico')}
         ${tabLink('appointments', 'Historial de Citas')}
+        ${tabLink('documents', '📁 Documentos & Radiografías')}
         ${isClinicalStaff ? '' : tabLink('invoices', 'Facturas')}
         ${isClinicalStaff ? '' : tabLink('receipts', 'Recibos')}
         ${isClinicalStaff ? '' : tabLink('quotations', 'Presupuestos')}
@@ -1062,7 +1334,7 @@ export class PatientProfile {
     // Receipts table row toggle in patient profile
     this.container.querySelectorAll('.profile-receipt-main-row').forEach(row => {
       row.addEventListener('click', (e) => {
-        if (e.target.closest('.view-profile-receipt-btn, .pay-profile-receipt-btn, .delete-profile-receipt-btn')) {
+        if (e.target.closest('.view-profile-receipt-btn, .pay-profile-receipt-btn, .delete-profile-receipt-btn, .download-pdf-profile-receipt-btn')) {
           return;
         }
 
@@ -1077,6 +1349,12 @@ export class PatientProfile {
             row.classList.add('row-active');
           }
         }
+      }, { signal });
+    });
+
+    this.container.querySelectorAll('.download-pdf-profile-receipt-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        pdfService.downloadReceipt(btn.dataset.id, btn.dataset.number);
       }, { signal });
     });
 
@@ -1123,7 +1401,7 @@ export class PatientProfile {
     // Quotation table row toggle in patient profile
     this.container.querySelectorAll('.profile-quotation-main-row').forEach(row => {
       row.addEventListener('click', async (e) => {
-        if (e.target.closest('.print-profile-quotation-btn, .manage-profile-quotation-btn, .delete-profile-quotation-btn')) {
+        if (e.target.closest('.print-profile-quotation-btn, .manage-profile-quotation-btn, .delete-profile-quotation-btn, .download-pdf-profile-quote-btn')) {
           return;
         }
         const id = row.getAttribute('data-id');
@@ -1138,6 +1416,13 @@ export class PatientProfile {
       await this.render();
       this.mount();
     };
+
+    this.container.querySelectorAll('.download-pdf-profile-quote-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        pdfService.downloadQuotation(btn.dataset.id, btn.dataset.number);
+      }, { signal });
+    });
 
     this.container.querySelectorAll('.print-profile-quotation-btn').forEach(btn => {
       btn.addEventListener('click', async (e) => {
@@ -1161,6 +1446,10 @@ export class PatientProfile {
         const { Quotations } = await import('../quotations/quotations.js');
         new Quotations(this.container).showDeleteConfirm(btn.dataset.id, refreshProfile);
       }, { signal });
+    });
+
+    this.container.querySelectorAll('.download-pdf-presc-btn').forEach(btn => {
+      btn.addEventListener('click', () => pdfService.downloadPrescription(btn.dataset.id, btn.dataset.number), { signal });
     });
 
     this.container.querySelectorAll('.view-prescription-btn').forEach(btn => {
@@ -1278,6 +1567,316 @@ export class PatientProfile {
         if (docId) this.showDocumentModal(docId);
       });
     });
+
+    // Alertas Médicas Rápidas
+    const quickAlertsBtn = this.container.querySelector('#quick-edit-medical-alerts-btn');
+    if (quickAlertsBtn) {
+      quickAlertsBtn.addEventListener('click', () => this.showQuickEditMedicalAlertsModal(), { signal });
+    }
+
+    // Subir imagen / radiografía
+    const uploadImgBtn = this.container.querySelector('#btn-upload-image');
+    if (uploadImgBtn) {
+      uploadImgBtn.addEventListener('click', () => this.showUploadImageModal(), { signal });
+    }
+
+    // Subir documento clínico
+    const uploadDocBtn = this.container.querySelector('#btn-upload-document');
+    if (uploadDocBtn) {
+      uploadDocBtn.addEventListener('click', () => this.showUploadDocumentModal(), { signal });
+    }
+
+    // Filtros de categoría para imágenes
+    this.container.querySelectorAll('.img-filter-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        this.selectedImageCategory = chip.getAttribute('data-category') || '';
+        this.renderProfile();
+        this.mount();
+      }, { signal });
+    });
+
+    // Filtros de categoría para documentos
+    this.container.querySelectorAll('.doc-filter-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        this.selectedDocumentCategory = chip.getAttribute('data-category') || '';
+        this.renderProfile();
+        this.mount();
+      }, { signal });
+    });
+
+    // Lightbox para ver imágenes / radiografías
+    this.container.querySelectorAll('.view-rx-thumb, .view-rx-btn').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const url = el.getAttribute('data-url');
+        const title = el.getAttribute('data-title');
+        if (url) this.showImageLightboxModal(url, title);
+      }, { signal });
+    });
+
+    // Eliminar imagen / radiografía
+    this.container.querySelectorAll('.delete-rx-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = btn.getAttribute('data-id');
+        if (id) this.showDeleteImageModal(id);
+      }, { signal });
+    });
+
+    // Eliminar documento clínico
+    this.container.querySelectorAll('.delete-doc-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = btn.getAttribute('data-id');
+        if (id) this.showDeleteDocumentModal(id);
+      }, { signal });
+    });
+  }
+
+  showQuickEditMedicalAlertsModal() {
+    const pat = this.patient;
+    const curAllergies = pat.allergies || pat.medical?.allergies || '';
+    const curConditions = pat.medical_conditions || pat.medical?.conditions || '';
+    const curMeds = pat.current_medications || pat.medical?.medications || '';
+
+    const content = `
+      <form id="form-quick-medical-alerts">
+        <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px;">
+          <p style="margin: 0; font-size: 13px; color: #991b1b;">
+            <strong>Aviso de Seguridad Clínica:</strong> Esta información es vital para prevenir reacciones adversas durante procedimientos e intervenciones.
+          </p>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label class="form-label" style="font-weight: 600; color: #dc2626;">🚨 Alergias Conocidas (Penicilina, Látex, AINEs, etc.)</label>
+          <textarea id="alert-allergies" class="form-input" rows="2" placeholder="Ej: Alergia grave a penicilina y derivados. Reacción a látex.">${escapeHtml(curAllergies)}</textarea>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label class="form-label" style="font-weight: 600; color: #d97706;">⚠️ Condiciones Médicas / Patologías Sistémicas</label>
+          <textarea id="alert-conditions" class="form-input" rows="2" placeholder="Ej: Hipertensión arterial controlada, Diabetes tipo 2, Cardiopatía.">${escapeHtml(curConditions)}</textarea>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label class="form-label" style="font-weight: 600; color: #0284c7;">💊 Medicamentos Actuales (Anticoagulantes, etc.)</label>
+          <textarea id="alert-medications" class="form-input" rows="2" placeholder="Ej: Sintrom 4mg/día, Enalapril 20mg, Metformina 850mg.">${escapeHtml(curMeds)}</textarea>
+        </div>
+      </form>
+    `;
+
+    Modal.show({
+      title: `Editar Alertas Médicas — ${pat.first_name} ${pat.last_name}`,
+      content,
+      size: 'md',
+      confirmText: 'Guardar Alertas',
+      cancelText: 'Cancelar',
+      onConfirm: async (bodyContent) => {
+        const allergies = bodyContent.querySelector('#alert-allergies').value.trim();
+        const medical_conditions = bodyContent.querySelector('#alert-conditions').value.trim();
+        const current_medications = bodyContent.querySelector('#alert-medications').value.trim();
+
+        try {
+          await patientService.update(this.patientId, {
+            allergies: allergies || null,
+            medical_conditions: medical_conditions || null,
+            current_medications: current_medications || null,
+          });
+
+          toast.success('Alertas médicas actualizadas correctamente.');
+          await this.loadPatientData();
+        } catch (err) {
+          toast.error('Error al guardar las alertas médicas: ' + (err.message || 'Error desconocido'));
+          return false;
+        }
+      }
+    });
+  }
+
+  showUploadImageModal() {
+    const content = `
+      <form id="form-upload-patient-image" enctype="multipart/form-data">
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label class="form-label" style="font-weight: 600;">Archivo de Imagen / Radiografía *</label>
+          <input type="file" id="rx-file-input" class="form-input" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" required />
+          <span style="font-size: 11px; color: var(--text-secondary);">Formatos permitidos: JPEG, PNG, WEBP, GIF, PDF (máx. 10MB)</span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px;">
+          <div class="form-group">
+            <label class="form-label" style="font-weight: 600;">Categoría de Imagen *</label>
+            <select id="rx-category-input" class="form-select">
+              <option value="radiografia">Radiografía Regular</option>
+              <option value="panoramica">Panorámica (Ortopantomografía)</option>
+              <option value="periapical">Periapical / Aleta de Mordida</option>
+              <option value="fotografia">Fotografía Clínica / Intraoral</option>
+              <option value="otro">Otro</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="font-weight: 600;">Pieza Dental (Opcional)</label>
+            <input type="number" id="rx-tooth-input" class="form-input" placeholder="Ej: 18, 21, 36, 47" min="11" max="85" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 600;">Descripción o Hallazgos Clínicos</label>
+          <textarea id="rx-desc-input" class="form-input" rows="2" placeholder="Ej: Control de conductos tras endodoncia."></textarea>
+        </div>
+      </form>
+    `;
+
+    Modal.show({
+      title: `Subir Radiografía / Imagen — ${this.patient?.first_name} ${this.patient?.last_name}`,
+      content,
+      size: 'md',
+      confirmText: 'Subir Archivo',
+      cancelText: 'Cancelar',
+      onConfirm: async (bodyContent) => {
+        const fileInput = bodyContent.querySelector('#rx-file-input');
+        const category = bodyContent.querySelector('#rx-category-input').value;
+        const tooth = bodyContent.querySelector('#rx-tooth-input').value;
+        const description = bodyContent.querySelector('#rx-desc-input').value;
+
+        if (!fileInput.files || fileInput.files.length === 0) {
+          toast.error('Por favor seleccione un archivo para subir.');
+          return false;
+        }
+
+        const formData = new FormData();
+        formData.append('image', fileInput.files[0]);
+        formData.append('category', category);
+        if (tooth) formData.append('tooth_number', tooth);
+        if (description) formData.append('description', description);
+
+        try {
+          await documentService.uploadImage(this.patientId, formData);
+          toast.success('Imagen / Radiografía subida exitosamente.');
+          this.activeTab = 'documents';
+          await this.loadPatientData();
+        } catch (err) {
+          toast.error('Error al subir la imagen: ' + (err.message || 'Error desconocido'));
+          return false;
+        }
+      }
+    });
+  }
+
+  showUploadDocumentModal() {
+    const content = `
+      <form id="form-upload-patient-doc" enctype="multipart/form-data">
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label class="form-label" style="font-weight: 600;">Archivo del Documento *</label>
+          <input type="file" id="doc-file-input" class="form-input" accept=".pdf,.doc,.docx,image/jpeg,image/png" required />
+          <span style="font-size: 11px; color: var(--text-secondary);">Formatos permitidos: PDF, DOC, DOCX, JPEG, PNG (máx. 10MB)</span>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label class="form-label" style="font-weight: 600;">Categoría del Documento *</label>
+          <select id="doc-category-input" class="form-select">
+            <option value="consentimiento">Consentimiento Informado Firmado</option>
+            <option value="receta">Receta Médica / Prescripción Externa</option>
+            <option value="referencia">Informe de Referencia Médica</option>
+            <option value="laboratorio">Resultados de Laboratorio</option>
+            <option value="otro">Otro Documento</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 600;">Descripción o Notas del Documento</label>
+          <textarea id="doc-desc-input" class="form-input" rows="2" placeholder="Ej: Consentimiento para colocación de implantes firmado."></textarea>
+        </div>
+      </form>
+    `;
+
+    Modal.show({
+      title: `Subir Documento Clínico — ${this.patient?.first_name} ${this.patient?.last_name}`,
+      content,
+      size: 'md',
+      confirmText: 'Subir Documento',
+      cancelText: 'Cancelar',
+      onConfirm: async (bodyContent) => {
+        const fileInput = bodyContent.querySelector('#doc-file-input');
+        const category = bodyContent.querySelector('#doc-category-input').value;
+        const description = bodyContent.querySelector('#doc-desc-input').value;
+
+        if (!fileInput.files || fileInput.files.length === 0) {
+          toast.error('Por favor seleccione un archivo para subir.');
+          return false;
+        }
+
+        const formData = new FormData();
+        formData.append('document', fileInput.files[0]);
+        formData.append('category', category);
+        if (description) formData.append('description', description);
+
+        try {
+          await documentService.uploadDocument(this.patientId, formData);
+          toast.success('Documento clínico subido exitosamente.');
+          this.activeTab = 'documents';
+          await this.loadPatientData();
+        } catch (err) {
+          toast.error('Error al subir el documento: ' + (err.message || 'Error desconocido'));
+          return false;
+        }
+      }
+    });
+  }
+
+  showImageLightboxModal(imageUrl, title) {
+    const isPdf = imageUrl.toLowerCase().endsWith('.pdf');
+    const content = isPdf ? `
+      <div style="width: 100%; height: 75vh;">
+        <iframe src="${imageUrl}" style="width: 100%; height: 100%; border: none;"></iframe>
+      </div>
+    ` : `
+      <div style="display: flex; justify-content: center; align-items: center; background: #0f172a; padding: 12px; border-radius: 6px; overflow: auto; max-height: 80vh;">
+        <img src="${imageUrl}" alt="${escapeHtml(title)}" style="max-width: 100%; max-height: 75vh; object-fit: contain; border-radius: 4px;" />
+      </div>
+    `;
+
+    Modal.show({
+      title: title || 'Visualizador de Radiografía / Imagen',
+      content,
+      size: 'xl',
+      confirmText: 'Cerrar',
+      cancelText: '',
+      onConfirm: () => true
+    });
+  }
+
+  showDeleteImageModal(imageId) {
+    Modal.confirm(
+      'Eliminar Radiografía / Imagen',
+      '¿Está seguro de que desea eliminar esta imagen del expediente del paciente? Esta acción no se puede deshacer.',
+      async () => {
+        try {
+          await documentService.deleteImage(this.patientId, imageId);
+          toast.success('Imagen eliminada exitosamente.');
+          this.activeTab = 'documents';
+          await this.loadPatientData();
+        } catch (err) {
+          toast.error('Error al eliminar la imagen: ' + (err.message || 'Error desconocido'));
+        }
+      }
+    );
+  }
+
+  showDeleteDocumentModal(docId) {
+    Modal.confirm(
+      'Eliminar Documento Clínico',
+      '¿Está seguro de que desea eliminar este documento del expediente del paciente? Esta acción no se puede deshacer.',
+      async () => {
+        try {
+          await documentService.deleteDocument(this.patientId, docId);
+          toast.success('Documento eliminado exitosamente.');
+          this.activeTab = 'documents';
+          await this.loadPatientData();
+        } catch (err) {
+          toast.error('Error al eliminar el documento: ' + (err.message || 'Error desconocido'));
+        }
+      }
+    );
   }
 
   async showPatientModal() {
@@ -1939,7 +2538,10 @@ export class PatientProfile {
         </style>
       </head>
       <body>
-        <button class="print-btn" id="print-btn">🖨️ Imprimir / Guardar PDF</button>
+        <div style="display: flex; justify-content: center; gap: 12px; margin: 20px auto;" class="no-print">
+          <button class="print-btn" id="print-btn" style="margin: 0;">🖨️ Imprimir</button>
+          <button class="print-btn download-btn" id="download-pdf-btn" style="margin: 0; background: #16a34a;">📥 Descargar PDF Oficial</button>
+        </div>
 
         <div class="header">
           <img src="${logoUrl}" alt="Logo" style="height: 60px; width: auto; object-fit: contain;" id="print-logo" />
@@ -2006,8 +2608,10 @@ export class PatientProfile {
       </html>
     `);
     printWindow.document.close();
-    const printBtn = printWindow.document.querySelector('.print-btn');
+    const printBtn = printWindow.document.querySelector('#print-btn');
     if (printBtn) printBtn.addEventListener('click', () => printWindow.print());
+    const dlBtn = printWindow.document.querySelector('#download-pdf-btn');
+    if (dlBtn) dlBtn.addEventListener('click', () => pdfService.downloadPrescription(id, prescription.prescription_number));
     const logo = printWindow.document.querySelector('#print-logo');
     if (logo) logo.addEventListener('error', () => { logo.style.display = 'none'; });
   }

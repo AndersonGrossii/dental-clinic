@@ -36,6 +36,9 @@ export const toAppointmentDTO = (row) => {
       phone: row.patient_phone,
       email: row.patient_email || null,
       dni: row.patient_dni || null,
+      allergies: row.patient_allergies || null,
+      medicalConditions: row.patient_medical_conditions || null,
+      currentMedications: row.patient_current_medications || null,
     },
     doctor: {
       id: row.doctor_id,
@@ -82,6 +85,14 @@ export const toAppointmentDTO = (row) => {
     status_label: row.status_label,
     cancellation_reason: row.cancellation_reason,
     is_first_visit: row.is_first_visit,
+    patient_allergies: row.patient_allergies || null,
+    patient_medical_conditions: row.patient_medical_conditions || null,
+    patient_current_medications: row.patient_current_medications || null,
+    has_medical_alerts: Boolean(
+      (row.patient_allergies && row.patient_allergies.trim()) ||
+      (row.patient_medical_conditions && row.patient_medical_conditions.trim()) ||
+      (row.patient_current_medications && row.patient_current_medications.trim())
+    ),
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -132,6 +143,14 @@ export const toCalendarEventDTO = (row) => {
     guest_phone: row.guest_phone,
     guest_email: row.guest_email,
     gabinete: row.gabinete,
+    patient_allergies: row.patient_allergies || null,
+    patient_medical_conditions: row.patient_medical_conditions || null,
+    patient_current_medications: row.patient_current_medications || null,
+    has_medical_alerts: Boolean(
+      (row.patient_allergies && row.patient_allergies.trim()) ||
+      (row.patient_medical_conditions && row.patient_medical_conditions.trim()) ||
+      (row.patient_current_medications && row.patient_current_medications.trim())
+    ),
     backgroundColor: row.doctor_color || '#0891b2',
     borderColor: row.status_color || '#6b7280',
   };

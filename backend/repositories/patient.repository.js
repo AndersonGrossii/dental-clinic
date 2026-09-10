@@ -555,43 +555,6 @@ class PatientRepository extends BaseRepository {
     return { rows: dataResult.rows, total };
   }
 
-  /**
-   * Obtiene las imágenes de un paciente.
-   * @param {number} patientId
-   * @param {object} options - { limit, offset }
-   * @returns {Promise<{ rows: Array, total: number }>}
-   */
-  async getImages(patientId, { limit = 20, offset = 0 } = {}) {
-    const clinicId = this.getClinicId();
-    const conditions = ['patient_id = $1'];
-    const params = [patientId];
-    if (clinicId) {
-      conditions.push(`clinic_id = $${params.length + 1}`);
-      params.push(clinicId);
-    }
-    const where = conditions.join(' AND ');
-
-    const countResult = await query(
-      `SELECT COUNT(*) AS total FROM patient_images
-       WHERE ${where} AND deleted_at IS NULL`,
-      params
-    );
-    const total = parseInt(countResult.rows[0].total, 10);
-
-    const dataResult = await query(
-      `SELECT pi.*, u.first_name AS uploaded_by_name, u.last_name AS uploaded_by_lastname
-       FROM patient_images pi
-       LEFT JOIN users u ON u.id = pi.uploaded_by
-       WHERE pi.patient_id = $1 AND pi.deleted_at IS NULL
-       ORDER BY pi.created_at DESC
-       LIMIT $2 OFFSET $3`,
-      clinicId
-        ? [patientId, clinicId, limit, offset]
-        : [patientId, limit, offset]
-    );
-
-    return { rows: dataResult.rows, total };
-  }
 
   /**
    * Obtiene las facturas de un paciente.
@@ -677,6 +640,219 @@ class PatientRepository extends BaseRepository {
         : [patientId, userId, title, content, type]
     );
     return result.rows[0];
+  }
+
+  /**
+   * Obtiene las imágenes y radiografías de un paciente.
+   * @param {number} patientId
+   * @param {object} filters
+   * @returns {Promise<Array>}
+   */
+  async getImages(patientId, { category, toothNumber } = {}) {
+    const conditions = ['pi.patient_id = $1', 'pi.deleted_at IS NULL'];
+    const params = [patientId];
+    scopeClinic(conditions, params, 'pi');
+
+    if (category) {
+      params.push(category);
+      conditions.push(`pi.category = $${params.length}`);
+    }
+    if (toothNumber) {
+      params.push(toothNumber);
+      conditions.push(`pi.tooth_number = $${params.length}`);
+    }
+
+    const sql = `
+      SELECT pi.*,
+             u.first_name AS uploader_first_name,
+             u.last_name AS uploader_last_name
+      FROM patient_images pi
+      LEFT JOIN users u ON u.id = pi.uploaded_by
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY pi.created_at DESC
+    `;
+    const result = await query(sql, params);
+    return result.rows;
+  }
+
+  /**
+   * Obtiene una imagen por su ID y paciente.
+   * @param {number} patientId
+   * @param {number} imageId
+   * @returns {Promise<object|null>}
+   */
+  async getImageById(patientId, imageId) {
+    const conditions = ['pi.id = $1', 'pi.patient_id = $2', 'pi.deleted_at IS NULL'];
+    const params = [imageId, patientId];
+    scopeClinic(conditions, params, 'pi');
+
+    const result = await query(
+      `SELECT pi.* FROM patient_images pi WHERE ${conditions.join(' AND ')}`,
+      params
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Agrega una nueva imagen o radiografía.
+   * @param {object} data
+   * @returns {Promise<object>}
+   */
+  async addImage(data) {
+    const clinicId = this.getClinicId();
+    const result = await query(
+      `INSERT INTO patient_images
+        (patient_id, file_name, original_name, file_path, file_size, mime_type, category, description, tooth_number, uploaded_by, clinic_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       RETURNING *`,
+      [
+        data.patientId,
+        data.fileName,
+        data.originalName,
+        data.filePath,
+        data.fileSize,
+        data.mimeType,
+        data.category || 'radiografia',
+        data.description || null,
+        data.toothNumber || null,
+        data.uploadedBy || null,
+        clinicId || 1
+      ]
+    );
+    return result.rows[0];
+  }
+
+  /**
+   * Elimina una imagen (soft delete).
+   * @param {number} patientId
+   * @param {number} imageId
+   * @returns {Promise<object|null>}
+   */
+  async deleteImage(patientId, imageId) {
+    const conditions = ['id = $1', 'patient_id = $2', 'deleted_at IS NULL'];
+    const params = [imageId, patientId];
+    const clinicId = this.getClinicId();
+    if (clinicId) {
+      params.push(clinicId);
+      conditions.push(`clinic_id = $${params.length}`);
+    }
+
+    const result = await query(
+      `UPDATE patient_images SET deleted_at = NOW() WHERE ${conditions.join(' AND ')} RETURNING *`,
+      params
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Obtiene los documentos clínicos de un paciente con paginación.
+   * @param {number} patientId
+   * @param {object} options
+   * @returns {Promise<{ rows: Array, total: number }>}
+   */
+  async getDocuments(patientId, { category, limit = 20, offset = 0 } = {}) {
+    const conditions = ['d.patient_id = $1', 'd.deleted_at IS NULL'];
+    const params = [patientId];
+    scopeClinic(conditions, params, 'd');
+
+    if (category) {
+      params.push(category);
+      conditions.push(`d.category = $${params.length}`);
+    }
+
+    const countResult = await query(
+      `SELECT COUNT(*) AS total FROM documents d WHERE ${conditions.join(' AND ')}`,
+      params
+    );
+    const total = parseInt(countResult.rows[0].total, 10);
+
+    const dataParams = [...params];
+    dataParams.push(limit);
+    const limitPlaceholder = `$${dataParams.length}`;
+    dataParams.push(offset);
+    const offsetPlaceholder = `$${dataParams.length}`;
+
+    const dataResult = await query(
+      `SELECT d.*,
+              u.first_name AS uploader_first_name,
+              u.last_name AS uploader_last_name
+       FROM documents d
+       LEFT JOIN users u ON u.id = d.uploaded_by
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY d.created_at DESC
+       LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}`,
+      dataParams
+    );
+
+    return { rows: dataResult.rows, total };
+  }
+
+  /**
+   * Obtiene un documento por su ID y paciente.
+   * @param {number} patientId
+   * @param {number} docId
+   * @returns {Promise<object|null>}
+   */
+  async getDocumentById(patientId, docId) {
+    const conditions = ['d.id = $1', 'd.patient_id = $2', 'd.deleted_at IS NULL'];
+    const params = [docId, patientId];
+    scopeClinic(conditions, params, 'd');
+
+    const result = await query(
+      `SELECT d.* FROM documents d WHERE ${conditions.join(' AND ')}`,
+      params
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Agrega un nuevo documento clínico.
+   * @param {object} data
+   * @returns {Promise<object>}
+   */
+  async addDocument(data) {
+    const clinicId = this.getClinicId();
+    const result = await query(
+      `INSERT INTO documents
+        (patient_id, file_name, original_name, file_path, file_size, mime_type, category, description, uploaded_by, clinic_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING *`,
+      [
+        data.patientId,
+        data.fileName,
+        data.originalName,
+        data.filePath,
+        data.fileSize,
+        data.mimeType,
+        data.category || 'otro',
+        data.description || null,
+        data.uploadedBy || null,
+        clinicId || 1
+      ]
+    );
+    return result.rows[0];
+  }
+
+  /**
+   * Elimina un documento clínico (soft delete).
+   * @param {number} patientId
+   * @param {number} docId
+   * @returns {Promise<object|null>}
+   */
+  async deleteDocument(patientId, docId) {
+    const conditions = ['id = $1', 'patient_id = $2', 'deleted_at IS NULL'];
+    const params = [docId, patientId];
+    const clinicId = this.getClinicId();
+    if (clinicId) {
+      params.push(clinicId);
+      conditions.push(`clinic_id = $${params.length}`);
+    }
+
+    const result = await query(
+      `UPDATE documents SET deleted_at = NOW() WHERE ${conditions.join(' AND ')} RETURNING *`,
+      params
+    );
+    return result.rows[0] || null;
   }
 }
 

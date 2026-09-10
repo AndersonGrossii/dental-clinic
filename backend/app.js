@@ -35,7 +35,7 @@ app.use(cors({
   origin: config.app.env === 'development' ? config.app.frontendUrl : true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Clinic-ID'],
 }));
 
 // ---- Rate Limiting ----

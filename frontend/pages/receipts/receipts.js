@@ -8,6 +8,7 @@ import Modal from '../../components/modal/modal.js';
 import state from '../../scripts/state.js';
 import { formatDate, formatCurrency } from '../../utils/helpers.js';
 import { getInvoiceStatusInfo, formatPaymentMethods } from '../../utils/formatters.js';
+import pdfService from '../../services/pdf.service.js';
 
 export class Receipts {
   constructor(container) {
@@ -59,6 +60,7 @@ export class Receipts {
                 🧾 Opciones para Recibo #${rec.invoice_number}:
               </div>
               <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="btn btn-sm btn-outline download-pdf-receipt-btn" data-id="${rec.id}" data-number="${rec.invoice_number}" style="border-color: var(--primary-600); color: var(--primary-700); font-weight: 600;">📥 Descargar PDF</button>
                 <button class="btn btn-sm btn-outline print-receipt-btn" data-id="${rec.id}">🖨️ Ver / Imprimir Recibo</button>
                 ${rec.receipt_id ? `
                   <button class="btn btn-sm btn-info view-linked-invoice-btn" data-id="${rec.receipt_id}">📄 Factura Vinc. #${rec.receipt_id}</button>
@@ -122,6 +124,14 @@ export class Receipts {
           const isVisible = actionsRow.style.display !== 'none';
           actionsRow.style.display = isVisible ? 'none' : 'table-row';
         }
+        return;
+      }
+
+      const dlPdfBtn = e.target.closest('.download-pdf-receipt-btn');
+      if (dlPdfBtn) {
+        const id = dlPdfBtn.getAttribute('data-id');
+        const num = dlPdfBtn.getAttribute('data-number');
+        pdfService.downloadReceipt(id, num);
         return;
       }
 
@@ -200,7 +210,10 @@ export class Receipts {
           </style>
         </head>
         <body>
-          <button class="print-btn" id="print-btn">🖨️ Imprimir / Guardar PDF</button>
+          <div style="display: flex; justify-content: center; gap: 12px; margin: 20px auto;" class="no-print">
+            <button class="print-btn" id="print-btn" style="margin: 0;">🖨️ Imprimir</button>
+            <button class="print-btn download-btn" id="download-pdf-btn" style="margin: 0; background: #16a34a;">📥 Descargar PDF Oficial</button>
+          </div>
 
           <div class="header">
             <img src="${logoUrl}" alt="Logo" style="height: 60px; width: auto; object-fit: contain;" id="print-logo" />
@@ -274,8 +287,10 @@ export class Receipts {
         </html>
       `);
       printWindow.document.close();
-      const printBtn = printWindow.document.querySelector('.print-btn');
+      const printBtn = printWindow.document.querySelector('#print-btn');
       if (printBtn) printBtn.addEventListener('click', () => printWindow.print());
+      const dlBtn = printWindow.document.querySelector('#download-pdf-btn');
+      if (dlBtn) dlBtn.addEventListener('click', () => pdfService.downloadReceipt(id, rec.invoice_number));
       const logo = printWindow.document.querySelector('#print-logo');
       if (logo) logo.addEventListener('error', () => { logo.style.display = 'none'; });
     } catch {

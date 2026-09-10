@@ -9,6 +9,7 @@ import { createPatientRules, updatePatientRules } from '../validators/patient.va
 import { auditMiddleware } from '../middlewares/audit.middleware.js';
 import * as patientController from '../controllers/patient.controller.js';
 import * as prescriptionController from '../controllers/prescription.controller.js';
+import { uploadSingleImage, uploadDocument } from '../middlewares/upload.middleware.js';
 import odontogramRoutes from './odontogram.routes.js';
 
 const router = Router();
@@ -110,6 +111,41 @@ router.get('/:id/credit', allRoles, patientController.getCredit);
  * @access  Todos los roles
  */
 router.get('/:id/images', allRoles, patientController.getImages);
+
+/**
+ * @route   POST /api/v1/patients/:id/images
+ * @desc    Subir imagen o radiografía del paciente
+ * @access  Todos los roles
+ */
+router.post('/:id/images', allRoles, uploadSingleImage, auditMiddleware('SUBIR_IMAGEN', 'patient_images'), patientController.uploadImage);
+
+/**
+ * @route   DELETE /api/v1/patients/:id/images/:imageId
+ * @desc    Eliminar imagen del paciente
+ * @access  Todos los roles
+ */
+router.delete('/:id/images/:imageId', allRoles, auditMiddleware('ELIMINAR_IMAGEN', 'patient_images'), patientController.deleteImage);
+
+/**
+ * @route   GET /api/v1/patients/:id/documents
+ * @desc    Obtener documentos del paciente
+ * @access  Todos los roles
+ */
+router.get('/:id/documents', allRoles, patientController.getDocuments);
+
+/**
+ * @route   POST /api/v1/patients/:id/documents
+ * @desc    Subir documento del paciente
+ * @access  Todos los roles
+ */
+router.post('/:id/documents', allRoles, uploadDocument, auditMiddleware('SUBIR_DOCUMENTO', 'documents'), patientController.uploadDocument);
+
+/**
+ * @route   DELETE /api/v1/patients/:id/documents/:docId
+ * @desc    Eliminar documento del paciente
+ * @access  Todos los roles
+ */
+router.delete('/:id/documents/:docId', allRoles, auditMiddleware('ELIMINAR_DOCUMENTO', 'documents'), patientController.deleteDocument);
 
 /**
  * @route   GET /api/v1/patients/:id/notes

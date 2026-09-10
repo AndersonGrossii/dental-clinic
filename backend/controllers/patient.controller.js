@@ -180,21 +180,89 @@ export const getTreatments = async (req, res, next) => {
 };
 
 /**
- * Obtiene las imágenes de un paciente.
- * @param {import('express').Request} req
- * @param {import('express').Response} res
- * @param {import('express').NextFunction} next
+ * Obtiene las imágenes y radiografías de un paciente.
  */
 export const getImages = async (req, res, next) => {
+  try {
+    const patientId = parseInt(req.params.id, 10);
+    const { category, tooth_number } = req.query;
+    const images = await patientService.getImages(patientId, {
+      category,
+      toothNumber: tooth_number ? parseInt(tooth_number, 10) : undefined,
+    });
+    return ApiResponse.success(res, images, 'Imágenes del paciente obtenidas exitosamente.');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Sube una nueva imagen o radiografía para el paciente.
+ */
+export const uploadImage = async (req, res, next) => {
+  try {
+    const patientId = parseInt(req.params.id, 10);
+    const image = await patientService.addImage(patientId, req.file, req.body, req.user.id);
+    return ApiResponse.created(res, image, 'Imagen subida exitosamente.');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Elimina una imagen del paciente.
+ */
+export const deleteImage = async (req, res, next) => {
+  try {
+    const patientId = parseInt(req.params.id, 10);
+    const imageId = parseInt(req.params.imageId, 10);
+    await patientService.deleteImage(patientId, imageId);
+    return ApiResponse.success(res, null, 'Imagen eliminada exitosamente.');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Obtiene los documentos del paciente.
+ */
+export const getDocuments = async (req, res, next) => {
   try {
     const { page, limit, offset } = parsePagination(req.query);
     const patientId = parseInt(req.params.id, 10);
 
-    const { rows, total } = await patientService.getImages(patientId, { limit, offset });
+    const { rows, total } = await patientService.getDocuments(patientId, { limit, offset });
 
     const pagination = buildPaginationMeta(total, page, limit);
 
-    return ApiResponse.paginated(res, rows, pagination, 'Imágenes del paciente obtenidas exitosamente.');
+    return ApiResponse.paginated(res, rows, pagination, 'Documentos del paciente obtenidos exitosamente.');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Sube un nuevo documento clínico para el paciente.
+ */
+export const uploadDocument = async (req, res, next) => {
+  try {
+    const patientId = parseInt(req.params.id, 10);
+    const document = await patientService.addDocument(patientId, req.file, req.body, req.user.id);
+    return ApiResponse.created(res, document, 'Documento subido exitosamente.');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Elimina un documento del paciente.
+ */
+export const deleteDocument = async (req, res, next) => {
+  try {
+    const patientId = parseInt(req.params.id, 10);
+    const docId = parseInt(req.params.docId, 10);
+    await patientService.deleteDocument(patientId, docId);
+    return ApiResponse.success(res, null, 'Documento eliminado exitosamente.');
   } catch (error) {
     next(error);
   }

@@ -65,8 +65,12 @@ class PrescriptionRepository extends BaseRepository {
       `SELECT p.*,
               CONCAT(pt.first_name, ' ', pt.last_name) AS patient_name,
               pt.dni AS patient_dni,
+              pt.allergies AS patient_allergies,
+              pt.phone AS patient_phone,
+              pt.email AS patient_email,
               CONCAT(u.first_name, ' ', u.last_name) AS doctor_name,
-              doc.specialty AS doctor_specialty
+              doc.specialty AS doctor_specialty,
+              doc.license_number AS doctor_license
        FROM prescriptions p
        INNER JOIN patients pt ON p.patient_id = pt.id
        LEFT JOIN doctors doc ON p.doctor_id = doc.id

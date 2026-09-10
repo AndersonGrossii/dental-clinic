@@ -324,21 +324,6 @@ class PatientService {
     return patientRepository.getTreatments(patientId, options);
   }
 
-  /**
-   * Obtiene las imágenes de un paciente.
-   * @param {number} patientId
-   * @param {object} options - { limit, offset }
-   * @returns {Promise<{ rows: Array, total: number }>}
-   */
-  async getImages(patientId, options) {
-    const patient = await patientRepository.findById(patientId);
-
-    if (!patient) {
-      throw new AppError('Paciente no encontrado.', 404);
-    }
-
-    return patientRepository.getImages(patientId, options);
-  }
 
   /**
    * Obtiene las facturas de un paciente.
@@ -441,6 +426,130 @@ class PatientService {
 
   async deleteDentalHistory(id) {
     return await patientRepository.deleteDentalHistory(id);
+  }
+
+  /**
+   * Obtiene las imágenes y radiografías de un paciente.
+   * @param {number} patientId
+   * @param {object} filters
+   * @returns {Promise<Array>}
+   */
+  async getImages(patientId, filters = {}) {
+    const patient = await patientRepository.findById(patientId);
+    if (!patient) {
+      throw new AppError('Paciente no encontrado.', 404);
+    }
+    return await patientRepository.getImages(patientId, filters);
+  }
+
+  /**
+   * Sube una nueva imagen o radiografía para el paciente.
+   * @param {number} patientId
+   * @param {object} file
+   * @param {object} body
+   * @param {number} userId
+   * @returns {Promise<object>}
+   */
+  async addImage(patientId, file, body = {}, userId = null) {
+    const patient = await patientRepository.findById(patientId);
+    if (!patient) {
+      throw new AppError('Paciente no encontrado.', 404);
+    }
+    if (!file) {
+      throw new AppError('No se ha proporcionado ningún archivo de imagen.', 400);
+    }
+
+    const validCategories = ['radiografia', 'fotografia', 'panoramica', 'periapical', 'otro'];
+    const category = validCategories.includes(body.category) ? body.category : 'radiografia';
+    const toothNumber = body.tooth_number ? parseInt(body.tooth_number, 10) : null;
+
+    return await patientRepository.addImage({
+      patientId,
+      fileName: file.filename,
+      originalName: file.originalname,
+      filePath: `/uploads/${file.filename}`,
+      fileSize: file.size,
+      mimeType: file.mimetype,
+      category,
+      description: body.description || null,
+      toothNumber: isNaN(toothNumber) ? null : toothNumber,
+      uploadedBy: userId,
+    });
+  }
+
+  /**
+   * Elimina una imagen del paciente.
+   * @param {number} patientId
+   * @param {number} imageId
+   * @returns {Promise<object>}
+   */
+  async deleteImage(patientId, imageId) {
+    const image = await patientRepository.getImageById(patientId, imageId);
+    if (!image) {
+      throw new AppError('Imagen no encontrada o no pertenece al paciente.', 404);
+    }
+    return await patientRepository.deleteImage(patientId, imageId);
+  }
+
+  /**
+   * Obtiene los documentos del paciente con paginación.
+   * @param {number} patientId
+   * @param {object} options
+   * @returns {Promise<{ rows: Array, total: number }>}
+   */
+  async getDocuments(patientId, options = {}) {
+    const patient = await patientRepository.findById(patientId);
+    if (!patient) {
+      throw new AppError('Paciente no encontrado.', 404);
+    }
+    return await patientRepository.getDocuments(patientId, options);
+  }
+
+  /**
+   * Sube un nuevo documento para el paciente.
+   * @param {number} patientId
+   * @param {object} file
+   * @param {object} body
+   * @param {number} userId
+   * @returns {Promise<object>}
+   */
+  async addDocument(patientId, file, body = {}, userId = null) {
+    const patient = await patientRepository.findById(patientId);
+    if (!patient) {
+      throw new AppError('Paciente no encontrado.', 404);
+    }
+    if (!file) {
+      throw new AppError('No se ha proporcionado ningún archivo de documento.', 400);
+    }
+
+    const validCategories = ['consentimiento', 'receta', 'referencia', 'laboratorio', 'otro'];
+    const category = validCategories.includes(body.category) ? body.category : 'otro';
+
+    return await patientRepository.addDocument({
+      patientId,
+      fileName: file.filename,
+      originalName: file.originalname,
+      filePath: `/uploads/${file.filename}`,
+      fileSize: file.size,
+      mimeType: file.mimetype,
+      category,
+      description: body.description || null,
+      uploadedBy: userId,
+    });
+  }
+
+  /**
+   * Elimina un documento del paciente.
+   * @param {number} patientId
+   * @param {number} docId
+   * @returns {Promise<object>}
+   */
+  async deleteDocument(patientId, docId) {
+    const document = await patientRepository.getDocumentById(patientId, docId);
+    if (!document) {
+      throw new AppError('Documento no encontrado o no pertenece al paciente.', 404);
+    }
+    return await patientRepository.deleteDocument(patientId, docId);
   }
 }
 

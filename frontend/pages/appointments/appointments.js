@@ -381,7 +381,14 @@ export class Appointments {
           <tr>
             <td><strong>${formatDate(app.appointment_date)}</strong></td>
             <td>${formatTime(app.start_time)} - ${formatTime(app.end_time)}</td>
-            <td><a href="#/patients/${app.patient_id}" style="color: var(--primary-600); font-weight: 600; text-decoration: underline;">${app.patient_name}</a></td>
+            <td>
+              <a href="#/patients/${app.patient_id}" style="color: var(--primary-600); font-weight: 600; text-decoration: underline;">${app.patient_name}</a>
+              ${app.has_medical_alerts ? `
+                <span class="badge" style="background: #fee2e2; color: #991b1b; border: 1px solid #f87171; font-size: 10px; margin-left: 6px; font-weight: 700; padding: 1px 6px;" title="⚠️ ALERTA MÉDICA: ${this.escapeHtml(app.patient_allergies || '')} ${app.patient_medical_conditions ? '| ' + this.escapeHtml(app.patient_medical_conditions) : ''}">
+                  ⚠️ Alerta Médica
+                </span>
+              ` : ''}
+            </td>
             <td>${app.doctor_name}</td>
             <td>${app.treatment_name || 'Consulta general'}</td>
             <td><span class="badge" style="background-color: ${app.status_color}; color: white;">${app.status_label}</span></td>
@@ -601,8 +608,9 @@ export class Appointments {
         html += `<div class="weekend-badge" style="font-size: 8px; color: #16a34a; font-weight: 600; margin-bottom: 1px;">🟢 Abierto</div>`;
       }
       events.slice(0, maxVisible).forEach(ev => {
-        html += `<div class="calendar-event ${ev.status_name || ''}" title="${ev.patient_name} — ${formatTime(ev.start_time)}" data-id="${ev.id}" data-patient-id="${ev.patient_id}" style="background-color: ${ev.status_color}; color: #fff; border-radius: 4px; padding: 1px 6px; margin: 1px 0; font-size: 11px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-          ${formatTime(ev.start_time)} ${ev.patient_name}
+        const hasAlert = ev.has_medical_alerts || ev.patient_allergies || ev.patient_medical_conditions;
+        html += `<div class="calendar-event ${ev.status_name || ''}" title="${hasAlert ? '⚠️ ALERTA MÉDICA | ' : ''}${ev.patient_name} — ${formatTime(ev.start_time)}" data-id="${ev.id}" data-patient-id="${ev.patient_id}" style="background-color: ${ev.status_color}; color: #fff; border-radius: 4px; padding: 1px 6px; margin: 1px 0; font-size: 11px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+          ${hasAlert ? '<span style="color:#fef08a;font-weight:bold;">⚠️</span> ' : ''}${formatTime(ev.start_time)} ${ev.patient_name}
         </div>`;
       });
       if (events.length > maxVisible) {
@@ -732,7 +740,7 @@ export class Appointments {
                 <div class="db-wg-event sub-slot-event" data-id="${appt.id}" data-patient-id="${appt.patient_id || ''}" style="background-color: color-mix(in srgb, ${docColor} 15%, var(--color-surface)) !important; border: 1px solid color-mix(in srgb, ${docColor} 35%, var(--color-border-light)) !important; border-radius: var(--radius-sm); padding: 3px 4px; display: flex; flex-direction: column; justify-content: space-between; min-height: 36px; flex: 1; min-width: 0; cursor: pointer;" title="Cita: ${patientName} (${timeRange}) | ${cabinetLabel ? 'Gabinete: ' + cabinetLabel + ' | ' : ''}${treatmentLabel ? 'Tratamiento: ' + treatmentLabel : ''} con Dr/a. ${d.first_name} ${d.last_name}">
                   <div>
                     <div class="db-wg-event-patient" style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 2px;">
-                      <span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 10px); font-size: ${isMulti ? '8px' : '9px'}; color: var(--color-text);">${formatTime(appt.start_time)} ${patientName}</span>
+                      <span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 10px); font-size: ${isMulti ? '8px' : '9px'}; color: var(--color-text);">${formatTime(appt.start_time)} ${appt.has_medical_alerts ? '<span style="color:#dc2626;font-weight:bold;" title="⚠️ ALERTA MÉDICA">⚠️</span> ' : ''}${patientName}</span>
                       <span style="width: 7px; height: 7px; border-radius: 50%; background: ${appt.status_color || '#0891b2'}; border: 1.5px solid #fff; display: inline-block; flex-shrink: 0;" title="${appt.status_label || appt.status_name}"></span>
                     </div>
                     <div style="display: flex; gap: 2px; align-items: center; flex-wrap: nowrap; overflow: hidden; margin-top: 1px;">
@@ -931,7 +939,7 @@ export class Appointments {
               <div class="cal-dg-event sub-slot-event" data-id="${appt.id}" data-patient-id="${appt.patient_id || ''}" style="background-color: color-mix(in srgb, ${docColor} 15%, var(--color-surface)) !important; border: 1.5px solid color-mix(in srgb, ${docColor} 40%, var(--color-border-light)) !important; border-radius: var(--radius-sm); padding: 4px 6px; display: flex; flex-direction: column; justify-content: space-between; min-height: 48px; flex: 1; min-width: 0; cursor: pointer;" title="Cita: ${patientName} (${timeRange}) | ${cabinetLabel ? 'Gabinete: ' + cabinetLabel + ' | ' : ''}${treatmentLabel ? 'Tratamiento: ' + treatmentLabel : ''} con Dr/a. ${d.first_name} ${d.last_name}">
                 <div>
                   <div class="cal-dg-event-patient" style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 4px;">
-                    <span style="font-weight: 700; font-size: ${isMulti ? '10px' : '11px'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--color-text);">${formatTime(appt.start_time)} ${patientName}</span>
+                    <span style="font-weight: 700; font-size: ${isMulti ? '10px' : '11px'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--color-text);">${formatTime(appt.start_time)} ${appt.has_medical_alerts ? '<span style="color:#dc2626;font-weight:bold;" title="⚠️ ALERTA MÉDICA">⚠️</span> ' : ''}${patientName}</span>
                     <span style="width: 8px; height: 8px; border-radius: 50%; background: ${appt.status_color || '#0891b2'}; border: 1.5px solid #fff; display: inline-block; flex-shrink: 0;" title="${appt.status_label || appt.status_name}"></span>
                   </div>
                   <div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap; margin-top: 2px;">

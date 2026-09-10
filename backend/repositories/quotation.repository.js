@@ -178,7 +178,10 @@ class QuotationRepository extends BaseRepository {
               p.dni AS patient_dni,
               p.email AS patient_email,
               p.phone AS patient_phone,
-              CONCAT(u.first_name, ' ', u.last_name) AS doctor_name
+              p.address AS patient_address,
+              CONCAT(u.first_name, ' ', u.last_name) AS doctor_name,
+              d.specialty AS doctor_specialty,
+              d.license_number AS doctor_license
        FROM quotations q
        INNER JOIN patients p ON q.patient_id = p.id
        LEFT JOIN doctors d ON q.doctor_id = d.id

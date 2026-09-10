@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node tests/run_all_tests.js",
+    "test": "node tests/run_test_suite.js",
     "migrate": "node database/migrations/runner.js",
     "seed": "node database/seeders/runner.js",
     "setup": "npm run migrate && npm run seed"
@@ -22,6 +22,8 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
+    "pdfkit": "^0.20.2",
+    "pdfkit-table": "^0.2.11",
     "pg": "^8.13.1",
     "uuid": "^11.0.5"
   },

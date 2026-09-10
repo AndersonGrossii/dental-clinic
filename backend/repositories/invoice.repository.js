@@ -131,10 +131,12 @@ class InvoiceRepository extends BaseRepository {
               p.dni AS patient_dni,
               p.email AS patient_email,
               p.phone AS patient_phone,
+              p.address AS patient_address,
               CONCAT(u.first_name, ' ', u.last_name) AS doctor_name,
               u.first_name AS doctor_first_name,
               u.last_name AS doctor_last_name,
-              d.specialty AS doctor_specialty
+              d.specialty AS doctor_specialty,
+              d.license_number AS doctor_license
        FROM invoices i
        INNER JOIN patients p ON i.patient_id = p.id
        LEFT JOIN doctors d ON i.doctor_id = d.id

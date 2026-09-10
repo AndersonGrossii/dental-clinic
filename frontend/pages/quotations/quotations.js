@@ -11,6 +11,7 @@ import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
 import state from '../../scripts/state.js';
 import { formatDate, formatCurrency } from '../../utils/helpers.js';
+import pdfService from '../../services/pdf.service.js';
 
 const STATUS_LABELS = {
   borrador: 'Borrador',
@@ -182,6 +183,9 @@ export class Quotations {
             <button type="button" class="btn btn-sm btn-primary edit-quote-btn" data-id="${q.id}" title="Gestionar ítems, estados y cobros del presupuesto">
               ⚙️ Gestionar / Cobrar
             </button>
+            <button type="button" class="btn btn-sm btn-outline download-pdf-quote-btn" data-id="${q.id}" data-number="${q.quote_number}" title="Descargar Presupuesto en PDF" style="border-color: var(--primary-600); color: var(--primary-700); font-weight: 600;">
+              📥 PDF
+            </button>
             <button type="button" class="btn btn-sm btn-outline view-quote-btn" data-id="${q.id}" title="Ver / Imprimir Cotización">
               👁 Imprimir
             </button>
@@ -252,9 +256,14 @@ export class Quotations {
         return;
       }
 
-      const actionBtn = e.target.closest('.view-quote-btn, .manage-items-btn, .change-status-btn, .pay-quote-btn, .convert-appointment-btn, .convert-invoice-btn, .edit-quote-btn, .delete-quote-btn');
+      const actionBtn = e.target.closest('.view-quote-btn, .download-pdf-quote-btn, .manage-items-btn, .change-status-btn, .pay-quote-btn, .convert-appointment-btn, .convert-invoice-btn, .edit-quote-btn, .delete-quote-btn');
       if (actionBtn) {
         const id = actionBtn.getAttribute('data-id');
+        if (actionBtn.classList.contains('download-pdf-quote-btn')) {
+          const num = actionBtn.getAttribute('data-number');
+          pdfService.downloadQuotation(id, num);
+          return;
+        }
         if (actionBtn.classList.contains('view-quote-btn')) {
           this.showViewOptionsModal(id);
         }
@@ -962,7 +971,7 @@ export class Quotations {
           </td>
           <td style="vertical-align: middle;">
             <div class="treatment-autocomplete-wrapper">
-              <input type="text" class="form-input quote-item-desc" placeholder="Buscar o escribir tratamiento..." value="${item.description || ''}" autocomplete="off" required style="padding: 6px 10px; font-size: 13px;" />
+              <input type="text" class="form-input quote-item-desc" placeholder="Buscar o escribir tratamiento..." value="${item.description || ''}" autocomplete="off" required style="padding: 8px 12px; font-size: 13px; width: 100%; min-width: 280px;" />
               <ul class="treatment-autocomplete-list"></ul>
             </div>
           </td>
@@ -1060,12 +1069,12 @@ export class Quotations {
             Seleccione la casilla <strong>[✓ Pagar]</strong> para cobrar tratamientos en este mismo momento.
           </div>
 
-          <div class="table-container" style="overflow-x: auto; border: 1px solid var(--border-color); border-radius: var(--radius-md);">
-            <table class="table" style="margin: 0; min-width: 820px;" id="quote-items-table">
+          <div class="table-container quote-items-table-container" id="quote-items-table-container" style="overflow-x: auto; border: 1px solid var(--border-color); border-radius: var(--radius-md); min-height: 380px; position: relative; background: var(--color-surface, #fff); margin-bottom: var(--space-3); transition: min-height 0.25s ease;">
+            <table class="table" style="margin: 0; min-width: 960px;" id="quote-items-table">
               <thead>
                 <tr style="background: var(--gray-50);">
                   <th style="width: 70px; text-align: center;" title="Cobrar ahora">Pagar</th>
-                  <th>Tratamiento / Concepto <span style="color: var(--danger-500);">*</span></th>
+                  <th style="min-width: 320px;">Tratamiento / Concepto <span style="color: var(--danger-500);">*</span></th>
                   <th style="width: 90px; text-align: center;">Pieza #</th>
                   <th style="width: 75px; text-align: center;">Cant.</th>
                   <th style="width: 105px; text-align: right;">Precio ($)</th>
@@ -1165,41 +1174,66 @@ export class Quotations {
     // Defer initialization for autocomplete and interactions
     setTimeout(() => {
       // ---- Inject CSS for autocomplete ----
-      if (!document.getElementById('treatment-autocomplete-styles')) {
-        const style = document.createElement('style');
+      let style = document.getElementById('treatment-autocomplete-styles');
+      if (!style) {
+        style = document.createElement('style');
         style.id = 'treatment-autocomplete-styles';
-        style.textContent = `
-          .treatment-autocomplete-wrapper { position: relative; width: 100%; min-width: 160px; }
-          .treatment-autocomplete-list {
-            display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 1050;
-            max-height: 220px; overflow-y: auto; margin: 4px 0 0 0; padding: 0; list-style: none;
-            background: var(--color-surface, #fff); border: 1px solid var(--color-border, #ddd);
-            border-radius: var(--radius-md, 8px); box-shadow: 0 8px 24px rgba(0,0,0,.15);
-          }
-          [data-theme='dark'] .treatment-autocomplete-list {
-            background: var(--gray-900, #0f172a); border-color: var(--gray-700, #334155);
-          }
-          .treatment-autocomplete-list .autocomplete-item {
-            display: flex; align-items: center; gap: 8px; padding: 10px 14px; cursor: pointer;
-            font-size: var(--text-sm, 0.875rem); border-bottom: 1px solid var(--color-border-light, #eee);
-            transition: background .15s;
-          }
-          .treatment-autocomplete-list .autocomplete-item:last-child { border-bottom: none; }
-          .treatment-autocomplete-list .autocomplete-item:hover,
-          .treatment-autocomplete-list .autocomplete-item.active { background: var(--primary-50, #eef2ff); }
-          [data-theme='dark'] .treatment-autocomplete-list .autocomplete-item:hover,
-          [data-theme='dark'] .treatment-autocomplete-list .autocomplete-item.active { background: var(--gray-800, #1e293b); }
-          .treatment-autocomplete-list .treatment-name { flex: 1; font-weight: 500; color: var(--color-text, #333); }
-          .treatment-autocomplete-list .treatment-price { font-weight: 600; color: var(--success-600, #16a34a); white-space: nowrap; }
-          .treatment-autocomplete-list .no-results { padding: 12px 14px; color: var(--color-text-secondary, #999); font-style: italic; text-align: center; }
-          .patient-item-row { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 10px; }
-          .patient-item-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-          .patient-item-name { font-weight: 600; color: var(--color-text); font-size: 13px; }
-          .patient-item-sub { font-size: 11px; color: var(--color-text-secondary); }
-          .patient-item-badge { font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: rgba(15, 134, 236, 0.12); color: var(--primary-600); flex-shrink: 0; }
-        `;
         document.head.appendChild(style);
       }
+      style.textContent = `
+        .treatment-autocomplete-wrapper { position: relative; width: 100%; min-width: 260px; }
+        .treatment-autocomplete-list {
+          display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 9999;
+          width: max-content; min-width: 480px; max-width: 650px; max-height: 320px; overflow-y: auto;
+          margin: 0; padding: 4px 0; list-style: none;
+          background: var(--color-surface, #ffffff); border: 1px solid var(--color-border, #cbd5e1);
+          border-radius: var(--radius-lg, 10px); box-shadow: 0 16px 36px rgba(0,0,0,.2), 0 4px 12px rgba(0,0,0,.08);
+        }
+        [data-theme='dark'] .treatment-autocomplete-list {
+          background: var(--gray-900, #0f172a); border-color: var(--gray-700, #334155);
+          box-shadow: 0 16px 36px rgba(0,0,0,.45);
+        }
+        .treatment-autocomplete-list .autocomplete-header {
+          padding: 8px 14px; background: var(--gray-50, #f8fafc); border-bottom: 1px solid var(--color-border-light, #e2e8f0);
+          font-size: 11px; font-weight: 700; color: var(--color-text-secondary, #64748b);
+          display: flex; justify-content: space-between; align-items: center; text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        [data-theme='dark'] .treatment-autocomplete-list .autocomplete-header {
+          background: var(--gray-800, #1e293b); border-bottom-color: var(--gray-700, #334155);
+        }
+        .treatment-autocomplete-list .autocomplete-item {
+          display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; cursor: pointer;
+          font-size: var(--text-sm, 0.875rem); border-bottom: 1px solid var(--color-border-light, #f1f5f9);
+          transition: background .15s;
+        }
+        .treatment-autocomplete-list .autocomplete-item:last-child { border-bottom: none; }
+        .treatment-autocomplete-list .autocomplete-item:hover,
+        .treatment-autocomplete-list .autocomplete-item.active { background: var(--primary-50, #eef2ff); }
+        [data-theme='dark'] .treatment-autocomplete-list .autocomplete-item:hover,
+        [data-theme='dark'] .treatment-autocomplete-list .autocomplete-item.active { background: var(--gray-800, #1e293b); }
+        .treatment-autocomplete-list .treatment-info { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+        .treatment-autocomplete-list .treatment-title-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        .treatment-autocomplete-list .treatment-name { font-weight: 600; color: var(--color-text, #1e293b); font-size: 13px; }
+        .treatment-autocomplete-list .treatment-code-tag {
+          font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px;
+          background: var(--gray-100, #f1f5f9); color: var(--gray-700, #334155); border: 1px solid var(--gray-300, #cbd5e1);
+        }
+        .treatment-autocomplete-list .treatment-cat-sub { font-size: 11px; color: var(--color-text-secondary, #64748b); }
+        .treatment-autocomplete-list .treatment-price-badge {
+          font-weight: 700; font-size: 13px; color: #15803d; background: #dcfce7;
+          border: 1px solid #86efac; padding: 3px 8px; border-radius: 6px; white-space: nowrap;
+        }
+        [data-theme='dark'] .treatment-autocomplete-list .treatment-price-badge {
+          background: rgba(34, 197, 94, 0.15); color: #4ade80; border-color: rgba(34, 197, 94, 0.3);
+        }
+        .treatment-autocomplete-list .no-results { padding: 18px 16px; color: var(--color-text-secondary, #64748b); text-align: center; }
+        .patient-item-row { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 10px; }
+        .patient-item-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+        .patient-item-name { font-weight: 600; color: var(--color-text); font-size: 13px; }
+        .patient-item-sub { font-size: 11px; color: var(--color-text-secondary); }
+        .patient-item-badge { font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: rgba(15, 134, 236, 0.12); color: var(--primary-600); flex-shrink: 0; }
+        .quote-items-table-container { min-height: 380px; overflow-x: auto; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--color-surface, #fff); position: relative; transition: min-height 0.25s ease; }
+      `;
 
       // Patient autocomplete
       const patientSearchInput = document.getElementById('quote-patient-search');
@@ -1316,51 +1350,141 @@ export class Quotations {
         input._acInitialized = true;
         const dropdown = wrapper.querySelector('.treatment-autocomplete-list');
         const row = input.closest('.quote-item-table-row');
+        const tableContainer = document.getElementById('quote-items-table-container');
         let activeIdx = -1;
+        let currentMatches = [];
+
+        const updateContainerHeight = (isOpen) => {
+          if (!tableContainer) return;
+          if (isOpen) {
+            const rowTop = row ? (row.offsetTop || 0) : 0;
+            const targetMinHeight = Math.max(380, rowTop + 360);
+            tableContainer.style.minHeight = targetMinHeight + 'px';
+          } else {
+            const anyOtherOpen = tableContainer.querySelector('.treatment-autocomplete-list[style*="display: block"]');
+            if (!anyOtherOpen) {
+              tableContainer.style.minHeight = '380px';
+            }
+          }
+        };
+
+        const selectTreatment = (selected) => {
+          if (!selected) return;
+          input.value = selected.name;
+          if (row) {
+            const priceInput = row.querySelector('.quote-item-price');
+            if (priceInput) priceInput.value = parseFloat(selected.default_price || selected.price || 0).toFixed(2);
+            recalculateAll();
+          }
+          dropdown.style.display = 'none';
+          updateContainerHeight(false);
+        };
+
+        const highlightActiveItem = () => {
+          const items = dropdown.querySelectorAll('.autocomplete-item');
+          items.forEach((item, idx) => {
+            if (idx === activeIdx) {
+              item.classList.add('active');
+              item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            } else {
+              item.classList.remove('active');
+            }
+          });
+        };
 
         const showResults = () => {
           const term = input.value.toLowerCase().trim();
-          if (!term) { dropdown.style.display = 'none'; return; }
+          
+          currentMatches = term
+            ? treatmentList.filter(t =>
+                (t.name || '').toLowerCase().includes(term) ||
+                (t.code && t.code.toLowerCase().includes(term)) ||
+                (t.category_name && t.category_name.toLowerCase().includes(term))
+              ).slice(0, 15)
+            : treatmentList.slice(0, 15);
 
-          const matches = treatmentList.filter(t =>
-            t.name.toLowerCase().includes(term) ||
-            (t.code && t.code.toLowerCase().includes(term))
-          ).slice(0, 10);
-
-          if (matches.length === 0) {
-            dropdown.innerHTML = '<li class="no-results">Sin resultados en catálogo</li>';
+          if (currentMatches.length === 0) {
+            dropdown.innerHTML = `
+              <li class="no-results">
+                <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px;">🔍 Sin resultados para "${term}"</div>
+                <div style="font-size: 11px;">Escribe libremente la descripción del tratamiento personalizado.</div>
+              </li>
+            `;
             dropdown.style.display = 'block';
             activeIdx = -1;
+            updateContainerHeight(true);
             return;
           }
 
-          dropdown.innerHTML = matches.map((t, idx) => `
+          const headerHtml = `
+            <li class="autocomplete-header">
+              <span>${term ? `Resultados del catálogo (${currentMatches.length})` : `Catálogo de tratamientos (${currentMatches.length})`}</span>
+              <span style="font-size: 10px; opacity: 0.85;">↓ Selecciona con flechas o clic</span>
+            </li>
+          `;
+
+          const itemsHtml = currentMatches.map((t, idx) => `
             <li class="autocomplete-item" data-idx="${idx}">
-              <span class="treatment-name">${t.name}</span>
-              <span class="treatment-price">${formatCurrency(t.default_price || 0)}</span>
+              <div class="treatment-info">
+                <div class="treatment-title-row">
+                  <span class="treatment-name">${t.name}</span>
+                  ${t.code ? `<span class="treatment-code-tag">${t.code}</span>` : ''}
+                </div>
+                ${t.category_name ? `<span class="treatment-cat-sub">📁 ${t.category_name}</span>` : ''}
+              </div>
+              <span class="treatment-price-badge">${formatCurrency(t.default_price || t.price || 0)}</span>
             </li>
           `).join('');
+
+          dropdown.innerHTML = headerHtml + itemsHtml;
           dropdown.style.display = 'block';
           activeIdx = -1;
+          updateContainerHeight(true);
 
           dropdown.querySelectorAll('.autocomplete-item').forEach((li, idx) => {
             li.addEventListener('mousedown', (e) => {
               e.preventDefault();
-              const selected = matches[idx];
-              input.value = selected.name;
-              if (row) {
-                const priceInput = row.querySelector('.quote-item-price');
-                if (priceInput) priceInput.value = parseFloat(selected.default_price || 0).toFixed(2);
-                recalculateAll();
-              }
-              dropdown.style.display = 'none';
+              selectTreatment(currentMatches[idx]);
+            });
+            li.addEventListener('mouseenter', () => {
+              activeIdx = idx;
+              highlightActiveItem();
             });
           });
         };
 
+        // Keyboard navigation
+        input.addEventListener('keydown', (e) => {
+          if (dropdown.style.display === 'block' && currentMatches.length > 0) {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              activeIdx = (activeIdx + 1) % currentMatches.length;
+              highlightActiveItem();
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              activeIdx = (activeIdx - 1 + currentMatches.length) % currentMatches.length;
+              highlightActiveItem();
+            } else if (e.key === 'Enter') {
+              if (activeIdx >= 0 && activeIdx < currentMatches.length) {
+                e.preventDefault();
+                selectTreatment(currentMatches[activeIdx]);
+              }
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              dropdown.style.display = 'none';
+              updateContainerHeight(false);
+            }
+          }
+        });
+
         input.addEventListener('input', showResults);
-        input.addEventListener('focus', () => { if (input.value.trim()) showResults(); });
-        input.addEventListener('blur', () => { setTimeout(() => { dropdown.style.display = 'none'; }, 150); });
+        input.addEventListener('focus', showResults);
+        input.addEventListener('blur', () => {
+          setTimeout(() => {
+            dropdown.style.display = 'none';
+            updateContainerHeight(false);
+          }, 200);
+        });
       };
 
       // ---- Dynamic Recalculations ----
@@ -1596,7 +1720,7 @@ export class Quotations {
             </td>
             <td style="vertical-align: middle;">
               <div class="treatment-autocomplete-wrapper">
-                <input type="text" class="form-input quote-item-desc" placeholder="Buscar o escribir tratamiento..." value="" autocomplete="off" required style="padding: 6px 10px; font-size: 13px;" />
+                <input type="text" class="form-input quote-item-desc" placeholder="Buscar o escribir tratamiento..." value="" autocomplete="off" required style="padding: 8px 12px; font-size: 13px; width: 100%; min-width: 280px;" />
                 <ul class="treatment-autocomplete-list"></ul>
               </div>
             </td>
@@ -1935,6 +2059,14 @@ export class Quotations {
             <span style="font-size: 14px; font-weight: 600; color: var(--primary-700);">🖨️ Ver Presupuesto</span>
           </button>
 
+          <button id="download-opt-quote-btn" class="btn btn-outline btn-md" style="display: flex; align-items: center; justify-content: space-between; text-align: left; padding: 14px 16px; border: 1px solid var(--success-300); background: var(--success-50, #f0fdf4); border-radius: var(--radius-md); cursor: pointer;">
+            <div>
+              <div style="font-weight: 700; font-size: 15px; color: var(--success-900);">📥 Descargar Presupuesto en PDF</div>
+              <div style="font-size: 12px; color: var(--success-700); margin-top: 2px;">Generar y guardar archivo PDF oficial con validez y desglose clínico</div>
+            </div>
+            <span style="font-size: 14px; font-weight: 600; color: var(--success-700);">📥 Descargar PDF</span>
+          </button>
+
           <div>
             <h4 style="font-size: 14px; margin: 10px 0 8px 0; color: var(--text-primary); font-weight: 600;">
               🧾 Comprobantes de Pago Vinculados (${linkedDocs.length}):
@@ -1965,6 +2097,13 @@ export class Quotations {
     if (!overlay) return;
 
     overlay.addEventListener('click', async (e) => {
+      const dlQuoteBtn = e.target.closest('#download-opt-quote-btn');
+      if (dlQuoteBtn) {
+        Modal.close();
+        pdfService.downloadQuotation(quotationId, q.quote_number);
+        return;
+      }
+
       const quoteBtn = e.target.closest('#view-opt-quote-btn');
       if (quoteBtn) {
         Modal.close();
@@ -2029,7 +2168,10 @@ export class Quotations {
           </style>
         </head>
         <body>
-          <button class="print-btn" id="print-btn">🖨️ Imprimir / Guardar PDF</button>
+          <div style="display: flex; justify-content: center; gap: 12px; margin: 20px auto;" class="no-print">
+            <button class="print-btn" id="print-btn" style="margin: 0;">🖨️ Imprimir</button>
+            <button class="print-btn download-btn" id="download-pdf-btn" style="margin: 0; background: #16a34a;">📥 Descargar PDF Oficial</button>
+          </div>
 
           <div class="header">
             <img src="${logoUrl}" alt="Logo" style="height: 60px; width: auto; object-fit: contain;" id="print-logo" />
@@ -2098,8 +2240,10 @@ export class Quotations {
         </html>
       `);
       printWindow.document.close();
-      const printBtn = printWindow.document.querySelector('.print-btn');
+      const printBtn = printWindow.document.querySelector('#print-btn');
       if (printBtn) printBtn.addEventListener('click', () => printWindow.print());
+      const dlBtn = printWindow.document.querySelector('#download-pdf-btn');
+      if (dlBtn) dlBtn.addEventListener('click', () => pdfService.downloadQuotation(id, quote.quote_number));
       const logo = printWindow.document.querySelector('#print-logo');
       if (logo) logo.addEventListener('error', () => { logo.style.display = 'none'; });
     } catch {
