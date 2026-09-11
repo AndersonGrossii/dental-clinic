@@ -18,6 +18,8 @@ router.get('/revenue', managementOnly, controller.getRevenueReport);
 router.get('/appointments', managementOnly, controller.getAppointmentReport);
 router.get('/patients', managementOnly, controller.getPatientReport);
 router.get('/treatments', managementOnly, controller.getTreatmentReport);
+router.get('/invoices-receipts-summary', managementOnly, controller.getInvoiceReceiptSummaryReport);
+router.get('/export/pdf/:type', managementOnly, controller.exportPdf);
 router.get('/export/:type', managementOnly, controller.exportCsv);
 
 export default router;

@@ -290,6 +290,225 @@ class ReportService {
 
     return { role, stats: {} };
   }
+
+  /**
+   * Reporte Resumen de Facturas y Recibos.
+   * Proporciona listados separados de Facturas y Recibos con identificación de cliente,
+   * método de pago, totales y desglose por método de pago.
+   * Estrictamente READ-ONLY y con aislamiento multi-clínica.
+   *
+   * @param {string} [startDate] - Fecha inicial en formato YYYY-MM-DD
+   * @param {string} [endDate] - Fecha final en formato YYYY-MM-DD
+   * @returns {Promise<object>} { invoices, receipts, totals }
+   */
+  async getInvoiceReceiptSummaryReport(startDate, endDate) {
+    const invParams = [];
+    let invDateCond = '';
+
+    if (startDate && typeof startDate === 'string' && startDate.trim()) {
+      invParams.push(startDate.trim());
+      invDateCond += ` AND DATE(i.created_at) >= $${invParams.length}`;
+    }
+    if (endDate && typeof endDate === 'string' && endDate.trim()) {
+      invParams.push(endDate.trim());
+      invDateCond += ` AND DATE(i.created_at) <= $${invParams.length}`;
+    }
+
+    const iCond = this.getClinicCondition('i');
+
+    // 1. Consulta de Facturas Oficiales
+    const invoicesResult = await query(
+      `SELECT 
+         i.id,
+         i.invoice_number,
+         i.document_type,
+         i.created_at AS date,
+         i.total,
+         i.subtotal,
+         i.tax_amount,
+         i.status,
+         i.patient_id,
+         p.first_name AS patient_first_name,
+         p.last_name AS patient_last_name,
+         TRIM(CONCAT(p.first_name, ' ', p.last_name)) AS customer_name,
+         COALESCE(NULLIF(TRIM(p.dni), ''), NULLIF(TRIM(p.passport), ''), 'No registrado') AS patient_identification,
+         p.dni AS patient_dni,
+         p.passport AS patient_passport,
+         COALESCE(
+           (
+             SELECT STRING_AGG(DISTINCT pm.label, ', ' ORDER BY pm.label)
+             FROM payments pay
+             INNER JOIN payment_methods pm ON pay.payment_method_id = pm.id
+             WHERE (
+               pay.invoice_id = i.id 
+               OR (i.receipt_id IS NOT NULL AND pay.invoice_id = i.receipt_id)
+               OR pay.invoice_id IN (SELECT rec.id FROM invoices rec WHERE rec.receipt_id = i.id AND rec.deleted_at IS NULL)
+             )
+             AND pay.deleted_at IS NULL
+           ),
+           'No registrado'
+         ) AS payment_method
+       FROM invoices i
+       INNER JOIN patients p ON i.patient_id = p.id
+       WHERE i.deleted_at IS NULL
+         AND COALESCE(i.document_type, CASE WHEN i.invoice_number LIKE 'REC%' THEN 'recibo' ELSE 'factura' END) = 'factura'
+         ${invDateCond}
+         ${iCond}
+       ORDER BY i.created_at DESC, i.id DESC`,
+      invParams
+    );
+
+    // 2. Consulta de Recibos Provisionales
+    const receiptsResult = await query(
+      `SELECT 
+         i.id,
+         i.invoice_number,
+         i.document_type,
+         i.created_at AS date,
+         i.total,
+         i.subtotal,
+         i.tax_amount,
+         i.status,
+         i.patient_id,
+         p.first_name AS patient_first_name,
+         p.last_name AS patient_last_name,
+         TRIM(CONCAT(p.first_name, ' ', p.last_name)) AS customer_name,
+         COALESCE(NULLIF(TRIM(p.dni), ''), NULLIF(TRIM(p.passport), ''), 'No registrado') AS patient_identification,
+         p.dni AS patient_dni,
+         p.passport AS patient_passport,
+         COALESCE(
+           (
+             SELECT STRING_AGG(DISTINCT pm.label, ', ' ORDER BY pm.label)
+             FROM payments pay
+             INNER JOIN payment_methods pm ON pay.payment_method_id = pm.id
+             WHERE (
+               pay.invoice_id = i.id 
+               OR pay.invoice_id IN (SELECT fac.id FROM invoices fac WHERE fac.receipt_id = i.id AND fac.deleted_at IS NULL)
+               OR (i.receipt_id IS NOT NULL AND pay.invoice_id = i.receipt_id)
+             )
+             AND pay.deleted_at IS NULL
+           ),
+           'No registrado'
+         ) AS payment_method
+       FROM invoices i
+       INNER JOIN patients p ON i.patient_id = p.id
+       WHERE i.deleted_at IS NULL
+         AND COALESCE(i.document_type, CASE WHEN i.invoice_number LIKE 'REC%' THEN 'recibo' ELSE 'factura' END) = 'recibo'
+         ${invDateCond}
+         ${iCond}
+       ORDER BY i.created_at DESC, i.id DESC`,
+      invParams
+    );
+
+    // Mapeo seguro de Facturas
+    const invoices = invoicesResult.rows.map((r) => ({
+      id: r.id,
+      date: formatDateSQL(r.date),
+      raw_date: r.date,
+      invoice_number: r.invoice_number,
+      customer_name: r.customer_name || 'No registrado',
+      patient_name: r.customer_name || 'No registrado',
+      patient_id: r.patient_id,
+      patient_identification: r.patient_identification || 'No registrado',
+      dni: r.patient_dni || null,
+      passport: r.patient_passport || null,
+      amount: parseFloat(parseFloat(r.total || 0).toFixed(2)),
+      total: parseFloat(parseFloat(r.total || 0).toFixed(2)),
+      subtotal: parseFloat(parseFloat(r.subtotal || 0).toFixed(2)),
+      tax_amount: parseFloat(parseFloat(r.tax_amount || 0).toFixed(2)),
+      payment_method: r.payment_method || 'No registrado',
+      status: r.status,
+    }));
+
+    // Mapeo seguro de Recibos
+    const receipts = receiptsResult.rows.map((r) => ({
+      id: r.id,
+      date: formatDateSQL(r.date),
+      raw_date: r.date,
+      receipt_number: r.invoice_number,
+      invoice_number: r.invoice_number,
+      customer_name: r.customer_name || 'No registrado',
+      patient_name: r.customer_name || 'No registrado',
+      patient_id: r.patient_id,
+      patient_identification: r.patient_identification || 'No registrado',
+      dni: r.patient_dni || null,
+      passport: r.patient_passport || null,
+      amount: parseFloat(parseFloat(r.total || 0).toFixed(2)),
+      total: parseFloat(parseFloat(r.total || 0).toFixed(2)),
+      subtotal: parseFloat(parseFloat(r.subtotal || 0).toFixed(2)),
+      tax_amount: parseFloat(parseFloat(r.tax_amount || 0).toFixed(2)),
+      payment_method: r.payment_method || 'No registrado',
+      status: r.status,
+    }));
+
+    // 3. Totales
+    const totalInvoices = invoices.reduce((acc, inv) => acc + inv.amount, 0);
+    const totalReceipts = receipts.reduce((acc, rec) => acc + rec.amount, 0);
+
+    // 4. Desglose por Método de Pago en el rango de fechas
+    const payParams = [];
+    let payDateCond = '';
+    if (startDate && typeof startDate === 'string' && startDate.trim()) {
+      payParams.push(startDate.trim());
+      payDateCond += ` AND DATE(pay.payment_date) >= $${payParams.length}`;
+    }
+    if (endDate && typeof endDate === 'string' && endDate.trim()) {
+      payParams.push(endDate.trim());
+      payDateCond += ` AND DATE(pay.payment_date) <= $${payParams.length}`;
+    }
+    const payCond = this.getClinicCondition('pay');
+
+    const methodResult = await query(
+      `SELECT pm.label AS method, COALESCE(SUM(pay.amount), 0) AS total
+       FROM payments pay
+       INNER JOIN payment_methods pm ON pay.payment_method_id = pm.id
+       WHERE pay.deleted_at IS NULL ${payDateCond} ${payCond}
+       GROUP BY pm.label
+       ORDER BY total DESC`,
+      payParams
+    );
+
+    let byPaymentMethod = methodResult.rows.map((r) => ({
+      method: r.method,
+      total: parseFloat(parseFloat(r.total).toFixed(2)),
+    }));
+
+    // Si la tabla payments no tuviese registros en el rango pero los documentos tienen método
+    if (byPaymentMethod.length === 0) {
+      const methodMap = {};
+      [...invoices, ...receipts].forEach((doc) => {
+        if (doc.payment_method && doc.payment_method !== 'No registrado') {
+          const methods = doc.payment_method.split(',').map((m) => m.trim());
+          const splitAmount = doc.amount / methods.length;
+          methods.forEach((m) => {
+            methodMap[m] = (methodMap[m] || 0) + splitAmount;
+          });
+        }
+      });
+      byPaymentMethod = Object.entries(methodMap)
+        .map(([method, total]) => ({
+          method,
+          total: parseFloat(total.toFixed(2)),
+        }))
+        .sort((a, b) => b.total - a.total);
+    }
+
+    return {
+      invoices,
+      receipts,
+      totals: {
+        invoices: {
+          total: parseFloat(totalInvoices.toFixed(2)),
+          count: invoices.length,
+        },
+        receipts: {
+          total: parseFloat(totalReceipts.toFixed(2)),
+          count: receipts.length,
+        },
+        byPaymentMethod,
+      },
+    };
+  }
 }
 
 export default new ReportService();

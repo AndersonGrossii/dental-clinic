@@ -4,7 +4,7 @@
 import { Router } from 'express';
 import * as controller from '../controllers/pdf.controller.js';
 import { authMiddleware } from '../middlewares/auth.middleware.js';
-import { allRoles } from '../middlewares/role.middleware.js';
+import { allRoles, managementOnly } from '../middlewares/role.middleware.js';
 
 const router = Router();
 
@@ -15,5 +15,6 @@ router.get('/invoices/:id', allRoles, controller.getInvoicePDF);
 router.get('/receipts/:id', allRoles, controller.getReceiptPDF);
 router.get('/quotations/:id', allRoles, controller.getQuotationPDF);
 router.get('/prescriptions/:id', allRoles, controller.getPrescriptionPDF);
+router.get('/reports/:type', managementOnly, controller.getReportPDF);
 
 export default router;

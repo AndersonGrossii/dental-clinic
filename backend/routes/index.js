@@ -27,6 +27,7 @@ import eventsRoutes from './events.routes.js';
 import internalChatRoutes from './internal-chat.routes.js';
 import holidayRoutes from './holiday.routes.js';
 import pdfRoutes from './pdf.routes.js';
+import promotionalPackRoutes from './promotional-pack.routes.js';
 
 const router = Router();
 
@@ -37,6 +38,7 @@ router.use('/patients', patientRoutes);
 router.use('/appointments', appointmentRoutes);
 router.use('/doctors', doctorRoutes);
 router.use('/treatments', treatmentRoutes);
+router.use('/promotional-packs', promotionalPackRoutes);
 router.use('/quotations', quotationRoutes);
 router.use('/invoices', invoiceRoutes);
 router.use('/payments', paymentRoutes);

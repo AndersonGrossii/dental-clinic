@@ -12,13 +12,18 @@ import { query, als } from '../database/pool.js';
  */
 export const authMiddleware = async (req, res, next) => {
   try {
+    let token = null;
     const authHeader = req.headers.authorization;
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return ApiResponse.error(res, 'Acceso no autorizado. Token no proporcionado.', 401);
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.split(' ')[1];
+    } else if (req.query && req.query.token) {
+      token = req.query.token;
     }
 
-    const token = authHeader.split(' ')[1];
+    if (!token) {
+      return ApiResponse.error(res, 'Acceso no autorizado. Token no proporcionado.', 401);
+    }
 
     const decoded = jwt.verify(token, config.jwt.secret);
 
@@ -47,7 +52,7 @@ export const authMiddleware = async (req, res, next) => {
     let clinicId = user.clinic_id;
     
     if (isOwner) {
-      const headerClinicId = req.headers['x-clinic-id'];
+      const headerClinicId = req.headers['x-clinic-id'] || req.query?.clinic_id || req.query?.clinicId;
       if (headerClinicId) {
         clinicId = parseInt(headerClinicId, 10);
       }

@@ -2,24 +2,68 @@
 // Servicio de Cotizaciones
 // ============================================
 import quotationRepository from '../repositories/quotation.repository.js';
+import promotionalPackService from './promotional-pack.service.js';
 import { AppError } from '../utils/errors.js';
 
 const round = (n) => parseFloat(n.toFixed(2));
 
 function processItems(items) {
-  return items.map((item) => ({
-    ...item,
-    id: item.id ? parseInt(item.id, 10) : undefined,
-    status: item.status || 'aceptado',
-    execution_status: item.execution_status || 'pendiente',
-    tooth_number: item.tooth_number || null,
-    subtotal: round(item.quantity * item.unit_price),
-    total: round(item.quantity * item.unit_price * (1 - (item.discount || 0) / 100)),
-  }));
+  return items.map((item) => {
+    const qty = parseInt(item.quantity || 1, 10) || 1;
+    const isPackHeader = Boolean(item.is_pack_header);
+    const isPackItem = Boolean(item.is_pack_item);
+
+    let unitPrice = parseFloat(item.unit_price || 0);
+    if (isPackHeader && item.pack_fixed_price !== undefined && item.pack_fixed_price !== null) {
+      unitPrice = parseFloat(item.pack_fixed_price);
+    } else if (isPackItem && !isPackHeader) {
+      unitPrice = 0.00;
+    }
+
+    const discount = parseFloat(item.discount || 0);
+    const subtotal = round(qty * unitPrice);
+    const total = round(qty * unitPrice * (1 - discount / 100));
+
+    return {
+      ...item,
+      id: item.id ? parseInt(item.id, 10) : undefined,
+      quantity: qty,
+      unit_price: unitPrice,
+      discount,
+      subtotal,
+      total,
+      status: item.status || 'aceptado',
+      execution_status: item.execution_status || 'pendiente',
+      tooth_number: item.tooth_number || null,
+      promotional_pack_id: item.promotional_pack_id ? parseInt(item.promotional_pack_id, 10) : null,
+      pack_group_id: item.pack_group_id || null,
+      pack_name: item.pack_name || null,
+      pack_fixed_price: item.pack_fixed_price !== undefined && item.pack_fixed_price !== null ? parseFloat(item.pack_fixed_price) : null,
+      is_pack_item: isPackItem,
+      is_pack_header: isPackHeader,
+    };
+  });
 }
 
 function computeTotals(processedItems, discountPct, taxRate) {
-  const subtotal = processedItems.reduce((acc, i) => acc + i.subtotal, 0);
+  let subtotal = 0;
+  const standaloneGroupsHandled = new Set();
+
+  for (const item of processedItems) {
+    if (item.pack_group_id && item.is_pack_item && !item.is_pack_header) {
+      // Si el grupo no tiene un encabezado explícito (is_pack_header), contar el precio fijo una única vez
+      const hasHeader = processedItems.some(i => i.pack_group_id === item.pack_group_id && i.is_pack_header);
+      if (!hasHeader) {
+        if (!standaloneGroupsHandled.has(item.pack_group_id)) {
+          standaloneGroupsHandled.add(item.pack_group_id);
+          subtotal += round(item.pack_fixed_price || 0);
+        }
+        continue;
+      }
+    }
+    subtotal += item.subtotal;
+  }
+
   const discountAmount = round(subtotal * (discountPct || 0) / 100);
   const taxableAmount = subtotal - discountAmount;
   const taxAmount = round(taxableAmount * (taxRate || 0) / 100);
@@ -42,6 +86,17 @@ class QuotationService {
 
   async create(data) {
     const { items, ...fields } = data;
+
+    // Validar packs si se están seleccionando en un nuevo presupuesto
+    if (Array.isArray(items)) {
+      const checkedPacks = new Set();
+      for (const it of items) {
+        if (it.promotional_pack_id && !checkedPacks.has(it.promotional_pack_id)) {
+          checkedPacks.add(it.promotional_pack_id);
+          await promotionalPackService.validatePackForQuotation(it.promotional_pack_id);
+        }
+      }
+    }
 
     const processedItems = processItems(items || []);
     const discountPct = fields.discount_percentage || 0;

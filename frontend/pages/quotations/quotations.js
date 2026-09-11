@@ -7,6 +7,7 @@ import paymentService from '../../services/payment.service.js';
 import patientService from '../../services/patient.service.js';
 import treatmentService from '../../services/treatment.service.js';
 import doctorService from '../../services/doctor.service.js';
+import promotionalPackService from '../../services/promotional-pack.service.js';
 import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
 import state from '../../scripts/state.js';
@@ -412,11 +413,21 @@ export class Quotations {
           rowStyle = 'background-color: #ffedd5 !important; border-left: 4px solid #f97316;';
         }
 
+        const isPackHdr = !!item.is_pack_header;
+        const isPackItm = !!item.is_pack_item;
+
+        let descHtml = `<strong>${item.description}</strong>`;
+        if (isPackHdr) {
+          descHtml = `<div style="display: flex; align-items: center; gap: 6px;"><span class="badge" style="background-color: #fdf2f8; color: #9d174d; border: 1px solid #fbcfe8; font-weight: 700; font-size: 11px;">🎁 Pack Promocional</span> <strong>${item.description}</strong></div>`;
+        } else if (isPackItm) {
+          descHtml = `<div style="padding-left: 18px; display: flex; align-items: center; gap: 6px;"><span style="color: #db2777; font-weight: bold; font-size: 13px;">↳</span> <span style="color: var(--text-primary);">${item.description}</span> <span class="badge" style="background-color: #f3f4f6; color: #4b5563; font-size: 10px; border: 1px solid #e5e7eb;">Incluido en pack</span></div>`;
+        }
+
         return `
         <tr class="quote-manage-item-row ${rowStateClass}" data-item-id="${item.id}" style="${rowStyle}">
           <td>
-            <strong>${item.description}</strong>
-            ${item.tooth_number ? `<span style="font-size: 11px; color: var(--text-secondary); margin-left: 6px;">(Diente #${item.tooth_number})</span>` : ''}
+            ${descHtml}
+            ${item.tooth_number ? `<span style="font-size: 11px; color: var(--text-secondary); margin-left: ${isPackItm ? '24px' : '6px'}; display: ${isPackItm ? 'block' : 'inline'};">(Pieza #${item.tooth_number})</span>` : ''}
           </td>
           <td style="text-align: center;">${item.quantity}</td>
           <td style="text-align: right;">${formatCurrency(item.unit_price)}</td>
@@ -721,13 +732,21 @@ export class Quotations {
 
     const itemsRowsHtml = unbilledItems.map((item) => {
       const isAccepted = item.status === 'aceptado';
+      const isPackHdr = !!item.is_pack_header;
+      const isPackItm = !!item.is_pack_item;
+      let descHtml = `<strong>${item.description}</strong>`;
+      if (isPackHdr) {
+        descHtml = `<span class="badge" style="background-color: #fdf2f8; color: #9d174d; border: 1px solid #fbcfe8; font-size: 10px; margin-right: 4px;">🎁 Pack</span> <strong>${item.description}</strong>`;
+      } else if (isPackItm) {
+        descHtml = `<div style="padding-left: 14px;">↳ ${item.description} <span style="font-size: 10px; color: var(--text-secondary);">(Pack)</span></div>`;
+      }
       return `
       <tr class="quote-convert-item-row" data-id="${item.id}" data-total="${item.total}">
         <td style="text-align: center;">
           <input type="checkbox" class="quote-item-checkbox" value="${item.id}" ${isAccepted ? 'checked' : ''} />
         </td>
         <td>
-          <strong>${item.description}</strong>
+          ${descHtml}
           ${item.tooth_number ? `<span style="font-size: 11px; color: var(--text-secondary); margin-left: 6px;">(Diente #${item.tooth_number})</span>` : ''}
         </td>
         <td style="text-align: center;">${item.quantity}</td>
@@ -872,17 +891,19 @@ export class Quotations {
       }
     }
 
-    // Fetch patients, doctors, treatments, and payment methods
+    // Fetch patients, doctors, treatments, payment methods, and promotional packs
     let patients = [];
     let doctors = [];
     let treatments = [];
     let paymentMethods = [];
+    let promotionalPacks = [];
     try {
-      [patients, doctors, treatments, paymentMethods] = await Promise.all([
+      [patients, doctors, treatments, paymentMethods, promotionalPacks] = await Promise.all([
         patientService.getAll({ limit: 500 }),
         doctorService.getAll(),
         treatmentService.getAll({ limit: 500, is_active: true }),
         paymentService.getMethods().catch(() => []),
+        promotionalPackService.getAll({ include_inactive: false }).catch(() => []),
       ]);
     } catch {
       // Fallback
@@ -892,6 +913,7 @@ export class Quotations {
     const doctorList = Array.isArray(doctors) ? doctors : (doctors?.data || doctors?.rows || []);
     const treatmentList = Array.isArray(treatments) ? treatments : (treatments?.data || treatments?.rows || []);
     const methodList = Array.isArray(paymentMethods) ? paymentMethods : (paymentMethods?.data || []);
+    const packList = Array.isArray(promotionalPacks) ? promotionalPacks : (promotionalPacks?.data || promotionalPacks?.rows || []);
 
     const selectedPatientId = q.patient_id || preselectedPatientId;
     let selectedPatient = selectedPatientId ? patientList.find(p => p.id == selectedPatientId) : null;
@@ -944,10 +966,21 @@ export class Quotations {
       const isFullyPaid = isAlreadyPaid;
       const isComplete = execStatus === 'realizado';
       const isUnpaid = paidAmount <= 0.001;
+      const isPackHdr = !!item.is_pack_header;
+      const isPackItm = !!item.is_pack_item;
+      const packId = item.promotional_pack_id || '';
+      const packGroupId = item.pack_group_id || '';
+      const packName = item.pack_name || '';
+      const packFixedPrice = item.pack_fixed_price !== undefined && item.pack_fixed_price !== null ? item.pack_fixed_price : '';
+      const treatmentId = item.treatment_id || '';
 
       let rowStateClass = '';
       let rowStyle = '';
-      if (isFullyPaid && isComplete) {
+      if (isPackHdr) {
+        rowStyle = 'background-color: #fdf2f8 !important; border-left: 4px solid #db2777;';
+      } else if (isPackItm) {
+        rowStyle = 'background-color: #fafafa !important; border-left: 4px solid #f472b6;';
+      } else if (isFullyPaid && isComplete) {
         rowStateClass = 'quote-item-paid-complete';
         rowStyle = 'background-color: #dcfce7 !important; border-left: 4px solid #22c55e;';
       } else if (isComplete && isUnpaid) {
@@ -959,10 +992,10 @@ export class Quotations {
       }
 
       return `
-        <tr class="quote-item-table-row ${rowStateClass}" data-item-id="${item.id || ''}" data-paid-amt="${paidAmount}" data-rem-amt="${remainingAmount}" style="${rowStyle}">
+        <tr class="quote-item-table-row ${rowStateClass}" data-item-id="${item.id || ''}" data-paid-amt="${paidAmount}" data-rem-amt="${remainingAmount}" data-is-pack-header="${isPackHdr ? 'true' : 'false'}" data-is-pack-item="${isPackItm ? 'true' : 'false'}" data-pack-id="${packId}" data-pack-group-id="${packGroupId}" data-pack-name="${packName}" data-pack-fixed-price="${packFixedPrice}" data-treatment-id="${treatmentId}" style="${rowStyle}">
           <td style="text-align: center; vertical-align: middle;">
             <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;">
-              <input type="checkbox" class="quote-item-pay-chk" ${isAlreadyPaid ? 'disabled' : ''} style="transform: scale(1.2); cursor: pointer;" title="${isAlreadyPaid ? 'Tratamiento ya 100% pagado' : 'Seleccionar para cobrar ahora'}" />
+              <input type="checkbox" class="quote-item-pay-chk" ${isAlreadyPaid || isPackItm ? 'disabled' : ''} style="transform: scale(1.2); cursor: pointer; ${isPackItm ? 'opacity: 0.5;' : ''}" title="${isPackItm ? 'Incluido en Pack Promocional' : (isAlreadyPaid ? 'Tratamiento ya 100% pagado' : 'Seleccionar para cobrar ahora')}" />
               <div class="quote-item-pay-qty-wrap" style="display: none; margin-top: 2px;">
                 <input type="number" class="form-input quote-item-pay-qty" value="${qty}" min="1" max="${qty}" style="width: 50px; padding: 2px 4px; font-size: 11px; text-align: center; font-weight: 700; border-color: var(--primary-400); background: var(--primary-50); color: var(--primary-900);" title="Cantidad de unidades a cobrar ahora" />
                 <span class="quote-item-pay-qty-hint" style="font-size: 10px; color: var(--primary-700); font-weight: 600; display: block; white-space: nowrap;">uds.</span>
@@ -971,21 +1004,21 @@ export class Quotations {
           </td>
           <td style="vertical-align: middle;">
             <div class="treatment-autocomplete-wrapper">
-              <input type="text" class="form-input quote-item-desc" placeholder="Buscar o escribir tratamiento..." value="${item.description || ''}" autocomplete="off" required style="padding: 8px 12px; font-size: 13px; width: 100%; min-width: 280px;" />
+              <input type="text" class="form-input quote-item-desc" placeholder="Buscar o escribir tratamiento..." value="${item.description || ''}" autocomplete="off" required ${isPackItm ? 'readonly' : ''} style="padding: 8px 12px; font-size: 13px; width: 100%; min-width: 280px; ${isPackItm ? 'background: transparent;' : ''}" />
               <ul class="treatment-autocomplete-list"></ul>
             </div>
           </td>
           <td style="vertical-align: middle;">
-            <input type="text" class="form-input quote-item-tooth" placeholder="Pieza #" value="${item.tooth_number || ''}" style="width: 80px; padding: 6px 8px; font-size: 13px; text-align: center;" />
+            <input type="text" class="form-input quote-item-tooth" placeholder="${isPackHdr ? 'Pack' : 'Pieza #'}" value="${item.tooth_number || ''}" ${isPackHdr ? 'disabled' : ''} style="width: 80px; padding: 6px 8px; font-size: 13px; text-align: center; ${isPackItm ? 'border-color: #fbcfe8;' : ''}" />
           </td>
           <td style="vertical-align: middle;">
-            <input type="number" class="form-input quote-item-qty" placeholder="Cant." value="${qty}" min="1" required style="width: 65px; padding: 6px 8px; font-size: 13px; text-align: center;" />
+            <input type="number" class="form-input quote-item-qty" placeholder="Cant." value="${qty}" min="1" ${isPackHdr ? 'disabled' : ''} required style="width: 65px; padding: 6px 8px; font-size: 13px; text-align: center;" />
           </td>
           <td style="vertical-align: middle;">
-            <input type="number" step="0.01" class="form-input quote-item-price" placeholder="0.00" value="${unitPrice.toFixed(2)}" min="0" required style="width: 95px; padding: 6px 8px; font-size: 13px; text-align: right;" />
+            <input type="number" step="0.01" class="form-input quote-item-price" placeholder="0.00" value="${unitPrice.toFixed(2)}" min="0" ${isPackItm ? 'disabled' : ''} required style="width: 95px; padding: 6px 8px; font-size: 13px; text-align: right; ${isPackItm ? 'background: #f3f4f6; color: #6b7280;' : ''}" />
           </td>
           <td style="vertical-align: middle;">
-            <input type="number" step="0.01" class="form-input quote-item-discount" placeholder="0" value="${discount}" min="0" max="100" style="width: 70px; padding: 6px 8px; font-size: 13px; text-align: center;" />
+            <input type="number" step="0.01" class="form-input quote-item-discount" placeholder="0" value="${discount}" min="0" max="100" ${isPackItm ? 'disabled' : ''} style="width: 70px; padding: 6px 8px; font-size: 13px; text-align: center; ${isPackItm ? 'background: #f3f4f6;' : ''}" />
           </td>
           <td style="text-align: right; font-weight: 700; font-size: 13px; vertical-align: middle; color: var(--text-primary);">
             <span class="quote-item-total-display">${formatCurrency(itemTotal)}</span>
@@ -998,7 +1031,7 @@ export class Quotations {
             </select>
           </td>
           <td style="text-align: center; vertical-align: middle;">
-            <button type="button" class="btn btn-sm btn-ghost btn-remove-item-row" title="Eliminar este tratamiento" style="color: var(--danger-500); padding: 4px 6px; font-size: 16px; line-height: 1;">✕</button>
+            <button type="button" class="btn btn-sm btn-ghost btn-remove-item-row" title="Eliminar este ítem" style="color: var(--danger-500); padding: 4px 6px; font-size: 16px; line-height: 1;">✕</button>
           </td>
         </tr>
       `;
@@ -1372,12 +1405,155 @@ export class Quotations {
           if (!selected) return;
           input.value = selected.name;
           if (row) {
+            row.setAttribute('data-treatment-id', selected.id);
+            row.setAttribute('data-is-pack-header', 'false');
+            row.setAttribute('data-is-pack-item', 'false');
+            row.removeAttribute('data-pack-id');
+            row.removeAttribute('data-pack-group-id');
+            row.removeAttribute('data-pack-name');
+            row.removeAttribute('data-pack-fixed-price');
+            row.style.backgroundColor = '';
+            row.style.borderLeft = '';
+
             const priceInput = row.querySelector('.quote-item-price');
-            if (priceInput) priceInput.value = parseFloat(selected.default_price || selected.price || 0).toFixed(2);
+            if (priceInput) {
+              priceInput.value = parseFloat(selected.default_price || selected.price || 0).toFixed(2);
+              priceInput.disabled = false;
+              priceInput.style.background = '';
+              priceInput.style.color = '';
+            }
+            const toothInput = row.querySelector('.quote-item-tooth');
+            if (toothInput) {
+              toothInput.disabled = false;
+              toothInput.placeholder = 'Pieza #';
+            }
+            const qtyInput = row.querySelector('.quote-item-qty');
+            if (qtyInput) {
+              qtyInput.disabled = false;
+            }
+            const discInput = row.querySelector('.quote-item-discount');
+            if (discInput) {
+              discInput.disabled = false;
+              discInput.style.background = '';
+            }
             recalculateAll();
           }
           dropdown.style.display = 'none';
           updateContainerHeight(false);
+        };
+
+        const selectPack = (selectedPack) => {
+          if (!selectedPack || !row) return;
+          const groupId = 'pack_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+
+          // Configure current row as Pack Header
+          row.setAttribute('data-is-pack-header', 'true');
+          row.setAttribute('data-is-pack-item', 'false');
+          row.setAttribute('data-pack-id', selectedPack.id);
+          row.setAttribute('data-pack-group-id', groupId);
+          row.setAttribute('data-pack-name', selectedPack.name);
+          row.setAttribute('data-pack-fixed-price', selectedPack.fixed_price);
+          row.removeAttribute('data-treatment-id');
+          row.style.backgroundColor = '#fdf2f8';
+          row.style.borderLeft = '4px solid #db2777';
+
+          input.value = `${selectedPack.name} (Pack Promocional)`;
+
+          const priceInput = row.querySelector('.quote-item-price');
+          if (priceInput) {
+            priceInput.value = parseFloat(selectedPack.fixed_price).toFixed(2);
+            priceInput.disabled = false;
+            priceInput.style.background = '';
+            priceInput.style.color = '';
+          }
+          const toothInput = row.querySelector('.quote-item-tooth');
+          if (toothInput) {
+            toothInput.value = '';
+            toothInput.placeholder = 'Pack';
+            toothInput.disabled = true;
+          }
+          const qtyInput = row.querySelector('.quote-item-qty');
+          if (qtyInput) {
+            qtyInput.value = 1;
+            qtyInput.disabled = true;
+          }
+          const discInput = row.querySelector('.quote-item-discount');
+          if (discInput) {
+            discInput.value = 0;
+            discInput.disabled = false;
+            discInput.style.background = '';
+          }
+
+          // Insert child rows for each treatment included in the pack
+          const packItems = selectedPack.items || [];
+          let prevElem = row;
+
+          packItems.forEach(item => {
+            const tr = document.createElement('tr');
+            tr.className = 'quote-item-table-row';
+            tr.setAttribute('data-paid-amt', '0');
+            tr.setAttribute('data-rem-amt', '0');
+            tr.setAttribute('data-is-pack-header', 'false');
+            tr.setAttribute('data-is-pack-item', 'true');
+            tr.setAttribute('data-pack-id', selectedPack.id);
+            tr.setAttribute('data-pack-group-id', groupId);
+            tr.setAttribute('data-pack-name', selectedPack.name);
+            tr.setAttribute('data-pack-fixed-price', selectedPack.fixed_price);
+            tr.setAttribute('data-treatment-id', item.treatment_id || item.id);
+            tr.style.backgroundColor = '#fafafa';
+            tr.style.borderLeft = '4px solid #f472b6';
+
+            const itemQty = parseInt(item.quantity || 1, 10);
+            const itemName = item.treatment_name || item.name || 'Tratamiento';
+
+            tr.innerHTML = `
+              <td style="text-align: center; vertical-align: middle;">
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;">
+                  <input type="checkbox" class="quote-item-pay-chk" disabled style="transform: scale(1.2); opacity: 0.5; cursor: not-allowed;" title="Cobrado en el precio fijo del Pack" />
+                  <div class="quote-item-pay-qty-wrap" style="display: none;"></div>
+                </div>
+              </td>
+              <td style="vertical-align: middle;">
+                <div style="display: flex; align-items: center; gap: 6px; padding: 2px 4px;">
+                  <span style="color: #db2777; font-weight: bold; font-size: 14px;">↳</span>
+                  <input type="text" class="form-input quote-item-desc" value="${itemName} (Incluido en pack)" readonly style="background: transparent; border: none; font-size: 13px; font-weight: 500; width: 100%; color: var(--text-primary);" />
+                </div>
+              </td>
+              <td style="vertical-align: middle;">
+                <input type="text" class="form-input quote-item-tooth" placeholder="Pieza #" value="" style="width: 80px; padding: 6px 8px; font-size: 13px; text-align: center; border-color: #fbcfe8;" title="Indicar diente o cuadrante si aplica" />
+              </td>
+              <td style="vertical-align: middle;">
+                <input type="number" class="form-input quote-item-qty" value="${itemQty}" min="1" style="width: 65px; padding: 6px 8px; font-size: 13px; text-align: center;" />
+              </td>
+              <td style="vertical-align: middle;">
+                <input type="number" step="0.01" class="form-input quote-item-price" value="0.00" disabled style="width: 95px; padding: 6px 8px; font-size: 13px; text-align: right; background: #f3f4f6; color: #6b7280;" title="0.00 € (Incluido en pack)" />
+              </td>
+              <td style="vertical-align: middle;">
+                <input type="number" step="0.01" class="form-input quote-item-discount" value="0" disabled style="width: 70px; padding: 6px 8px; font-size: 13px; text-align: center; background: #f3f4f6;" />
+              </td>
+              <td style="text-align: right; font-weight: 700; font-size: 13px; vertical-align: middle; color: var(--text-secondary);">
+                <span class="quote-item-total-display">$0.00</span>
+              </td>
+              <td style="vertical-align: middle; text-align: center;">
+                <select class="form-select quote-item-exec-select" style="padding: 5px 8px; font-size: 12px; font-weight: 500; width: 135px;">
+                  <option value="pendiente" selected>⏳ Pendiente</option>
+                  <option value="en_proceso">⚙️ En Proceso</option>
+                  <option value="realizado">✅ Completado</option>
+                </select>
+              </td>
+              <td style="text-align: center; vertical-align: middle;">
+                <button type="button" class="btn btn-sm btn-ghost btn-remove-item-row" title="Eliminar ítem del pack" style="color: var(--danger-500); padding: 4px 6px; font-size: 16px; line-height: 1;">✕</button>
+              </td>
+            `;
+
+            prevElem.insertAdjacentElement('afterend', tr);
+            attachRowEvents(tr);
+            prevElem = tr;
+          });
+
+          dropdown.style.display = 'none';
+          updateContainerHeight(false);
+          recalculateAll();
         };
 
         const highlightActiveItem = () => {
@@ -1394,14 +1570,26 @@ export class Quotations {
 
         const showResults = () => {
           const term = input.value.toLowerCase().trim();
-          
-          currentMatches = term
+
+          const matchedPacks = term
+            ? packList.filter(p =>
+                (p.name || '').toLowerCase().includes(term) ||
+                (p.description && p.description.toLowerCase().includes(term))
+              ).slice(0, 10)
+            : packList.slice(0, 10);
+
+          const matchedTreatments = term
             ? treatmentList.filter(t =>
                 (t.name || '').toLowerCase().includes(term) ||
                 (t.code && t.code.toLowerCase().includes(term)) ||
                 (t.category_name && t.category_name.toLowerCase().includes(term))
               ).slice(0, 15)
             : treatmentList.slice(0, 15);
+
+          currentMatches = [
+            ...matchedPacks.map(p => ({ type: 'pack', data: p })),
+            ...matchedTreatments.map(t => ({ type: 'treatment', data: t })),
+          ];
 
           if (currentMatches.length === 0) {
             dropdown.innerHTML = `
@@ -1416,35 +1604,74 @@ export class Quotations {
             return;
           }
 
-          const headerHtml = `
-            <li class="autocomplete-header">
-              <span>${term ? `Resultados del catálogo (${currentMatches.length})` : `Catálogo de tratamientos (${currentMatches.length})`}</span>
-              <span style="font-size: 10px; opacity: 0.85;">↓ Selecciona con flechas o clic</span>
-            </li>
-          `;
+          let itemsHtml = '';
 
-          const itemsHtml = currentMatches.map((t, idx) => `
-            <li class="autocomplete-item" data-idx="${idx}">
-              <div class="treatment-info">
-                <div class="treatment-title-row">
-                  <span class="treatment-name">${t.name}</span>
-                  ${t.code ? `<span class="treatment-code-tag">${t.code}</span>` : ''}
-                </div>
-                ${t.category_name ? `<span class="treatment-cat-sub">📁 ${t.category_name}</span>` : ''}
-              </div>
-              <span class="treatment-price-badge">${formatCurrency(t.default_price || t.price || 0)}</span>
-            </li>
-          `).join('');
+          if (matchedPacks.length > 0) {
+            itemsHtml += `
+              <li class="autocomplete-section-header" style="background: #fdf2f8; color: #9d174d; padding: 7px 14px; font-size: 11px; font-weight: 700; border-bottom: 1px solid #fbcfe8; display: flex; justify-content: space-between; align-items: center; text-transform: uppercase; letter-spacing: 0.5px;">
+                <span>🎁 PACKS PROMOCIONALES (${matchedPacks.length})</span>
+                <span style="font-size: 10px; opacity: 0.85;">PRECIO FIJO TOTAL</span>
+              </li>
+            `;
+            matchedPacks.forEach(p => {
+              const globalIdx = currentMatches.findIndex(m => m.type === 'pack' && m.data.id === p.id);
+              const itemsDesc = (p.items || []).map(it => it.treatment_name || it.name).filter(Boolean).join(' + ') || p.description || 'Paquete de tratamientos';
+              itemsHtml += `
+                <li class="autocomplete-item pack-item" data-idx="${globalIdx}" style="border-left: 3px solid #db2777;">
+                  <div class="treatment-info">
+                    <div class="treatment-title-row">
+                      <span class="treatment-name" style="color: #9d174d; font-weight: 700;">🎁 ${p.name}</span>
+                      <span class="treatment-code-tag" style="background: #fce7f3; color: #be185d; border-color: #fbcfe8;">Pack (${(p.items || []).length} tratamientos)</span>
+                    </div>
+                    <div class="treatment-cat-sub" style="color: #64748b; font-size: 11px;">${itemsDesc}</div>
+                  </div>
+                  <span class="treatment-price-badge" style="background: #fdf2f8; color: #be185d; border-color: #f472b6;">
+                    ${formatCurrency(p.fixed_price)}
+                  </span>
+                </li>
+              `;
+            });
+          }
 
-          dropdown.innerHTML = headerHtml + itemsHtml;
+          if (matchedTreatments.length > 0) {
+            itemsHtml += `
+              <li class="autocomplete-section-header" style="background: var(--gray-50); color: var(--color-text-secondary); padding: 7px 14px; font-size: 11px; font-weight: 700; border-bottom: 1px solid var(--color-border-light); border-top: ${matchedPacks.length > 0 ? '1px solid var(--color-border-light)' : 'none'}; display: flex; justify-content: space-between; align-items: center; text-transform: uppercase; letter-spacing: 0.5px;">
+                <span>🦷 TRATAMIENTOS INDIVIDUALES (${matchedTreatments.length})</span>
+                <span style="font-size: 10px; opacity: 0.85;">CATÁLOGO REGULAR</span>
+              </li>
+            `;
+            matchedTreatments.forEach(t => {
+              const globalIdx = currentMatches.findIndex(m => m.type === 'treatment' && m.data.id === t.id);
+              itemsHtml += `
+                <li class="autocomplete-item" data-idx="${globalIdx}">
+                  <div class="treatment-info">
+                    <div class="treatment-title-row">
+                      <span class="treatment-name">${t.name}</span>
+                      ${t.code ? `<span class="treatment-code-tag">${t.code}</span>` : ''}
+                    </div>
+                    ${t.category_name ? `<span class="treatment-cat-sub">📁 ${t.category_name}</span>` : ''}
+                  </div>
+                  <span class="treatment-price-badge">${formatCurrency(t.default_price || t.price || 0)}</span>
+                </li>
+              `;
+            });
+          }
+
+          dropdown.innerHTML = itemsHtml;
           dropdown.style.display = 'block';
           activeIdx = -1;
           updateContainerHeight(true);
 
-          dropdown.querySelectorAll('.autocomplete-item').forEach((li, idx) => {
+          dropdown.querySelectorAll('.autocomplete-item').forEach(li => {
+            const idx = parseInt(li.getAttribute('data-idx'), 10);
             li.addEventListener('mousedown', (e) => {
               e.preventDefault();
-              selectTreatment(currentMatches[idx]);
+              const match = currentMatches[idx];
+              if (match.type === 'pack') {
+                selectPack(match.data);
+              } else {
+                selectTreatment(match.data);
+              }
             });
             li.addEventListener('mouseenter', () => {
               activeIdx = idx;
@@ -1467,7 +1694,12 @@ export class Quotations {
             } else if (e.key === 'Enter') {
               if (activeIdx >= 0 && activeIdx < currentMatches.length) {
                 e.preventDefault();
-                selectTreatment(currentMatches[activeIdx]);
+                const match = currentMatches[activeIdx];
+                if (match.type === 'pack') {
+                  selectPack(match.data);
+                } else {
+                  selectTreatment(match.data);
+                }
               }
             } else if (e.key === 'Escape') {
               e.preventDefault();
@@ -1686,6 +1918,20 @@ export class Quotations {
         if (removeBtn) {
           removeBtn.addEventListener('click', () => {
             const tbody = document.getElementById('quote-items-tbody');
+            const isPackHeader = row.getAttribute('data-is-pack-header') === 'true';
+            const packGroupId = row.getAttribute('data-pack-group-id');
+
+            if (isPackHeader && packGroupId) {
+              const childRows = tbody.querySelectorAll(`.quote-item-table-row[data-pack-group-id="${packGroupId}"]`);
+              childRows.forEach(r => r.remove());
+              row.remove();
+              if (tbody.children.length === 0) {
+                addRowBtn?.click();
+              }
+              recalculateAll();
+              return;
+            }
+
             if (tbody.children.length > 1) {
               row.remove();
               recalculateAll();
@@ -1708,6 +1954,8 @@ export class Quotations {
           tr.className = 'quote-item-table-row';
           tr.setAttribute('data-paid-amt', '0');
           tr.setAttribute('data-rem-amt', '0');
+          tr.setAttribute('data-is-pack-header', 'false');
+          tr.setAttribute('data-is-pack-item', 'false');
           tr.innerHTML = `
             <td style="text-align: center; vertical-align: middle;">
               <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;">
@@ -1783,8 +2031,17 @@ export class Quotations {
             const disc = parseFloat(row.querySelector('.quote-item-discount')?.value) || 0;
             const execStatus = row.querySelector('.quote-item-exec-select')?.value || 'pendiente';
 
+            const isPackHeader = row.getAttribute('data-is-pack-header') === 'true';
+            const isPackItem = row.getAttribute('data-is-pack-item') === 'true';
+            const packId = row.getAttribute('data-pack-id') ? parseInt(row.getAttribute('data-pack-id'), 10) : null;
+            const packGroupId = row.getAttribute('data-pack-group-id') || null;
+            const packName = row.getAttribute('data-pack-name') || null;
+            const packFixedPrice = row.getAttribute('data-pack-fixed-price') ? parseFloat(row.getAttribute('data-pack-fixed-price')) : null;
+            const treatmentId = row.getAttribute('data-treatment-id') ? parseInt(row.getAttribute('data-treatment-id'), 10) : null;
+
             items.push({
               id: itemId,
+              treatment_id: treatmentId,
               description: desc,
               tooth_number: tooth,
               quantity: qty,
@@ -1792,6 +2049,12 @@ export class Quotations {
               discount: disc,
               status: 'aceptado',
               execution_status: execStatus,
+              promotional_pack_id: packId,
+              pack_group_id: packGroupId,
+              pack_name: packName,
+              pack_fixed_price: packFixedPrice,
+              is_pack_item: isPackItem,
+              is_pack_header: isPackHeader
             });
 
             const payChk = row.querySelector('.quote-item-pay-chk');
@@ -2209,15 +2472,27 @@ export class Quotations {
               </tr>
             </thead>
             <tbody>
-              ${(quote.items || []).map(item => `
-                <tr>
-                  <td>${item.description}</td>
+              ${(quote.items || []).map(item => {
+                const isPackHdr = !!item.is_pack_header;
+                const isPackItm = !!item.is_pack_item;
+                let descStr = item.description;
+                if (isPackHdr) {
+                  descStr = `<strong>${item.description.replace(/^🎁\s*/, '')}</strong>`;
+                } else if (isPackItm) {
+                  descStr = `&nbsp;&nbsp;&nbsp;&nbsp;- <em>${item.description.replace(/^[↳-]\s*/, '')}</em>`;
+                }
+                return `
+                <tr style="${isPackHdr ? 'background: #fdf2f8;' : (isPackItm ? 'background: #fafafa;' : '')}">
+                  <td>
+                    ${descStr}
+                    ${item.tooth_number ? `<span style="font-size: 11px; color: #666; margin-left: 6px;">(Pieza #${item.tooth_number})</span>` : ''}
+                  </td>
                   <td>${formatCurrency(item.unit_price)}</td>
                   <td>${item.quantity}</td>
                   <td>${item.discount || 0}%</td>
                   <td><strong>${formatCurrency(item.total)}</strong></td>
                 </tr>
-              `).join('')}
+              `}).join('')}
             </tbody>
           </table>
 

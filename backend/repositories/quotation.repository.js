@@ -330,12 +330,51 @@ class QuotationRepository extends BaseRepository {
         const execStatus = item.execution_status || 'pendiente';
         const toothNumber = item.tooth_number || null;
         const itemResult = await client.query(
-          `INSERT INTO quotation_items (quotation_id, treatment_id, description, quantity, unit_price, discount, total, status, execution_status, tooth_number${clinicId ? ', clinic_id' : ''})
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10${clinicId ? ', $11' : ''})
+          `INSERT INTO quotation_items (
+             quotation_id, treatment_id, description, quantity, unit_price, discount, total,
+             status, execution_status, tooth_number, promotional_pack_id, pack_group_id,
+             pack_name, pack_fixed_price, is_pack_item, is_pack_header${clinicId ? ', clinic_id' : ''}
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16${clinicId ? ', $17' : ''})
            RETURNING *`,
           clinicId
-            ? [quotation.id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.discount || 0, item.total, itemStatus, execStatus, toothNumber, clinicId]
-            : [quotation.id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.discount || 0, item.total, itemStatus, execStatus, toothNumber]
+            ? [
+                quotation.id,
+                item.treatment_id || null,
+                item.description,
+                item.quantity,
+                item.unit_price,
+                item.discount || 0,
+                item.total,
+                itemStatus,
+                execStatus,
+                toothNumber,
+                item.promotional_pack_id || null,
+                item.pack_group_id || null,
+                item.pack_name || null,
+                item.pack_fixed_price !== undefined ? item.pack_fixed_price : null,
+                Boolean(item.is_pack_item),
+                Boolean(item.is_pack_header),
+                clinicId,
+              ]
+            : [
+                quotation.id,
+                item.treatment_id || null,
+                item.description,
+                item.quantity,
+                item.unit_price,
+                item.discount || 0,
+                item.total,
+                itemStatus,
+                execStatus,
+                toothNumber,
+                item.promotional_pack_id || null,
+                item.pack_group_id || null,
+                item.pack_name || null,
+                item.pack_fixed_price !== undefined ? item.pack_fixed_price : null,
+                Boolean(item.is_pack_item),
+                Boolean(item.is_pack_header),
+              ]
         );
         insertedItems.push(itemResult.rows[0]);
       }
@@ -390,22 +429,81 @@ class QuotationRepository extends BaseRepository {
         if (item.id) {
           const updateRes = await client.query(
             `UPDATE quotation_items
-             SET treatment_id = $1, description = $2, quantity = $3, unit_price = $4, discount = $5, total = $6, status = $7, execution_status = $8, tooth_number = $9
-             WHERE id = $10 AND quotation_id = $11
+             SET treatment_id = $1, description = $2, quantity = $3, unit_price = $4, discount = $5, total = $6,
+                 status = $7, execution_status = $8, tooth_number = $9, promotional_pack_id = $10,
+                 pack_group_id = $11, pack_name = $12, pack_fixed_price = $13, is_pack_item = $14, is_pack_header = $15
+             WHERE id = $16 AND quotation_id = $17
              RETURNING *`,
-            [item.treatment_id || null, item.description, item.quantity, item.unit_price, item.discount || 0, item.total, itemStatus, execStatus, toothNumber, item.id, id]
+            [
+              item.treatment_id || null,
+              item.description,
+              item.quantity,
+              item.unit_price,
+              item.discount || 0,
+              item.total,
+              itemStatus,
+              execStatus,
+              toothNumber,
+              item.promotional_pack_id || null,
+              item.pack_group_id || null,
+              item.pack_name || null,
+              item.pack_fixed_price !== undefined ? item.pack_fixed_price : null,
+              Boolean(item.is_pack_item),
+              Boolean(item.is_pack_header),
+              item.id,
+              id,
+            ]
           );
           if (updateRes.rows.length > 0) {
             processedItems.push(updateRes.rows[0]);
           }
         } else {
           const insertRes = await client.query(
-            `INSERT INTO quotation_items (quotation_id, treatment_id, description, quantity, unit_price, discount, total, status, execution_status, tooth_number${clinicId ? ', clinic_id' : ''})
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10${clinicId ? ', $11' : ''})
+            `INSERT INTO quotation_items (
+               quotation_id, treatment_id, description, quantity, unit_price, discount, total,
+               status, execution_status, tooth_number, promotional_pack_id, pack_group_id,
+               pack_name, pack_fixed_price, is_pack_item, is_pack_header${clinicId ? ', clinic_id' : ''}
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16${clinicId ? ', $17' : ''})
              RETURNING *`,
             clinicId
-              ? [id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.discount || 0, item.total, itemStatus, execStatus, toothNumber, clinicId]
-              : [id, item.treatment_id || null, item.description, item.quantity, item.unit_price, item.discount || 0, item.total, itemStatus, execStatus, toothNumber]
+              ? [
+                  id,
+                  item.treatment_id || null,
+                  item.description,
+                  item.quantity,
+                  item.unit_price,
+                  item.discount || 0,
+                  item.total,
+                  itemStatus,
+                  execStatus,
+                  toothNumber,
+                  item.promotional_pack_id || null,
+                  item.pack_group_id || null,
+                  item.pack_name || null,
+                  item.pack_fixed_price !== undefined ? item.pack_fixed_price : null,
+                  Boolean(item.is_pack_item),
+                  Boolean(item.is_pack_header),
+                  clinicId,
+                ]
+              : [
+                  id,
+                  item.treatment_id || null,
+                  item.description,
+                  item.quantity,
+                  item.unit_price,
+                  item.discount || 0,
+                  item.total,
+                  itemStatus,
+                  execStatus,
+                  toothNumber,
+                  item.promotional_pack_id || null,
+                  item.pack_group_id || null,
+                  item.pack_name || null,
+                  item.pack_fixed_price !== undefined ? item.pack_fixed_price : null,
+                  Boolean(item.is_pack_item),
+                  Boolean(item.is_pack_header),
+                ]
           );
           processedItems.push(insertRes.rows[0]);
         }

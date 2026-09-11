@@ -67,3 +67,18 @@ export const getPrescriptionPDF = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * GET /api/v1/pdf/reports/:type
+ * Genera y descarga el PDF de un reporte consolidado.
+ */
+export const getReportPDF = async (req, res, next) => {
+  try {
+    const { type } = req.params;
+    const { start_date, end_date } = req.query;
+    const result = await pdfService.generateReportPDF(type, start_date, end_date);
+    return sendPdfResponse(res, req, result);
+  } catch (error) {
+    next(error);
+  }
+};

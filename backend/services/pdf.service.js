@@ -9,6 +9,7 @@ import invoiceRepository from '../repositories/invoice.repository.js';
 import quotationRepository from '../repositories/quotation.repository.js';
 import prescriptionRepository from '../repositories/prescription.repository.js';
 import settingsRepository from '../repositories/settings.repository.js';
+import reportService from './report.service.js';
 import { query, als } from '../database/pool.js';
 import { AppError } from '../utils/errors.js';
 
@@ -107,6 +108,22 @@ class PDFService {
   }
 
   /**
+   * Elimina emojis, pictogramas y caracteres gráficos no estándar
+   * que PDFKit / fuentes estándar Type 1 (Helvetica) no pueden codificar ni renderizar.
+   */
+  stripEmojis(text) {
+    if (text === null || text === undefined) return '';
+    return String(text)
+      .replace(/\p{Extended_Pictographic}/gu, '')
+      .replace(/[\u{1F300}-\u{1F5FF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F1E6}-\u{1F1FF}]/gu, '')
+      .replace(/[↳➔➜➞►▶]/g, '-')
+      .replace(/[✓✔]/g, '')
+      .replace(/[⚠️]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /**
    * Convierte un flujo de PDFKit en un Buffer en memoria.
    */
   async streamToBuffer(doc) {
@@ -184,27 +201,27 @@ class PDFService {
       .fillColor(COLORS.primary)
       .font('Helvetica-Bold')
       .fontSize(13)
-      .text(clinic.name || 'Clínica Dental', clinicX, 20, { width: clinicWidth });
+      .text(this.stripEmojis(clinic.name) || 'Clínica Dental', clinicX, 20, { width: clinicWidth });
 
     doc
       .fillColor(COLORS.textSecondary)
       .font('Helvetica')
       .fontSize(8)
-      .text(clinic.legal_name ? `${clinic.legal_name}${clinic.tax_id ? ' · CIF: ' + clinic.tax_id : ''}` : (clinic.tax_id ? `CIF/NIF: ${clinic.tax_id}` : ''), clinicX, 36, { width: clinicWidth })
-      .text(`${clinic.address || ''}${clinic.city ? ', ' + clinic.city : ''}${clinic.postal_code ? ' (' + clinic.postal_code + ')' : ''}`, clinicX, 47, { width: clinicWidth })
-      .text(`${clinic.phone ? 'Tel: ' + clinic.phone : ''}${clinic.email ? ' · ' + clinic.email : ''}`, clinicX, 58, { width: clinicWidth });
+      .text(this.stripEmojis(clinic.legal_name ? `${clinic.legal_name}${clinic.tax_id ? ' · CIF: ' + clinic.tax_id : ''}` : (clinic.tax_id ? `CIF/NIF: ${clinic.tax_id}` : '')), clinicX, 36, { width: clinicWidth })
+      .text(this.stripEmojis(`${clinic.address || ''}${clinic.city ? ', ' + clinic.city : ''}${clinic.postal_code ? ' (' + clinic.postal_code + ')' : ''}`), clinicX, 47, { width: clinicWidth })
+      .text(this.stripEmojis(`${clinic.phone ? 'Tel: ' + clinic.phone : ''}${clinic.email ? ' · ' + clinic.email : ''}`), clinicX, 58, { width: clinicWidth });
 
     doc
       .fillColor(COLORS.text)
       .font('Helvetica-Bold')
       .fontSize(14)
-      .text(docTitle.toUpperCase(), rightColX, 20, { width: 200, align: 'right' });
+      .text(this.stripEmojis(docTitle).toUpperCase(), rightColX, 20, { width: 200, align: 'right' });
 
     doc
       .fillColor(COLORS.primaryDark)
       .font('Helvetica-Bold')
       .fontSize(12)
-      .text(docNumber, rightColX, 37, { width: 200, align: 'right' });
+      .text(this.stripEmojis(docNumber), rightColX, 37, { width: 200, align: 'right' });
 
     if (badgeText) {
       const badgeWidth = 90;
@@ -217,7 +234,7 @@ class PDFService {
         .fillColor(COLORS.white)
         .font('Helvetica-Bold')
         .fontSize(8)
-        .text(badgeText.toUpperCase(), badgeX, badgeY + 4, { width: badgeWidth, align: 'center' });
+        .text(this.stripEmojis(badgeText).toUpperCase(), badgeX, badgeY + 4, { width: badgeWidth, align: 'center' });
     }
 
     // Línea separadora elegante
@@ -229,6 +246,95 @@ class PDFService {
       .stroke();
 
     doc.y = 92;
+  }
+
+  /**
+   * Dibuja el encabezado exclusivo para reportes y balances (evita solapamientos tipográficos).
+   */
+  drawReportHeader(doc, clinic, { title, docNumber = 'INFORME OFICIAL', periodText = null, badgeColor = COLORS.primary }) {
+    const pageWidth = doc.page.width;
+    const margin = 40;
+
+    // Barra superior decorativa corporativa
+    doc.rect(0, 0, pageWidth, 6).fill(COLORS.primary);
+
+    // Intentar ubicar y dibujar el logo de la clínica
+    const logoPath = this.resolveClinicLogoPath(clinic);
+    let logoLoaded = false;
+    if (logoPath) {
+      try {
+        doc.image(logoPath, margin, 14, { fit: [95, 46] });
+        logoLoaded = true;
+      } catch {}
+    }
+
+    // Bloque Izquierdo: Datos de la clínica
+    const clinicX = logoLoaded ? margin + 105 : margin;
+    const rightColWidth = 240;
+    const rightColX = pageWidth - margin - rightColWidth;
+    const clinicWidth = rightColX - clinicX - 15;
+
+    doc
+      .fillColor(COLORS.primary)
+      .font('Helvetica-Bold')
+      .fontSize(11)
+      .text(this.stripEmojis(clinic.name) || 'Clínica Dental', clinicX, 14, { width: clinicWidth });
+
+    const details = [];
+    if (clinic.legal_name || clinic.tax_id) {
+      details.push(this.stripEmojis(`${clinic.legal_name || ''}${clinic.tax_id ? ' · CIF: ' + clinic.tax_id : ''}`));
+    }
+    const fullAddress = this.stripEmojis(`${clinic.address || ''}${clinic.city ? ', ' + clinic.city : ''}${clinic.postal_code ? ' (' + clinic.postal_code + ')' : ''}`).trim();
+    if (fullAddress) details.push(fullAddress);
+    const fullContact = this.stripEmojis(`${clinic.phone ? 'Tel: ' + clinic.phone : ''}${clinic.email ? ' · ' + clinic.email : ''}`).trim();
+    if (fullContact) details.push(fullContact);
+
+    doc
+      .fillColor(COLORS.textSecondary)
+      .font('Helvetica')
+      .fontSize(7)
+      .text(details.join('\n'), clinicX, 27, { width: clinicWidth, lineGap: 1.5 });
+    const clinicBottomY = doc.y;
+
+    // Bloque Derecho: Título del reporte sin colisión
+    doc
+      .fillColor(COLORS.text)
+      .font('Helvetica-Bold')
+      .fontSize(11)
+      .text(this.stripEmojis(title).toUpperCase(), rightColX, 14, { width: rightColWidth, align: 'right' });
+
+    doc
+      .fillColor(COLORS.textSecondary)
+      .font('Helvetica')
+      .fontSize(7.5)
+      .text(this.stripEmojis(docNumber).toUpperCase(), rightColX, 28, { width: rightColWidth, align: 'right' });
+
+    if (periodText) {
+      const badgeWidth = 200;
+      const badgeHeight = 15;
+      const badgeX = pageWidth - margin - badgeWidth;
+      const badgeY = 41;
+      doc
+        .roundedRect(badgeX, badgeY, badgeWidth, badgeHeight, 3)
+        .fill(badgeColor);
+      doc
+        .fillColor(COLORS.white)
+        .font('Helvetica-Bold')
+        .fontSize(7.5)
+        .text(this.stripEmojis(periodText).toUpperCase(), badgeX, badgeY + 3.5, { width: badgeWidth, align: 'center', lineBreak: false });
+    }
+
+    // Línea separadora
+    const dividerY = Math.max(clinicBottomY + 4, 66);
+    doc
+      .strokeColor(COLORS.border)
+      .lineWidth(0.75)
+      .moveTo(margin, dividerY)
+      .lineTo(pageWidth - margin, dividerY)
+      .stroke();
+
+    doc.x = margin;
+    doc.y = dividerY + 8;
   }
 
   /**
@@ -255,7 +361,7 @@ class PDFService {
       .fillColor(COLORS.text)
       .font('Helvetica-Bold')
       .fontSize(9.5)
-      .text(patient.name || 'Paciente No Especificado', margin + 10, yPos + 22, { width: boxWidth - 20 });
+      .text(this.stripEmojis(patient.name) || 'Paciente No Especificado', margin + 10, yPos + 22, { width: boxWidth - 20 });
 
     doc
       .fillColor(COLORS.textSecondary)
@@ -263,7 +369,7 @@ class PDFService {
       .fontSize(8)
       .text(`DNI / NIF: ${patient.dni || '—'}`, margin + 10, yPos + 35)
       .text(`Tel: ${patient.phone || '—'}  |  Email: ${patient.email || '—'}`, margin + 10, yPos + 46, { width: boxWidth - 20 })
-      .text(patient.address ? `Dir: ${patient.address}` : '', margin + 10, yPos + 57, { width: boxWidth - 20 });
+      .text(patient.address ? this.stripEmojis(`Dir: ${patient.address}`) : '', margin + 10, yPos + 57, { width: boxWidth - 20 });
 
     // Caja Profesional / Documento (Derecha)
     const rightX = margin + boxWidth + 15;
@@ -281,9 +387,9 @@ class PDFService {
       .fillColor(COLORS.text)
       .font('Helvetica-Bold')
       .fontSize(9)
-      .text(doctor.name ? `Dr/a. ${doctor.name}` : 'Clínica Dental Especializada', rightX + 10, yPos + 22, { width: boxWidth - 20 });
+      .text(doctor.name ? `Dr/a. ${this.stripEmojis(doctor.name)}` : 'Clínica Dental Especializada', rightX + 10, yPos + 22, { width: boxWidth - 20 });
 
-    const docSub = doctor.specialty ? `${doctor.specialty}${doctor.license ? ' (Col. ' + doctor.license + ')' : ''}` : 'Odontología Integral';
+    const docSub = doctor.specialty ? this.stripEmojis(`${doctor.specialty}${doctor.license ? ' (Col. ' + doctor.license + ')' : ''}`) : 'Odontología Integral';
     doc
       .fillColor(COLORS.textSecondary)
       .font('Helvetica')
@@ -294,7 +400,7 @@ class PDFService {
     if (dueDate) {
       doc.text(`Fecha de Vto: ${this.formatDate(dueDate)}`, rightX + 10, yPos + 57);
     } else if (extraLabels.length > 0) {
-      doc.text(extraLabels[0], rightX + 10, yPos + 57);
+      doc.text(this.stripEmojis(extraLabels[0]), rightX + 10, yPos + 57);
     }
 
     doc.y = yPos + boxHeight + 14;
@@ -308,31 +414,35 @@ class PDFService {
     const margin = 40;
     const pageWidth = doc.page.width;
     const pageHeight = doc.page.height;
-    const footerY = pageHeight - 35;
+    const footerY = pageHeight - 28;
 
     for (let i = range.start; i < range.start + range.count; i++) {
       doc.switchToPage(i);
+      const oldBottomMargin = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
 
       // Línea divisoria de pie
       doc
         .strokeColor(COLORS.border)
         .lineWidth(0.5)
-        .moveTo(margin, footerY - 8)
-        .lineTo(pageWidth - margin, footerY - 8)
+        .moveTo(margin, footerY - 6)
+        .lineTo(pageWidth - margin, footerY - 6)
         .stroke();
 
-      const defaultNotice = legalNotice || `${clinic.name || 'Clínica Dental'} · Documento oficial emitido conforme a la legislación sanitaria y fiscal vigente.`;
+      const defaultNotice = this.stripEmojis(legalNotice || `${clinic.name || 'Clínica Dental'} · Documento oficial emitido conforme a la legislación sanitaria y fiscal vigente.`);
       doc
         .fillColor(COLORS.textMuted)
         .font('Helvetica')
         .fontSize(7)
-        .text(defaultNotice, margin, footerY, { width: pageWidth - margin * 2 - 70 });
+        .text(defaultNotice, margin, footerY, { width: pageWidth - margin * 2 - 70, lineBreak: false });
 
       doc
         .fillColor(COLORS.textSecondary)
         .font('Helvetica-Bold')
         .fontSize(7.5)
-        .text(`Página ${i + 1} de ${range.count}`, pageWidth - margin - 70, footerY, { width: 70, align: 'right' });
+        .text(`Página ${i + 1} de ${range.count}`, pageWidth - margin - 70, footerY, { width: 70, align: 'right', lineBreak: false });
+
+      doc.page.margins.bottom = oldBottomMargin;
     }
   }
 
@@ -406,7 +516,7 @@ class PDFService {
         { label: 'Total', property: 'subtotal', width: 100, align: 'right' },
       ],
       datas: items.map((item) => ({
-        desc: item.clean_description || item.description || item.treatment_name || 'Tratamiento Odontológico',
+        desc: this.stripEmojis(item.clean_description || item.description || item.treatment_name || 'Tratamiento Odontológico'),
         tooth: item.tooth_number ? String(item.tooth_number) : '—',
         qty: String(item.quantity || 1),
         unitPrice: this.formatCurrency(item.unit_price, clinic.currency),
@@ -528,7 +638,7 @@ class PDFService {
         .fontSize(8)
         .text('Observaciones:', margin, doc.y + 6)
         .font('Helvetica')
-        .text(invoice.notes, margin, doc.y + 1, { width: 350 });
+        .text(this.stripEmojis(invoice.notes), margin, doc.y + 1, { width: 350 });
     }
 
     // 7. Pie de página y numeración
@@ -621,13 +731,33 @@ class PDFService {
       datas: items.map((item) => {
         const itemDisc = parseFloat(item.discount || 0);
         const discStr = itemDisc > 0 ? `${itemDisc}%` : '—';
+        const isPackHeader = Boolean(item.is_pack_header);
+        const isPackItem = Boolean(item.is_pack_item);
+
+        let desc = this.stripEmojis(item.description || item.treatment_name || 'Tratamiento Odontológico');
+        let priceStr = this.formatCurrency(item.unit_price, clinic.currency);
+        let totalStr = this.formatCurrency(item.total, clinic.currency);
+
+        if (isPackHeader) {
+          const rawPackName = this.stripEmojis(item.pack_name || item.description || 'PACK PROMOCIONAL');
+          const cleanPackName = rawPackName.replace(/\(Pack Promocional\)/gi, '').trim();
+          desc = `${cleanPackName} (Pack Promocional)`;
+          priceStr = this.formatCurrency(item.pack_fixed_price !== null && item.pack_fixed_price !== undefined ? item.pack_fixed_price : item.unit_price, clinic.currency);
+          totalStr = this.formatCurrency(item.total, clinic.currency);
+        } else if (isPackItem) {
+          const rawItemName = this.stripEmojis(item.description || item.treatment_name || 'Tratamiento').replace(/^[-–—]\s*/, '').replace(/\(Incluido en pack\)/gi, '').trim();
+          desc = `   - ${rawItemName} (Incluido en pack)`;
+          priceStr = 'Incluido';
+          totalStr = this.formatCurrency(0, clinic.currency);
+        }
+
         return {
           tooth: item.tooth_number ? String(item.tooth_number) : '—',
-          desc: item.description || item.treatment_name || 'Tratamiento Odontológico',
+          desc,
           qty: String(item.quantity || 1),
-          price: this.formatCurrency(item.unit_price, clinic.currency),
-          discount: discStr,
-          total: this.formatCurrency(item.total, clinic.currency),
+          price: priceStr,
+          discount: isPackItem ? '—' : discStr,
+          total: totalStr,
         };
       }),
     };
@@ -643,15 +773,32 @@ class PDFService {
       });
     }
 
+    const margin = 40;
+    doc.x = margin;
     await doc.table(tableData, {
-      prepareHeader: () => doc.font('Helvetica-Bold').fontSize(8.5).fillColor(COLORS.white),
-      prepareRow: () => doc.font('Helvetica').fontSize(8.5).fillColor(COLORS.text),
+      x: margin,
+      columnsSize: [45, 235, 40, 85, 45, 65],
+      prepareHeader: () => {
+        doc.x = margin;
+        doc.font('Helvetica-Bold').fontSize(8.5).fillColor(COLORS.white);
+      },
+      prepareRow: (row, indexColumn, indexRow, rectRow) => {
+        doc.x = margin;
+        const rawItem = items[indexRow];
+        if (rawItem && rawItem.is_pack_header) {
+          doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#0369a1');
+        } else if (rawItem && rawItem.is_pack_item) {
+          doc.font('Helvetica-Oblique').fontSize(8).fillColor('#475569');
+        } else {
+          doc.font('Helvetica').fontSize(8.5).fillColor(COLORS.text);
+        }
+      },
       padding: [5, 4],
       headerBackgroundColor: COLORS.primary,
     });
 
     // 4. Totales y resumen
-    const margin = 40;
+    doc.x = margin;
     const pageWidth = doc.page.width;
     const summaryWidth = 220;
     const summaryX = pageWidth - margin - summaryWidth;
@@ -840,7 +987,7 @@ class PDFService {
       .fillColor(COLORS.text)
       .font('Helvetica-Bold')
       .fontSize(9.5)
-      .text(presc.patient_name || 'Paciente', rightX + 10, yPos + 22, { width: boxWidth - 20 });
+      .text(this.stripEmojis(presc.patient_name) || 'Paciente', rightX + 10, yPos + 22, { width: boxWidth - 20 });
 
     doc
       .fillColor(COLORS.textSecondary)
@@ -856,13 +1003,13 @@ class PDFService {
         .fillColor(COLORS.danger)
         .font('Helvetica-Bold')
         .fontSize(7.5)
-        .text(`⚠️ ALERGIAS: ${allergies.toUpperCase()}`, rightX + 10, yPos + 62, { width: boxWidth - 20 });
+        .text(`ALERGIAS: ${this.stripEmojis(allergies).toUpperCase()}`, rightX + 10, yPos + 62, { width: boxWidth - 20 });
     } else {
       doc
         .fillColor(COLORS.success)
         .font('Helvetica')
         .fontSize(7.5)
-        .text(`✓ Sin alergias conocidas registradas`, rightX + 10, yPos + 62);
+        .text(`Sin alergias conocidas registradas`, rightX + 10, yPos + 62);
     }
 
     doc.y = yPos + boxHeight + 14;
@@ -880,11 +1027,11 @@ class PDFService {
       ],
       datas: items.map((item, idx) => ({
         index: String(idx + 1),
-        med: item.medication_name || 'Medicamento',
-        dosage: item.dosage || '—',
-        freq: item.frequency || '—',
-        duration: item.duration || '—',
-        instructions: item.instructions || 'Según indicación del facultativo',
+        med: this.stripEmojis(item.medication_name || 'Medicamento'),
+        dosage: this.stripEmojis(item.dosage || '—'),
+        freq: this.stripEmojis(item.frequency || '—'),
+        duration: this.stripEmojis(item.duration || '—'),
+        instructions: this.stripEmojis(item.instructions || 'Según indicación del facultativo'),
       })),
     };
 
@@ -920,13 +1067,13 @@ class PDFService {
         .fillColor('#92400e')
         .font('Helvetica-Bold')
         .fontSize(8.5)
-        .text('📋 INDICACIONES Y RECOMENDACIONES GENERALES:', margin + 10, notesBoxY + 8);
+        .text('INDICACIONES Y RECOMENDACIONES GENERALES:', margin + 10, notesBoxY + 8);
 
       doc
         .fillColor('#78350f')
         .font('Helvetica')
         .fontSize(8)
-        .text(presc.notes, margin + 10, notesBoxY + 22, { width: pageWidth - margin * 2 - 20 });
+        .text(this.stripEmojis(presc.notes), margin + 10, notesBoxY + 22, { width: pageWidth - margin * 2 - 20 });
 
       doc.y = notesBoxY + 60;
     }
@@ -976,6 +1123,567 @@ class PDFService {
     const filename = `Receta_${safeNumber}.pdf`;
 
     return { buffer, filename, documentNumber: presc.prescription_number };
+  }
+
+  /**
+   * Genera el PDF del Resumen de Facturas y Recibos con diseño ejecutivo y separación de tablas.
+   */
+  async generateInvoiceReceiptSummaryPDF({ startDate, endDate }) {
+    const store = als.getStore();
+    const clinicId = store?.clinicId || 1;
+    const clinic = await this.getClinicInfo(clinicId);
+
+    const data = await reportService.getInvoiceReceiptSummaryReport(startDate, endDate);
+    const invoices = data.invoices || [];
+    const receipts = data.receipts || [];
+    const totals = data.totals || {
+      invoices: { total: 0, count: 0 },
+      receipts: { total: 0, count: 0 },
+      byPaymentMethod: [],
+    };
+
+    const grandTotal = (totals.invoices?.total || 0) + (totals.receipts?.total || 0);
+    const totalDocs = (totals.invoices?.count || 0) + (totals.receipts?.count || 0);
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    const bufferPromise = this.streamToBuffer(doc);
+
+    // 1. Encabezado institucional elegante y espacioso (sin colisiones)
+    const fromLabel = startDate ? this.formatDate(startDate) : 'Inicio';
+    const toLabel = endDate ? this.formatDate(endDate) : 'Presente';
+    const periodLabel = `Período: ${fromLabel} — ${toLabel}`;
+    this.drawReportHeader(doc, clinic, {
+      title: 'Resumen Facturas y Recibos',
+      docNumber: 'CONTROL DE FACTURACIÓN Y COBROS',
+      periodText: periodLabel,
+      badgeColor: COLORS.primary,
+    });
+
+    // 2. Tarjetas KPI ejecutivas de resumen
+    const margin = 40;
+    const pageWidth = doc.page.width;
+    const boxWidth = pageWidth - margin * 2;
+    const cardY = doc.y + 4;
+    const cardWidth = (boxWidth - 20) / 3;
+    const cardHeight = 52;
+
+    // Card 1: Total Facturas
+    doc.roundedRect(margin, cardY, cardWidth, cardHeight, 4).fillAndStroke('#f0f9ff', '#bae6fd');
+    doc.fillColor('#0369a1').font('Helvetica-Bold').fontSize(8).text('TOTAL FACTURAS', margin + 10, cardY + 8);
+    doc.fillColor('#0c4a6e').font('Helvetica-Bold').fontSize(12).text(this.formatCurrency(totals.invoices?.total || 0, clinic.currency), margin + 10, cardY + 20);
+    doc.fillColor('#0284c7').font('Helvetica').fontSize(7.5).text(`${totals.invoices?.count || 0} factura(s) emitida(s)`, margin + 10, cardY + 36);
+
+    // Card 2: Total Recibos
+    const c2X = margin + cardWidth + 10;
+    doc.roundedRect(c2X, cardY, cardWidth, cardHeight, 4).fillAndStroke('#f0fdf4', '#bbf7d0');
+    doc.fillColor('#15803d').font('Helvetica-Bold').fontSize(8).text('TOTAL RECIBOS', c2X + 10, cardY + 8);
+    doc.fillColor('#14532d').font('Helvetica-Bold').fontSize(12).text(this.formatCurrency(totals.receipts?.total || 0, clinic.currency), c2X + 10, cardY + 20);
+    doc.fillColor('#16a34a').font('Helvetica').fontSize(7.5).text(`${totals.receipts?.count || 0} recibo(s) emitido(s)`, c2X + 10, cardY + 36);
+
+    // Card 3: Total Consolidado
+    const c3X = c2X + cardWidth + 10;
+    doc.roundedRect(c3X, cardY, cardWidth, cardHeight, 4).fillAndStroke('#f8fafc', '#cbd5e1');
+    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(8).text('TOTAL RECAUDADO', c3X + 10, cardY + 8);
+    doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(12).text(this.formatCurrency(grandTotal, clinic.currency), c3X + 10, cardY + 20);
+    doc.fillColor('#64748b').font('Helvetica').fontSize(7.5).text(`${totalDocs} documento(s) consolidado(s)`, c3X + 10, cardY + 36);
+
+    // 3. Desglose por métodos de pago
+    const pBreakdownY = cardY + cardHeight + 8;
+    doc.roundedRect(margin, pBreakdownY, boxWidth, 32, 4).fillAndStroke('#f8fafc', '#e2e8f0');
+
+    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(7.5).text('DESGLOSE DE INGRESOS POR MÉTODO DE PAGO:', margin + 10, pBreakdownY + 6);
+
+    const pMethods = totals.byPaymentMethod || [];
+    let pMethodsText = 'Sin cobros registrados en este período.';
+    if (pMethods.length > 0) {
+      pMethodsText = pMethods.map(pm => `${pm.method}: ${this.formatCurrency(pm.total, clinic.currency)}`).join('   •   ');
+    }
+    doc.fillColor('#1e293b').font('Helvetica').fontSize(8).text(pMethodsText, margin + 10, pBreakdownY + 17, { width: boxWidth - 20 });
+
+    doc.x = margin;
+    doc.y = pBreakdownY + 40;
+
+    // 4. Tabla de Facturas Oficiales
+    if (doc.y > 600) {
+      doc.addPage();
+      doc.x = margin;
+      doc.y = 40;
+    }
+    const facturasHeaderY = doc.y;
+    doc.roundedRect(margin, facturasHeaderY, boxWidth, 20, 3).fill('#0284c7');
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8.5).text(`1. FACTURAS OFICIALES EMITIDAS (${invoices.length} REGISTROS)`, margin + 8, facturasHeaderY + 5);
+    doc.fillColor('#e0f2fe').font('Helvetica-Bold').fontSize(8).text(`Subtotal: ${this.formatCurrency(totals.invoices?.total || 0, clinic.currency)}`, margin + boxWidth - 160, facturasHeaderY + 5, { width: 150, align: 'right' });
+
+    doc.x = margin;
+    doc.y = facturasHeaderY + 24;
+
+    const facturasTableData = {
+      headers: [
+        { label: 'Fecha', property: 'date', width: 65, align: 'center', headerColor: '#0284c7', headerOpacity: 1 },
+        { label: 'Nº Factura', property: 'number', width: 80, align: 'center', headerColor: '#0284c7', headerOpacity: 1 },
+        { label: 'Cliente / Paciente', property: 'customer', width: 150, align: 'left', headerColor: '#0284c7', headerOpacity: 1 },
+        { label: 'DNI / NIE / CIF', property: 'dni', width: 80, align: 'center', headerColor: '#0284c7', headerOpacity: 1 },
+        { label: 'Método de Pago', property: 'method', width: 75, align: 'center', headerColor: '#0284c7', headerOpacity: 1 },
+        { label: 'Importe', property: 'amount', width: 65, align: 'right', headerColor: '#0284c7', headerOpacity: 1 },
+      ],
+      datas: invoices.length > 0
+        ? invoices.map(inv => ({
+            date: this.formatDate(inv.date || inv.raw_date),
+            number: inv.invoice_number || `FAC-${inv.id}`,
+            customer: inv.customer_name || 'Sin nombre',
+            dni: inv.patient_identification || 'No registrado',
+            method: inv.payment_method || '—',
+            amount: this.formatCurrency(inv.amount, clinic.currency),
+          }))
+        : [{
+            date: '—',
+            number: '—',
+            customer: 'No se encontraron facturas en el período seleccionado.',
+            dni: '—',
+            method: '—',
+            amount: '—',
+          }],
+    };
+
+    if (invoices.length > 0) {
+      facturasTableData.datas.push({
+        date: '',
+        number: '',
+        customer: `TOTAL FACTURAS (${invoices.length} docs)`,
+        dni: '',
+        method: '',
+        amount: this.formatCurrency(totals.invoices?.total || 0, clinic.currency),
+      });
+    }
+
+    await doc.table(facturasTableData, {
+      x: margin,
+      columnsSize: [65, 80, 150, 80, 75, 65],
+      prepareHeader: () => {
+        doc.x = margin;
+        doc.font('Helvetica-Bold').fontSize(8).fillColor('#ffffff');
+      },
+      prepareRow: (row, indexColumn, indexRow, rectRow) => {
+        doc.x = margin;
+        const isTotalRow = indexRow === facturasTableData.datas.length - 1 && invoices.length > 0;
+        if (isTotalRow) {
+          doc.font('Helvetica-Bold').fontSize(8).fillColor('#0369a1');
+        } else {
+          doc.font('Helvetica').fontSize(8).fillColor('#1e293b');
+        }
+      },
+      padding: [4, 4],
+      headerBackgroundColor: '#0369a1',
+    });
+
+    // 5. Tabla de Recibos de Cobro
+    doc.x = margin;
+    doc.y += 16;
+    if (doc.y > 580) {
+      doc.addPage();
+      doc.x = margin;
+      doc.y = 40;
+    }
+
+    const recibosHeaderY = doc.y;
+    doc.roundedRect(margin, recibosHeaderY, boxWidth, 20, 3).fill('#16a34a');
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8.5).text(`2. RECIBOS DE PAGO EMITIDOS (${receipts.length} REGISTROS)`, margin + 8, recibosHeaderY + 5);
+    doc.fillColor('#dcfce7').font('Helvetica-Bold').fontSize(8).text(`Subtotal: ${this.formatCurrency(totals.receipts?.total || 0, clinic.currency)}`, margin + boxWidth - 160, recibosHeaderY + 5, { width: 150, align: 'right' });
+
+    doc.x = margin;
+    doc.y = recibosHeaderY + 24;
+
+    const recibosTableData = {
+      headers: [
+        { label: 'Fecha', property: 'date', width: 65, align: 'center', headerColor: '#16a34a', headerOpacity: 1 },
+        { label: 'Nº Recibo', property: 'number', width: 80, align: 'center', headerColor: '#16a34a', headerOpacity: 1 },
+        { label: 'Cliente / Paciente', property: 'customer', width: 150, align: 'left', headerColor: '#16a34a', headerOpacity: 1 },
+        { label: 'DNI / NIE / CIF', property: 'dni', width: 80, align: 'center', headerColor: '#16a34a', headerOpacity: 1 },
+        { label: 'Método de Pago', property: 'method', width: 75, align: 'center', headerColor: '#16a34a', headerOpacity: 1 },
+        { label: 'Importe', property: 'amount', width: 65, align: 'right', headerColor: '#16a34a', headerOpacity: 1 },
+      ],
+      datas: receipts.length > 0
+        ? receipts.map(rec => ({
+            date: this.formatDate(rec.date || rec.raw_date),
+            number: rec.receipt_number || `REC-${rec.id}`,
+            customer: rec.customer_name || 'Sin nombre',
+            dni: rec.patient_identification || 'No registrado',
+            method: rec.payment_method || '—',
+            amount: this.formatCurrency(rec.amount, clinic.currency),
+          }))
+        : [{
+            date: '—',
+            number: '—',
+            customer: 'No se encontraron recibos en el período seleccionado.',
+            dni: '—',
+            method: '—',
+            amount: '—',
+          }],
+    };
+
+    if (receipts.length > 0) {
+      recibosTableData.datas.push({
+        date: '',
+        number: '',
+        customer: `TOTAL RECIBOS (${receipts.length} docs)`,
+        dni: '',
+        method: '',
+        amount: this.formatCurrency(totals.receipts?.total || 0, clinic.currency),
+      });
+    }
+
+    await doc.table(recibosTableData, {
+      x: margin,
+      columnsSize: [65, 80, 150, 80, 75, 65],
+      prepareHeader: () => {
+        doc.x = margin;
+        doc.font('Helvetica-Bold').fontSize(8).fillColor('#ffffff');
+      },
+      prepareRow: (row, indexColumn, indexRow, rectRow) => {
+        doc.x = margin;
+        const isTotalRow = indexRow === recibosTableData.datas.length - 1 && receipts.length > 0;
+        if (isTotalRow) {
+          doc.font('Helvetica-Bold').fontSize(8).fillColor('#15803d');
+        } else {
+          doc.font('Helvetica').fontSize(8).fillColor('#1e293b');
+        }
+      },
+      padding: [4, 4],
+      headerBackgroundColor: '#15803d',
+    });
+
+    doc.x = margin;
+
+    // 6. Pie de página y numeración
+    const legalNotice = `${clinic.name || 'Clínica Dental'} · Informe oficial de control de facturación y cobros conforme a la legislación fiscal vigente.`;
+    this.drawFooterAndPages(doc, clinic, legalNotice);
+
+    doc.end();
+    const buffer = await bufferPromise;
+    const safeFrom = (startDate || 'inicio').replace(/[^a-zA-Z0-9-_]/g, '_');
+    const safeTo = (endDate || 'fin').replace(/[^a-zA-Z0-9-_]/g, '_');
+    const filename = `Resumen_Facturas_Recibos_${safeFrom}_${safeTo}.pdf`;
+
+    return { buffer, filename, documentNumber: 'INF-FAC-REC' };
+  }
+
+  /**
+   * Genera el PDF del Reporte de Ingresos Financieros.
+   */
+  async generateRevenueReportPDF({ startDate, endDate }) {
+    const store = als.getStore();
+    const clinicId = store?.clinicId || 1;
+    const clinic = await this.getClinicInfo(clinicId);
+
+    const data = await reportService.getRevenueReport(startDate, endDate);
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    const bufferPromise = this.streamToBuffer(doc);
+
+    const fromLabel = startDate ? this.formatDate(startDate) : 'Inicio';
+    const toLabel = endDate ? this.formatDate(endDate) : 'Presente';
+    this.drawReportHeader(doc, clinic, {
+      title: 'Reporte de Ingresos',
+      docNumber: 'INFORME FINANCIERO',
+      periodText: `Período: ${fromLabel} — ${toLabel}`,
+      badgeColor: COLORS.primary,
+    });
+
+    const margin = 40;
+    const boxWidth = doc.page.width - margin * 2;
+
+    // Card Total Ingresos
+    doc.roundedRect(margin, doc.y + 4, boxWidth, 52, 4).fillAndStroke('#f0fdf4', '#86efac');
+    doc.fillColor('#166534').font('Helvetica-Bold').fontSize(9).text('TOTAL DE INGRESOS RECAUDADOS EN EL PERÍODO', margin + 14, doc.y + 12);
+    doc.fillColor('#14532d').font('Helvetica-Bold').fontSize(16).text(this.formatCurrency(data.total || 0, clinic.currency), margin + 14, doc.y + 26);
+
+    doc.x = margin;
+    doc.y += 66;
+
+    // Tabla Ingresos por Método de Pago
+    const methodTableData = {
+      headers: [
+        { label: 'Método de Pago', property: 'method', width: 260 },
+        { label: 'Importe Total', property: 'total', width: 255, align: 'right' },
+      ],
+      datas: (data.byMethod || []).map(m => ({
+        method: m.method,
+        total: this.formatCurrency(m.total, clinic.currency),
+      })),
+    };
+
+    if (methodTableData.datas.length === 0) {
+      methodTableData.datas.push({ method: 'Sin cobros registrados', total: '0,00 €' });
+    }
+
+    doc.fillColor(COLORS.primaryDark).font('Helvetica-Bold').fontSize(9.5).text('1. INGRESOS POR MÉTODO DE PAGO', margin, doc.y);
+    doc.x = margin;
+    doc.y += 4;
+    await doc.table(methodTableData, {
+      x: margin,
+      columnsSize: [260, 255],
+      prepareHeader: () => {
+        doc.x = margin;
+        doc.font('Helvetica-Bold').fontSize(8).fillColor('#ffffff');
+      },
+      prepareRow: () => {
+        doc.x = margin;
+        doc.font('Helvetica').fontSize(8).fillColor('#1e293b');
+      },
+      padding: [4, 4],
+      headerBackgroundColor: '#0284c7',
+    });
+
+    // Tabla Ingresos por Médico
+    doc.x = margin;
+    doc.y += 14;
+    if (doc.y > 620) {
+      doc.addPage();
+      doc.x = margin;
+      doc.y = 40;
+    }
+
+    const doctorTableData = {
+      headers: [
+        { label: 'Profesional / Odontólogo', property: 'doctor', width: 260 },
+        { label: 'Importe Generado', property: 'total', width: 255, align: 'right' },
+      ],
+      datas: (data.byDoctor || []).map(d => ({
+        doctor: d.doctor,
+        total: this.formatCurrency(d.total, clinic.currency),
+      })),
+    };
+
+    if (doctorTableData.datas.length === 0) {
+      doctorTableData.datas.push({ doctor: 'Sin actividad médica registrada', total: '0,00 €' });
+    }
+
+    doc.fillColor(COLORS.primaryDark).font('Helvetica-Bold').fontSize(9.5).text('2. INGRESOS POR MÉDICO / ODONTÓLOGO', margin, doc.y);
+    doc.x = margin;
+    doc.y += 4;
+    await doc.table(doctorTableData, {
+      x: margin,
+      columnsSize: [260, 255],
+      prepareHeader: () => {
+        doc.x = margin;
+        doc.font('Helvetica-Bold').fontSize(8).fillColor('#ffffff');
+      },
+      prepareRow: () => {
+        doc.x = margin;
+        doc.font('Helvetica').fontSize(8).fillColor('#1e293b');
+      },
+      padding: [4, 4],
+      headerBackgroundColor: '#0f766e',
+    });
+
+    doc.x = margin;
+    this.drawFooterAndPages(doc, clinic, `${clinic.name} · Reporte Financiero de Ingresos.`);
+    doc.end();
+    const buffer = await bufferPromise;
+    const filename = `Reporte_Ingresos_${(startDate || 'inicio').replace(/[^a-zA-Z0-9-_]/g, '_')}_${(endDate || 'fin').replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+    return { buffer, filename, documentNumber: 'INF-ING' };
+  }
+
+  /**
+   * Genera el PDF del Reporte Operativo de Citas.
+   */
+  async generateAppointmentsReportPDF({ startDate, endDate }) {
+    const store = als.getStore();
+    const clinicId = store?.clinicId || 1;
+    const clinic = await this.getClinicInfo(clinicId);
+
+    const data = await reportService.getAppointmentReport(startDate, endDate);
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    const bufferPromise = this.streamToBuffer(doc);
+
+    const fromLabel = startDate ? this.formatDate(startDate) : 'Inicio';
+    const toLabel = endDate ? this.formatDate(endDate) : 'Presente';
+    this.drawReportHeader(doc, clinic, {
+      title: 'Reporte de Citas',
+      docNumber: 'INFORME OPERATIVO',
+      periodText: `Período: ${fromLabel} — ${toLabel}`,
+      badgeColor: '#4f46e5',
+    });
+
+    const margin = 40;
+    const boxWidth = doc.page.width - margin * 2;
+
+    // Card Total Citas
+    doc.roundedRect(margin, doc.y + 4, boxWidth, 52, 4).fillAndStroke('#eef2ff', '#c7d2fe');
+    doc.fillColor('#3730a3').font('Helvetica-Bold').fontSize(9).text('TOTAL DE CITAS REGISTRADAS EN EL PERÍODO', margin + 14, doc.y + 12);
+    doc.fillColor('#312e81').font('Helvetica-Bold').fontSize(16).text(`${data.total || 0} Citas Agendadas`, margin + 14, doc.y + 26);
+
+    doc.x = margin;
+    doc.y += 66;
+
+    // Tabla de Citas por Estado
+    const statusTableData = {
+      headers: [
+        { label: 'Estado de la Cita', property: 'status', width: 260 },
+        { label: 'Cantidad de Citas', property: 'count', width: 255, align: 'right' },
+      ],
+      datas: (data.byStatus || []).map(s => ({
+        status: s.status,
+        count: `${s.count} citas`,
+      })),
+    };
+
+    doc.fillColor('#4338ca').font('Helvetica-Bold').fontSize(9.5).text('1. DISTRIBUCIÓN POR ESTADO', margin, doc.y);
+    doc.x = margin;
+    doc.y += 4;
+    await doc.table(statusTableData, {
+      x: margin,
+      columnsSize: [260, 255],
+      prepareHeader: () => {
+        doc.x = margin;
+        doc.font('Helvetica-Bold').fontSize(8).fillColor('#ffffff');
+      },
+      prepareRow: () => {
+        doc.x = margin;
+        doc.font('Helvetica').fontSize(8).fillColor('#1e293b');
+      },
+      padding: [4, 4],
+      headerBackgroundColor: '#4f46e5',
+    });
+
+    // Tabla de Citas por Médico
+    doc.x = margin;
+    doc.y += 14;
+    if (doc.y > 620) {
+      doc.addPage();
+      doc.x = margin;
+      doc.y = 40;
+    }
+
+    const docTableData = {
+      headers: [
+        { label: 'Profesional Asignado', property: 'doctor', width: 260 },
+        { label: 'Citas Asignadas', property: 'count', width: 255, align: 'right' },
+      ],
+      datas: (data.byDoctor || []).map(d => ({
+        doctor: d.doctor,
+        count: `${d.count} citas`,
+      })),
+    };
+
+    doc.fillColor('#4338ca').font('Helvetica-Bold').fontSize(9.5).text('2. CITAS POR PROFESIONAL', margin, doc.y);
+    doc.x = margin;
+    doc.y += 4;
+    await doc.table(docTableData, {
+      x: margin,
+      columnsSize: [260, 255],
+      prepareHeader: () => {
+        doc.x = margin;
+        doc.font('Helvetica-Bold').fontSize(8).fillColor('#ffffff');
+      },
+      prepareRow: () => {
+        doc.x = margin;
+        doc.font('Helvetica').fontSize(8).fillColor('#1e293b');
+      },
+      padding: [4, 4],
+      headerBackgroundColor: '#6366f1',
+    });
+
+    doc.x = margin;
+    this.drawFooterAndPages(doc, clinic, `${clinic.name} · Reporte Operativo de Citas.`);
+    doc.end();
+    const buffer = await bufferPromise;
+    const filename = `Reporte_Citas_${(startDate || 'inicio').replace(/[^a-zA-Z0-9-_]/g, '_')}_${(endDate || 'fin').replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+    return { buffer, filename, documentNumber: 'INF-CIT' };
+  }
+
+  /**
+   * Genera el PDF del Reporte Clínico de Tratamientos.
+   */
+  async generateTreatmentsReportPDF({ startDate, endDate }) {
+    const store = als.getStore();
+    const clinicId = store?.clinicId || 1;
+    const clinic = await this.getClinicInfo(clinicId);
+
+    const data = await reportService.getTreatmentReport(startDate, endDate);
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    const bufferPromise = this.streamToBuffer(doc);
+
+    const fromLabel = startDate ? this.formatDate(startDate) : 'Inicio';
+    const toLabel = endDate ? this.formatDate(endDate) : 'Presente';
+    this.drawReportHeader(doc, clinic, {
+      title: 'Reporte de Tratamientos',
+      docNumber: 'INFORME CLÍNICO',
+      periodText: `Período: ${fromLabel} — ${toLabel}`,
+      badgeColor: '#0284c7',
+    });
+
+    const margin = 40;
+    doc.x = margin;
+    doc.y += 6;
+
+    const treatTableData = {
+      headers: [
+        { label: '#', property: 'rank', width: 35, align: 'center' },
+        { label: 'Servicio / Tratamiento Odontológico', property: 'name', width: 280 },
+        { label: 'Frecuencia', property: 'count', width: 90, align: 'center' },
+        { label: 'Ingresos Totales', property: 'total', width: 110, align: 'right' },
+      ],
+      datas: (data.popular || []).map((t, idx) => ({
+        rank: `# ${idx + 1}`,
+        name: t.treatment,
+        count: `${t.count} veces`,
+        total: this.formatCurrency(t.total || 0, clinic.currency),
+      })),
+    };
+
+    if (treatTableData.datas.length === 0) {
+      treatTableData.datas.push({
+        rank: '—',
+        name: 'No hay tratamientos registrados en el rango.',
+        count: '—',
+        total: '—',
+      });
+    }
+
+    doc.fillColor('#0369a1').font('Helvetica-Bold').fontSize(9.5).text('RANKING DE TRATAMIENTOS MÁS REALIZADOS', margin, doc.y);
+    doc.x = margin;
+    doc.y += 4;
+    await doc.table(treatTableData, {
+      x: margin,
+      columnsSize: [35, 280, 90, 110],
+      prepareHeader: () => {
+        doc.x = margin;
+        doc.font('Helvetica-Bold').fontSize(8).fillColor('#ffffff');
+      },
+      prepareRow: () => {
+        doc.x = margin;
+        doc.font('Helvetica').fontSize(8).fillColor('#1e293b');
+      },
+      padding: [4, 4],
+      headerBackgroundColor: '#0284c7',
+    });
+
+    doc.x = margin;
+    this.drawFooterAndPages(doc, clinic, `${clinic.name} · Reporte Clínico de Tratamientos.`);
+    doc.end();
+    const buffer = await bufferPromise;
+    const filename = `Reporte_Tratamientos_${(startDate || 'inicio').replace(/[^a-zA-Z0-9-_]/g, '_')}_${(endDate || 'fin').replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+    return { buffer, filename, documentNumber: 'INF-TRAT' };
+  }
+
+  /**
+   * Router maestro para generación de PDF de cualquier tipo de reporte.
+   */
+  async generateReportPDF(type, startDate, endDate) {
+    if (type === 'facturas_recibos') {
+      return this.generateInvoiceReceiptSummaryPDF({ startDate, endDate });
+    } else if (type === 'ingresos') {
+      return this.generateRevenueReportPDF({ startDate, endDate });
+    } else if (type === 'citas') {
+      return this.generateAppointmentsReportPDF({ startDate, endDate });
+    } else if (type === 'tratamientos') {
+      return this.generateTreatmentsReportPDF({ startDate, endDate });
+    } else {
+      return this.generateInvoiceReceiptSummaryPDF({ startDate, endDate });
+    }
   }
 }
 

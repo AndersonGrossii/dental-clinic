@@ -31,6 +31,7 @@ class Modal {
     cancelText = 'Cancelar',
     onConfirm = null,
     onCancel = null,
+    onOpen = null,
   }) {
     // 1. Verificar y cerrar cualquier modal existente
     this.closeAll();
@@ -66,6 +67,15 @@ class Modal {
 
     document.body.appendChild(overlay);
 
+    const bodyContent = overlay.querySelector('.modal-body');
+    if (typeof onOpen === 'function') {
+      try {
+        onOpen(bodyContent, overlay);
+      } catch (err) {
+        console.error('Error in Modal onOpen:', err);
+      }
+    }
+
     const close = () => {
       overlay.style.animation = 'fadeOut 0.2s ease-out forwards';
       overlay.querySelector('.modal').style.animation = 'fadeOut 0.2s ease-out forwards';
@@ -84,9 +94,9 @@ class Modal {
       if (onConfirm) {
         const btn = e.target;
         btn.disabled = true;
-        const bodyContent = overlay.querySelector('.modal-body');
+        const currentBodyContent = overlay.querySelector('.modal-body');
         // Ejecutar callback (que puede ser asíncrono)
-        const shouldClose = await onConfirm(bodyContent);
+        const shouldClose = await onConfirm(currentBodyContent);
         btn.disabled = false;
         if (shouldClose !== false) close();
       } else {
@@ -98,6 +108,8 @@ class Modal {
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) close();
     });
+
+    return overlay;
   }
 
   /**

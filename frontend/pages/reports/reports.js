@@ -67,11 +67,12 @@ export class Reports {
               <option value="ingresos">Reporte Financiero (Ingresos)</option>
               <option value="citas">Reporte Operativo (Citas)</option>
               <option value="tratamientos">Reporte Clínico (Tratamientos)</option>
+              <option value="facturas_recibos">Resumen de Facturas y Recibos</option>
             </select>
           </div>
           <button id="generate-report-btn" class="btn btn-primary">Generar Reporte</button>
-          <button id="export-csv-btn" class="btn btn-outline" style="display: none;">Exportar CSV</button>
-          <button id="print-report-btn" class="btn btn-outline" style="display: none;">Imprimir</button>
+          <button id="export-pdf-btn" class="btn btn-primary" style="display: none; background-color: #0369a1; border-color: #0284c7;">📄 Descargar PDF</button>
+          <button id="print-report-btn" class="btn btn-outline" style="display: none;">🖨️ Imprimir</button>
         </div>
       </div>
 
@@ -87,14 +88,14 @@ export class Reports {
 
   mount() {
     const generateBtn = this.container.querySelector('#generate-report-btn');
-    const exportBtn = this.container.querySelector('#export-csv-btn');
+    const exportPdfBtn = this.container.querySelector('#export-pdf-btn');
 
     if (generateBtn) {
       generateBtn.addEventListener('click', () => this.generateReport());
     }
 
-    if (exportBtn) {
-      exportBtn.addEventListener('click', () => this.exportCsv());
+    if (exportPdfBtn) {
+      exportPdfBtn.addEventListener('click', () => this.exportPdf());
     }
 
     const printBtn = this.container.querySelector('#print-report-btn');
@@ -270,10 +271,16 @@ export class Reports {
         `;
 
         try { this.initTreatmentCharts(data); } catch (e) { console.warn('Error en treatment charts:', e); }
+      } else if (type === 'facturas_recibos') {
+        const data = await reportService.getInvoiceReceiptSummary(from, to);
+        this.reportData = data;
+        this.renderInvoiceReceiptSummary(resultsContainer, data);
       }
 
-      this.container.querySelector('#export-csv-btn').style.display = 'inline-block';
-      this.container.querySelector('#print-report-btn').style.display = 'inline-block';
+      const exportPdfBtn = this.container.querySelector('#export-pdf-btn');
+      if (exportPdfBtn) exportPdfBtn.style.display = 'inline-block';
+      const printBtn = this.container.querySelector('#print-report-btn');
+      if (printBtn) printBtn.style.display = 'inline-block';
     } catch (err) {
       toast.error('Error al generar el reporte.');
       resultsContainer.innerHTML = `<p style="color: var(--danger-600);">Error: ${err.message}</p>`;
@@ -403,15 +410,199 @@ export class Reports {
     }
   }
 
+  renderInvoiceReceiptSummary(resultsContainer, data) {
+    const invoices = data.invoices || [];
+    const receipts = data.receipts || [];
+    const totals = data.totals || { invoices: { total: 0, count: 0 }, receipts: { total: 0, count: 0 }, byPaymentMethod: [] };
+
+    const paymentMethodsHtml = (totals.byPaymentMethod || []).length > 0
+      ? totals.byPaymentMethod.map(pm => `
+          <div style="background: var(--gray-50); border: 1px solid var(--color-border); border-radius: var(--radius-md, 6px); padding: var(--space-3); min-width: 160px; flex: 1;">
+            <div style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">${pm.method}</div>
+            <div style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin-top: 4px;">${formatCurrency(pm.total)}</div>
+          </div>
+        `).join('')
+      : `<div style="color: var(--text-secondary); font-size: 13px; font-style: italic; padding: var(--space-2);">No hay cobros registrados en este período.</div>`;
+
+    const invoiceRows = invoices.length > 0
+      ? invoices.map(inv => `
+          <tr>
+            <td>${formatDate(inv.date || inv.raw_date)}</td>
+            <td><strong class="badge badge-info" style="font-family: monospace; font-size: 13px;"># ${inv.invoice_number}</strong></td>
+            <td><strong>${inv.customer_name}</strong></td>
+            <td><span class="${inv.patient_identification === 'No registrado' ? 'badge badge-neutral' : ''}" style="${inv.patient_identification === 'No registrado' ? 'font-style: italic;' : 'font-weight: 600;'}">${inv.patient_identification}</span></td>
+            <td><strong style="color: var(--primary-700);">${formatCurrency(inv.amount)}</strong></td>
+            <td><span class="badge badge-neutral" style="font-size: 12px;">${inv.payment_method}</span></td>
+          </tr>
+        `).join('')
+      : `<tr><td colspan="6" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">No se encontraron facturas en el rango de fechas seleccionado.</td></tr>`;
+
+    const receiptRows = receipts.length > 0
+      ? receipts.map(rec => `
+          <tr>
+            <td>${formatDate(rec.date || rec.raw_date)}</td>
+            <td><strong class="badge badge-success" style="font-family: monospace; font-size: 13px; background-color: var(--success-100); color: var(--success-800); border: 1px solid var(--success-300);"># ${rec.receipt_number}</strong></td>
+            <td><strong>${rec.customer_name}</strong></td>
+            <td><span class="${rec.patient_identification === 'No registrado' ? 'badge badge-neutral' : ''}" style="${rec.patient_identification === 'No registrado' ? 'font-style: italic;' : 'font-weight: 600;'}">${rec.patient_identification}</span></td>
+            <td><strong style="color: var(--success-700);">${formatCurrency(rec.amount)}</strong></td>
+            <td><span class="badge badge-neutral" style="font-size: 12px;">${rec.payment_method}</span></td>
+          </tr>
+        `).join('')
+      : `<tr><td colspan="6" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">No se encontraron recibos en el rango de fechas seleccionado.</td></tr>`;
+
+    resultsContainer.innerHTML = `
+      <div style="display: flex; flex-direction: column; gap: var(--space-6);">
+        <!-- Totals Cards -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4);">
+          <div class="card" style="background-color: var(--primary-50); border-left: 6px solid var(--primary-500); padding: var(--space-6);">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+              <div>
+                <h3 style="margin: 0; color: var(--primary-900); font-size: 16px;">Total Facturas</h3>
+                <span style="font-size: 32px; font-weight: 700; color: var(--primary-800); display: block; margin-top: 4px;">
+                  ${formatCurrency(totals.invoices?.total || 0)}
+                </span>
+                <span style="font-size: 13px; color: var(--primary-700); margin-top: 4px; display: inline-block;">
+                  ${totals.invoices?.count || 0} factura(s) emitida(s)
+                </span>
+              </div>
+              <span style="font-size: 32px;">📄</span>
+            </div>
+          </div>
+
+          <div class="card" style="background-color: var(--success-50); border-left: 6px solid var(--success-500); padding: var(--space-6);">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+              <div>
+                <h3 style="margin: 0; color: var(--success-900); font-size: 16px;">Total Recibos</h3>
+                <span style="font-size: 32px; font-weight: 700; color: var(--success-800); display: block; margin-top: 4px;">
+                  ${formatCurrency(totals.receipts?.total || 0)}
+                </span>
+                <span style="font-size: 13px; color: var(--success-700); margin-top: 4px; display: inline-block;">
+                  ${totals.receipts?.count || 0} recibo(s) emitido(s)
+                </span>
+              </div>
+              <span style="font-size: 32px;">🧾</span>
+            </div>
+          </div>
+
+          <div class="card" style="grid-column: span 2; padding: var(--space-5);">
+            <div style="margin-bottom: var(--space-3);">
+              <h3 style="margin: 0; font-size: 15px; color: var(--text-primary); font-weight: 600;">💳 Desglose por Método de Pago</h3>
+            </div>
+            <div style="display: flex; gap: var(--space-3); flex-wrap: wrap;">
+              ${paymentMethodsHtml}
+            </div>
+          </div>
+        </div>
+
+        <!-- Section / Tabs Header -->
+        <div>
+          <div style="display: flex; gap: var(--space-2); border-bottom: 2px solid var(--color-border); margin-bottom: var(--space-4);">
+            <button type="button" id="tab-btn-facturas" class="btn btn-primary" style="border-bottom-left-radius: 0; border-bottom-right-radius: 0; padding: var(--space-2) var(--space-4); font-weight: 600;">
+              📄 Facturas (${invoices.length})
+            </button>
+            <button type="button" id="tab-btn-recibos" class="btn btn-outline" style="border-bottom-left-radius: 0; border-bottom-right-radius: 0; padding: var(--space-2) var(--space-4); font-weight: 600; border-bottom: none;">
+              🧾 Recibos (${receipts.length})
+            </button>
+          </div>
+
+          <!-- Section Facturas -->
+          <div id="section-facturas" class="card">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+              <h3>Detalle de Facturas Emitidas</h3>
+              <span class="badge badge-info">${invoices.length} registro(s)</span>
+            </div>
+            <div class="card-body table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Número de Factura</th>
+                    <th>Nombre del Cliente</th>
+                    <th>DNI / NIE / Pasaporte</th>
+                    <th>Importe</th>
+                    <th>Método de Pago</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${invoiceRows}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Section Recibos -->
+          <div id="section-recibos" class="card" style="display: none;">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+              <h3>Detalle de Recibos de Pago</h3>
+              <span class="badge badge-success">${receipts.length} registro(s)</span>
+            </div>
+            <div class="card-body table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Número de Recibo</th>
+                    <th>Nombre del Cliente</th>
+                    <th>DNI / NIE / Pasaporte</th>
+                    <th>Importe</th>
+                    <th>Método de Pago</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${receiptRows}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Bind tab events
+    const tabFacturas = resultsContainer.querySelector('#tab-btn-facturas');
+    const tabRecibos = resultsContainer.querySelector('#tab-btn-recibos');
+    const secFacturas = resultsContainer.querySelector('#section-facturas');
+    const secRecibos = resultsContainer.querySelector('#section-recibos');
+
+    if (tabFacturas && tabRecibos && secFacturas && secRecibos) {
+      tabFacturas.addEventListener('click', () => {
+        tabFacturas.className = 'btn btn-primary';
+        tabRecibos.className = 'btn btn-outline';
+        secFacturas.style.display = 'block';
+        secRecibos.style.display = 'none';
+      });
+
+      tabRecibos.addEventListener('click', () => {
+        tabRecibos.className = 'btn btn-primary';
+        tabFacturas.className = 'btn btn-outline';
+        secFacturas.style.display = 'none';
+        secRecibos.style.display = 'block';
+      });
+    }
+  }
+
   printReport() {
-    const typeLabels = { ingresos: 'Reporte Financiero (Ingresos)', citas: 'Reporte Operativo (Citas)', tratamientos: 'Reporte Clínico (Tratamientos)' };
+    const typeLabels = {
+      ingresos: 'Reporte Financiero (Ingresos)',
+      citas: 'Reporte Operativo (Citas)',
+      tratamientos: 'Reporte Clínico (Tratamientos)',
+      facturas_recibos: 'Resumen de Facturas y Recibos',
+    };
     const from = this.container.querySelector('#report-date-from').value;
     const to = this.container.querySelector('#report-date-to').value;
     const typeLabel = typeLabels[this.activeReport] || 'Reporte';
     const title = `${typeLabel} — ${from} al ${to}`;
 
     const contentEl = this.container.querySelector('#report-results-container');
-    const printContent = contentEl.innerHTML.replace(/<canvas[^>]*>.*?<\/canvas>/g, '');
+    const cloneEl = contentEl.cloneNode(true);
+    
+    // Ensure both sections are visible in printable document
+    const secFacturas = cloneEl.querySelector('#section-facturas');
+    const secRecibos = cloneEl.querySelector('#section-recibos');
+    if (secFacturas) secFacturas.style.display = 'block';
+    if (secRecibos) secRecibos.style.display = 'block';
+
+    const printContent = cloneEl.innerHTML.replace(/<canvas[^>]*>.*?<\/canvas>/g, '');
 
     const w = window.open('', '_blank');
     w.document.write(`
@@ -438,9 +629,13 @@ export class Reports {
     w.print();
   }
 
-  exportCsv() {
+  exportPdf() {
     const from = this.container.querySelector('#report-date-from').value;
     const to = this.container.querySelector('#report-date-to').value;
-    reportService.exportCsv(this.activeReport, from, to);
+    reportService.exportPdf(this.activeReport, from, to);
+  }
+
+  exportCsv() {
+    this.exportPdf();
   }
 }

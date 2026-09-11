@@ -15,6 +15,9 @@ const suites = [
   { name: 'Aislamiento Multi-Tenant y Seguridad entre Clínicas (11 pruebas)', file: 'test_multi_tenant_isolation.js' },
   { name: 'Documentos, Radiografías y Aislamiento de Archivos (15 pruebas)', file: 'test_documents_and_images.js' },
   { name: 'Generación de PDFs Clínicos & Multi-Tenant (17 pruebas)', file: 'test_pdf_generation.js' },
+  { name: 'Resumen de Facturas y Recibos — Reporte Financiero (47 pruebas)', file: 'test_invoice_receipt_report.js' },
+  { name: 'Generación de Reportes PDF de Alta Calidad (11 pruebas)', file: 'test_report_pdf.js' },
+  { name: 'Paquetes Promocionales de Tratamientos (40 pruebas)', file: 'test_promotional_packs.js' },
 ];
 
 console.log('\n╔══════════════════════════════════════════════════════════════════╗');
