@@ -16,5 +16,6 @@ router.get('/receipts/:id', allRoles, controller.getReceiptPDF);
 router.get('/quotations/:id', allRoles, controller.getQuotationPDF);
 router.get('/prescriptions/:id', allRoles, controller.getPrescriptionPDF);
 router.get('/reports/:type', managementOnly, controller.getReportPDF);
+router.get('/agenda', allRoles, controller.getAgendaPDF);
 
 export default router;

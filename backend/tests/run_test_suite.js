@@ -18,6 +18,7 @@ const suites = [
   { name: 'Resumen de Facturas y Recibos — Reporte Financiero (47 pruebas)', file: 'test_invoice_receipt_report.js' },
   { name: 'Generación de Reportes PDF de Alta Calidad (11 pruebas)', file: 'test_report_pdf.js' },
   { name: 'Paquetes Promocionales de Tratamientos (40 pruebas)', file: 'test_promotional_packs.js' },
+  { name: 'Generación de Agenda PDF e Impresión con Citas Simultáneas (21 pruebas)', file: 'test_agenda_pdf.js' },
 ];
 
 console.log('\n╔══════════════════════════════════════════════════════════════════╗');

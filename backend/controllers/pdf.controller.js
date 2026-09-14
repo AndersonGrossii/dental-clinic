@@ -82,3 +82,23 @@ export const getReportPDF = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * GET /api/v1/pdf/agenda
+ * Genera y descarga el PDF de la agenda médica (diaria o semanal).
+ */
+export const getAgendaPDF = async (req, res, next) => {
+  try {
+    const { date, slot_duration, doctor_id, mode } = req.query;
+    const result = await pdfService.generateAgendaPDF({
+      date,
+      slotDuration: parseInt(slot_duration || '30', 10),
+      doctorId: doctor_id ? parseInt(doctor_id, 10) : null,
+      mode: mode || 'daily',
+    });
+    return sendPdfResponse(res, req, result);
+  } catch (error) {
+    next(error);
+  }
+};
+

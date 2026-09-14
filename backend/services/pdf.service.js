@@ -9,6 +9,8 @@ import invoiceRepository from '../repositories/invoice.repository.js';
 import quotationRepository from '../repositories/quotation.repository.js';
 import prescriptionRepository from '../repositories/prescription.repository.js';
 import settingsRepository from '../repositories/settings.repository.js';
+import appointmentRepository from '../repositories/appointment.repository.js';
+import doctorRepository from '../repositories/doctor.repository.js';
 import reportService from './report.service.js';
 import { query, als } from '../database/pool.js';
 import { AppError } from '../utils/errors.js';
@@ -1667,6 +1669,565 @@ class PDFService {
     const buffer = await bufferPromise;
     const filename = `Reporte_Tratamientos_${(startDate || 'inicio').replace(/[^a-zA-Z0-9-_]/g, '_')}_${(endDate || 'fin').replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
     return { buffer, filename, documentNumber: 'INF-TRAT' };
+  }
+
+  /**
+   * Helper para obtener el rango horario de una cita con duración por defecto segura.
+   */
+  _getAppointmentRange(a, defaultDuration = 30) {
+    const s = a.start_time ? String(a.start_time).substring(0, 5) : '';
+    let e = a.end_time ? String(a.end_time).substring(0, 5) : '';
+    if (!e || e <= s) {
+      if (!s) return { s: '09:00', e: '09:30' };
+      const [sh, sm] = s.split(':').map(Number);
+      const totalMins = (sh || 0) * 60 + (sm || 0) + (Number(defaultDuration) || 30);
+      const eh = String(Math.floor(totalMins / 60)).padStart(2, '0');
+      const em = String(totalMins % 60).padStart(2, '0');
+      e = `${eh}:${em}`;
+    }
+    return { s, e };
+  }
+
+  /**
+   * Helper para extraer ID personalizado de paciente.
+   */
+  getPatientCustomId(a) {
+    return a.custom_id || a.customId || a.patient_custom_id || (a.patient_id ? `PAC-${String(a.patient_id).padStart(5, '0')}` : '—');
+  }
+
+  /**
+   * Helper para extraer nombre completo del paciente.
+   */
+  getPatientName(a) {
+    if (a.patient_name) return a.patient_name;
+    if (a.patient_first_name) return `${a.patient_first_name} ${a.patient_last_name || ''}`.trim();
+    if (a.guest_name) return a.guest_name;
+    return 'Sin paciente';
+  }
+
+  /**
+   * Helper para extraer teléfono del paciente.
+   */
+  getPatientPhone(a) {
+    return a.patient_phone || a.phone || a.guest_phone || 'Sin teléfono';
+  }
+
+  /**
+   * Genera el documento PDF oficial de la Agenda Médica (Diaria o Semanal)
+   * respetando los intervalos de tiempo seleccionados (15, 30 o 60 min)
+   * y mostrando todas las citas simultáneas por doctor.
+   */
+  async generateAgendaPDF({ date, slotDuration = 30, doctorId = null, mode = 'daily' } = {}) {
+    const store = als.getStore();
+    const clinicId = store?.clinicId || 1;
+    const clinic = await this.getClinicInfo(clinicId);
+
+    const validDuration = [15, 30, 60].includes(Number(slotDuration)) ? Number(slotDuration) : 30;
+    const printDate = date ? String(date).slice(0, 10) : new Date().toISOString().slice(0, 10);
+
+    const formatTimeSlot = (timeStr) => {
+      if (!timeStr) return '';
+      return String(timeStr).substring(0, 5);
+    };
+
+    if (mode === 'weekly') {
+      return this._generateWeeklyAgendaPDF({ clinic, printDate, validDuration, doctorId });
+    }
+
+    // ============================================
+    // MODO DIARIO (Agenda del Día)
+    // ============================================
+    const appointmentsResult = await appointmentRepository.findAllWithDetails({
+      limit: 9999,
+      sortBy: 'a.start_time',
+      sortOrder: 'ASC',
+      filters: {
+        date_from: printDate,
+        date_to: printDate,
+        doctor_id: doctorId || undefined,
+        exclude_cancelled: true,
+      },
+    });
+    const appointments = appointmentsResult.rows || [];
+
+    const doctorsResult = await doctorRepository.findAllWithUsers({ limit: 500 });
+    const allDoctors = doctorsResult.rows || [];
+    const activeDoctors = allDoctors.filter(d => d.is_active);
+
+    // Obtener horarios e indisponibilidades de los doctores
+    const [unavailResults, scheduleResults] = await Promise.all([
+      Promise.all(activeDoctors.map(d =>
+        doctorRepository.getUnavailability(d.id, printDate, printDate).catch(() => [])
+      )),
+      Promise.all(activeDoctors.map(d =>
+        doctorRepository.getSchedule(d.id).catch(() => [])
+      )),
+    ]);
+
+    // Agrupar citas por doctor
+    const apptsByDoctor = {};
+    appointments.forEach(a => {
+      const docKey = a.doctor_id || (a.doctor_name ? `name_${a.doctor_name}` : 'unassigned');
+      if (!apptsByDoctor[docKey]) apptsByDoctor[docKey] = [];
+      apptsByDoctor[docKey].push(a);
+    });
+
+    const dow = new Date(printDate + 'T12:00:00').getDay();
+    const doctorsToShow = [];
+
+    activeDoctors.forEach((d, idx) => {
+      if (doctorId && Number(d.id) !== Number(doctorId)) return;
+
+      const unavail = unavailResults[idx] || [];
+      const schedules = scheduleResults[idx] || [];
+
+      const isUnavailable = unavail.some(rec => {
+        const start = String(rec.start_date).slice(0, 10);
+        const end = String(rec.end_date).slice(0, 10);
+        return printDate >= start && printDate <= end;
+      });
+
+      const daySched = schedules.find(s => s.day_of_week === dow && s.is_active);
+      const worksToday = !isUnavailable && !!daySched;
+      const docAppts = apptsByDoctor[d.id] || [];
+
+      if (worksToday || docAppts.length > 0 || (doctorId && Number(d.id) === Number(doctorId))) {
+        doctorsToShow.push({
+          id: d.id,
+          name: `${d.first_name || ''} ${d.last_name || ''}`.trim() || 'Doctor',
+          specialty: d.specialty || 'Odontología General',
+          appointments: docAppts.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || '')),
+        });
+      }
+    });
+
+    // Incluir cualquier cita asignada a doctores fuera de activeDoctors
+    const matchedDoctorIds = new Set(doctorsToShow.map(d => d.id));
+    Object.keys(apptsByDoctor).forEach(key => {
+      const docAppts = apptsByDoctor[key];
+      if (docAppts.length > 0 && !matchedDoctorIds.has(docAppts[0].doctor_id)) {
+        if (!doctorId || Number(docAppts[0].doctor_id) === Number(doctorId)) {
+          doctorsToShow.push({
+            id: docAppts[0].doctor_id || 0,
+            name: docAppts[0].doctor_name || 'Doctor',
+            specialty: docAppts[0].doctor_specialty || '',
+            appointments: docAppts.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || '')),
+          });
+        }
+      }
+    });
+
+    // Calcular franja de horarios (mínimo 09:00 - 20:00 o ampliado según citas)
+    let minHourMinutes = 540; // 09:00
+    let maxHourMinutes = 1200; // 20:00
+    appointments.forEach(a => {
+      if (a.start_time) {
+        const [h, m] = a.start_time.substring(0, 5).split(':').map(Number);
+        const mins = (h || 0) * 60 + (m || 0);
+        if (mins < minHourMinutes) minHourMinutes = mins;
+      }
+      if (a.end_time) {
+        const [h, m] = a.end_time.substring(0, 5).split(':').map(Number);
+        const mins = (h || 0) * 60 + (m || 0);
+        if (mins > maxHourMinutes) maxHourMinutes = Math.min(mins, 1440);
+      }
+    });
+
+    // Alinear al intervalo seleccionado
+    minHourMinutes = Math.floor(minHourMinutes / validDuration) * validDuration;
+    maxHourMinutes = Math.ceil(maxHourMinutes / validDuration) * validDuration;
+
+    const slots = [];
+    for (let m = minHourMinutes; m < maxHourMinutes; m += validDuration) {
+      const hStr = String(Math.floor(m / 60)).padStart(2, '0');
+      const mStr = String(m % 60).padStart(2, '0');
+      const nextM = m + validDuration;
+      const nextHStr = String(Math.floor(nextM / 60)).padStart(2, '0');
+      const nextMStr = String(nextM % 60).padStart(2, '0');
+      slots.push({
+        label: `${hStr}:${mStr}`,
+        startMin: m,
+        endMin: nextM,
+        nextLabel: `${nextHStr}:${nextMStr}`,
+      });
+    }
+
+    // Formatear etiqueta de fecha en español
+    const dateObj = new Date(printDate + 'T12:00:00');
+    const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    const dateLabel = `${dayNames[dateObj.getDay()]}, ${dateObj.getDate()} de ${monthNames[dateObj.getMonth()]} de ${dateObj.getFullYear()}`;
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
+    const bufferPromise = this.streamToBuffer(doc);
+    const margin = 40;
+    const pageWidth = doc.page.width;
+    const contentWidth = pageWidth - margin * 2;
+
+    if (doctorsToShow.length === 0) {
+      this.drawHeader(doc, clinic, 'Agenda del Día', dateLabel, 'AGENDA', COLORS.primary);
+      doc.y += 30;
+      doc.fillColor(COLORS.textSecondary).font('Helvetica').fontSize(11).text('No hay citas ni doctores activos programados para esta fecha.', margin, doc.y, { align: 'center', width: contentWidth });
+    }
+
+    doctorsToShow.forEach((doctor, docIdx) => {
+      if (docIdx > 0) {
+        doc.addPage();
+      }
+
+      this.drawHeader(doc, clinic, 'Agenda del Día', dateLabel, 'AGENDA', COLORS.primary);
+
+      // Tarjeta de información del Doctor y Resumen de la Jornada
+      const cardY = doc.y + 4;
+      const cardHeight = 44;
+      doc.roundedRect(margin, cardY, contentWidth, cardHeight, 4).fillAndStroke(COLORS.bgLight, COLORS.border);
+
+      doc.fillColor(COLORS.primaryDark).font('Helvetica-Bold').fontSize(11)
+        .text(`Dr/a. ${this.stripEmojis(doctor.name)}`, margin + 12, cardY + 8);
+
+      doc.fillColor(COLORS.textSecondary).font('Helvetica').fontSize(8.5)
+        .text(`Especialidad: ${this.stripEmojis(doctor.specialty)} · Intervalo: ${validDuration} min`, margin + 12, cardY + 24);
+
+      doc.fillColor(COLORS.text).font('Helvetica-Bold').fontSize(9)
+        .text(`Citas Programadas: ${doctor.appointments.length}`, margin, cardY + 16, { width: contentWidth - 14, align: 'right' });
+
+      doc.y = cardY + cardHeight + 12;
+
+      // Encabezado visual de la lista
+      doc.fillColor(COLORS.primaryDark).font('Helvetica-Bold').fontSize(8.5)
+        .text('PROGRAMACIÓN HORARIA DETALLADA', margin, doc.y);
+      doc.y += 4;
+      doc.strokeColor(COLORS.primary).lineWidth(1).moveTo(margin, doc.y).lineTo(pageWidth - margin, doc.y).stroke();
+      doc.y += 8;
+
+      // Renderizar cada fila horaria
+      slots.forEach(slot => {
+        // Asignar todas las citas que ocupen este bloque horario (iniciadas en o cruzando por este slot)
+        const matches = doctor.appointments.filter(a => {
+          const { s, e } = this._getAppointmentRange(a, validDuration);
+          return s < slot.nextLabel && e > slot.label;
+        });
+
+        // Salto de página preventivo si nos acercamos al pie
+        const estimatedHeight = matches.length > 0 ? matches.length * 28 + 12 : 18;
+        if (doc.y + estimatedHeight > doc.page.height - 45) {
+          doc.addPage();
+          doc.y = 36;
+          doc.fillColor(COLORS.textSecondary).font('Helvetica-Bold').fontSize(8)
+            .text(`Dr/a. ${this.stripEmojis(doctor.name)} — Agenda del Día (Continuación) · ${dateLabel}`, margin, doc.y);
+          doc.y += 14;
+          doc.strokeColor(COLORS.border).lineWidth(0.5).moveTo(margin, doc.y).lineTo(pageWidth - margin, doc.y).stroke();
+          doc.y += 8;
+        }
+
+        const rowStartY = doc.y;
+
+        if (matches.length === 0) {
+          // Bloque sin citas: estilo limpio, sutil y ordenado
+          doc.roundedRect(margin, rowStartY, 42, 13, 2.5).fill('#f8fafc');
+          doc.fillColor('#94a3b8').font('Helvetica-Bold').fontSize(7.5)
+            .text(slot.label, margin, rowStartY + 2.5, { width: 42, align: 'center' });
+
+          doc.fillColor('#94a3b8').font('Helvetica').fontSize(8)
+            .text(' -   ....   (Disponible)', margin + 48, rowStartY + 2.5, { width: contentWidth - 48 });
+
+          doc.y = rowStartY + 16;
+          doc.strokeColor('#f1f5f9').lineWidth(0.4)
+            .moveTo(margin, doc.y)
+            .lineTo(pageWidth - margin, doc.y)
+            .stroke();
+          doc.y += 2;
+        } else {
+          // Bloque con una o más citas (iniciando en o cruzando por este bloque)
+          const cardX = margin + 48;
+          const cardWidth = contentWidth - 48;
+
+          matches.forEach((m, mIdx) => {
+            const { s } = this._getAppointmentRange(m, validDuration);
+            const isContinuation = s < slot.label;
+
+            const idStr = this.stripEmojis(this.getPatientCustomId(m));
+            const patName = this.stripEmojis(this.getPatientName(m));
+            const phoneStr = this.stripEmojis(this.getPatientPhone(m));
+            const timeRange = `Horario Cita (${formatTimeSlot(m.start_time)} - ${formatTimeSlot(m.end_time)})`;
+            const statusText = m.status_name ? m.status_name.charAt(0).toUpperCase() + m.status_name.slice(1) : '';
+
+            const extraParts = [];
+            if (isContinuation) {
+              extraParts.push(`(En curso · Inició ${formatTimeSlot(m.start_time)})`);
+            }
+            if (m.treatment_name || m.reason) {
+              extraParts.push(`Tratamiento: ${this.stripEmojis(m.treatment_name || m.reason)}`);
+            }
+            if (m.gabinete) {
+              extraParts.push(`Gabinete: ${this.stripEmojis(m.gabinete)}`);
+            }
+            const extraDetails = extraParts.join(' · ');
+
+            const cardHeight = extraDetails ? 26 : 18;
+
+            // Salto de página individual si la tarjeta se sale del límite
+            if (doc.y + cardHeight > doc.page.height - 40) {
+              doc.addPage();
+              doc.y = 36;
+              doc.fillColor(COLORS.textSecondary).font('Helvetica-Bold').fontSize(8)
+                .text(`Dr/a. ${this.stripEmojis(doctor.name)} — Agenda del Día (Continuación) · ${dateLabel}`, margin, doc.y);
+              doc.y += 14;
+              doc.strokeColor(COLORS.border).lineWidth(0.5).moveTo(margin, doc.y).lineTo(pageWidth - margin, doc.y).stroke();
+              doc.y += 8;
+            }
+
+            const itemY = doc.y;
+
+            // Badge de horario (solo en el primer ítem del slot)
+            if (mIdx === 0) {
+              doc.roundedRect(margin, itemY, 42, 15, 3).fillAndStroke('#eff6ff', '#bfdbfe');
+              doc.fillColor('#1d4ed8').font('Helvetica-Bold').fontSize(8)
+                .text(slot.label, margin, itemY + 3.5, { width: 42, align: 'center' });
+            } else {
+              doc.fillColor('#94a3b8').font('Helvetica-Bold').fontSize(9)
+                .text('·', margin, itemY + 2, { width: 42, align: 'center' });
+            }
+
+            // Tarjeta visual elegante de la cita
+            const bgCard = isContinuation ? '#fefce8' : '#f8fafc';
+            const borderCard = isContinuation ? '#fef08a' : '#e2e8f0';
+            doc.roundedRect(cardX, itemY, cardWidth, cardHeight, 3).fillAndStroke(bgCard, borderCard);
+
+            // Barra lateral indicadora de estado
+            const accentColor = isContinuation
+              ? '#f59e0b'
+              : (m.status_name === 'confirmada' ? '#10b981' : (m.status_name === 'en_consulta' ? '#2563eb' : '#0284c7'));
+            doc.roundedRect(cardX, itemY, 3.5, cardHeight, 1.5).fill(accentColor);
+
+            // Texto Línea 1 (Información principal de la cita)
+            const textX = cardX + 8;
+            const textY = itemY + 3.5;
+
+            doc.fillColor('#0284c7').font('Helvetica-Bold').fontSize(8)
+              .text(`ID [${idStr}]`, textX, textY, { continued: true });
+            doc.fillColor('#94a3b8').font('Helvetica').fontSize(8)
+              .text('  -  ', { continued: true });
+            doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(8.5)
+              .text(patName, { continued: true });
+            doc.fillColor('#94a3b8').font('Helvetica').fontSize(8)
+              .text('  -  ', { continued: true });
+            doc.fillColor('#475569').font('Helvetica').fontSize(8)
+              .text(phoneStr ? `Tel: ${phoneStr}` : 'Sin tel.', { continued: true });
+            doc.fillColor('#94a3b8').font('Helvetica').fontSize(8)
+              .text('  -  ', { continued: true });
+            doc.fillColor(isContinuation ? '#b45309' : '#0369a1').font('Helvetica-Bold').fontSize(8)
+              .text(timeRange, { continued: statusText ? true : false });
+            if (statusText) {
+              doc.fillColor(accentColor).font('Helvetica').fontSize(7.5)
+                .text(`  [${statusText}]`);
+            }
+
+            // Texto Línea 2 (Tratamiento, Gabinete, Nota de continuación)
+            if (extraDetails) {
+              doc.fillColor(isContinuation ? '#92400e' : '#64748b').font('Helvetica-Oblique').fontSize(7.2)
+                .text(extraDetails, textX, itemY + 14, { width: cardWidth - 14, lineBreak: false });
+            }
+
+            doc.y = itemY + cardHeight + 3;
+          });
+
+          // Línea divisoria al final del bloque
+          doc.y += 1;
+          doc.strokeColor('#e2e8f0').lineWidth(0.4)
+            .moveTo(margin, doc.y)
+            .lineTo(pageWidth - margin, doc.y)
+            .stroke();
+          doc.y += 3;
+        }
+      });
+    });
+
+    this.drawFooterAndPages(doc, clinic, `${clinic.name} · Agenda Operativa del Día.`);
+    doc.end();
+
+    const buffer = await bufferPromise;
+    const filename = `Agenda_Dia_${printDate}.pdf`;
+    return { buffer, filename, documentNumber: 'AGE-DIA' };
+  }
+
+  /**
+   * Genera el documento PDF oficial de la Agenda Semanal en formato Horizontal.
+   */
+  async _generateWeeklyAgendaPDF({ clinic, printDate, validDuration, doctorId }) {
+    const baseDate = new Date(printDate + 'T12:00:00');
+    const dayOfWeek = baseDate.getDay();
+    const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const monday = new Date(baseDate);
+    monday.setDate(baseDate.getDate() + diffToMonday);
+
+    const saturday = new Date(monday);
+    saturday.setDate(monday.getDate() + 5);
+
+    const startDateStr = monday.toISOString().slice(0, 10);
+    const endDateStr = saturday.toISOString().slice(0, 10);
+
+    const appointmentsResult = await appointmentRepository.findAllWithDetails({
+      limit: 9999,
+      sortBy: 'a.start_time',
+      sortOrder: 'ASC',
+      filters: {
+        date_from: startDateStr,
+        date_to: endDateStr,
+        doctor_id: doctorId || undefined,
+        exclude_cancelled: true,
+      },
+    });
+    const appointments = appointmentsResult.rows || [];
+
+    const doctorsResult = await doctorRepository.findAllWithUsers({ limit: 500 });
+    const allDoctors = doctorsResult.rows || [];
+    const activeDoctors = allDoctors.filter(d => d.is_active);
+
+    const apptsByDoctor = {};
+    appointments.forEach(a => {
+      const docKey = a.doctor_id || 0;
+      if (!apptsByDoctor[docKey]) apptsByDoctor[docKey] = [];
+      apptsByDoctor[docKey].push(a);
+    });
+
+    const doctorsToShow = activeDoctors.filter(d => {
+      if (doctorId && Number(d.id) !== Number(doctorId)) return false;
+      return (apptsByDoctor[d.id] || []).length > 0 || (doctorId && Number(d.id) === Number(doctorId));
+    });
+
+    if (doctorsToShow.length === 0 && activeDoctors.length > 0 && !doctorId) {
+      doctorsToShow.push(activeDoctors[0]);
+    }
+
+    const weekDays = [];
+    const dayNamesShort = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      weekDays.push({
+        dateStr: d.toISOString().slice(0, 10),
+        label: `${dayNamesShort[i]} ${d.getDate()}/${d.getMonth() + 1}`,
+      });
+    }
+
+    const doc = new PDFDocument({ margin: 30, size: 'A4', layout: 'landscape', bufferPages: true });
+    const bufferPromise = this.streamToBuffer(doc);
+    const margin = 30;
+    const pageWidth = doc.page.width;
+    const contentWidth = pageWidth - margin * 2;
+
+    const slots = [];
+    for (let m = 540; m < 1200; m += validDuration) {
+      const hStr = String(Math.floor(m / 60)).padStart(2, '0');
+      const mStr = String(m % 60).padStart(2, '0');
+      const nextM = m + validDuration;
+      const nextHStr = String(Math.floor(nextM / 60)).padStart(2, '0');
+      const nextMStr = String(nextM % 60).padStart(2, '0');
+      slots.push({
+        label: `${hStr}:${mStr}`,
+        startMin: m,
+        endMin: nextM,
+        nextLabel: `${nextHStr}:${nextMStr}`,
+      });
+    }
+
+    const weekTitle = `Semana: ${startDateStr} al ${endDateStr}`;
+
+    doctorsToShow.forEach((doctor, dIdx) => {
+      if (dIdx > 0) doc.addPage();
+
+      this.drawHeader(doc, clinic, 'Agenda Semanal', weekTitle, 'SEMANAL', COLORS.primary);
+
+      const docAppts = apptsByDoctor[doctor.id] || [];
+      const apptsByDate = {};
+      docAppts.forEach(a => {
+        const dStr = String(a.appointment_date).slice(0, 10);
+        if (!apptsByDate[dStr]) apptsByDate[dStr] = [];
+        apptsByDate[dStr].push(a);
+      });
+
+      // Encabezado de la tabla semanal
+      const timeColWidth = 45;
+      const dayColWidth = (contentWidth - timeColWidth) / 6;
+
+      const theadY = doc.y + 4;
+      doc.rect(margin, theadY, contentWidth, 20).fill(COLORS.primary);
+
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8.5)
+        .text('Hora', margin + 4, theadY + 5, { width: timeColWidth - 8, align: 'center' });
+
+      weekDays.forEach((wd, wIdx) => {
+        doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8.5)
+          .text(wd.label, margin + timeColWidth + wIdx * dayColWidth, theadY + 5, {
+            width: dayColWidth,
+            align: 'center',
+          });
+      });
+
+      doc.y = theadY + 22;
+
+      slots.forEach(slot => {
+        if (doc.y > doc.page.height - 40) {
+          doc.addPage();
+          doc.y = 35;
+        }
+
+        const rowY = doc.y;
+        doc.fillColor(COLORS.primaryDark).font('Helvetica-Bold').fontSize(7.5)
+          .text(slot.label, margin, rowY + 3, { width: timeColWidth, align: 'center' });
+
+        let maxHeightInRow = 14;
+
+        weekDays.forEach((wd, wIdx) => {
+          const dayList = apptsByDate[wd.dateStr] || [];
+          const matches = dayList.filter(a => {
+            const { s, e } = this._getAppointmentRange(a, validDuration);
+            return s < slot.nextLabel && e > slot.label;
+          });
+
+          const colX = margin + timeColWidth + wIdx * dayColWidth + 2;
+          const colW = dayColWidth - 4;
+
+          if (matches.length > 0) {
+            let currentItemY = rowY + 2;
+            matches.forEach(m => {
+              const id = this.stripEmojis(this.getPatientCustomId(m));
+              const name = this.stripEmojis(this.getPatientName(m));
+              const time = `${(m.start_time || '').substring(0, 5)}-${(m.end_time || '').substring(0, 5)}`;
+              const { s } = this._getAppointmentRange(m, validDuration);
+              const isContinuation = s < slot.label;
+              const text = `[${id}] ${name} (${time})${isContinuation ? ' *' : ''}`;
+
+              doc.fillColor(isContinuation ? '#b45309' : COLORS.text)
+                .font(isContinuation ? 'Helvetica-Oblique' : 'Helvetica')
+                .fontSize(6.5)
+                .text(text, colX, currentItemY, { width: colW });
+              currentItemY += 9;
+            });
+            const cellHeight = matches.length * 9 + 4;
+            if (cellHeight > maxHeightInRow) maxHeightInRow = cellHeight;
+          } else {
+            doc.fillColor(COLORS.textMuted).font('Helvetica').fontSize(6.5)
+              .text('—', colX, rowY + 3, { width: colW, align: 'center' });
+          }
+        });
+
+        doc.y = rowY + maxHeightInRow;
+        doc.strokeColor(COLORS.border).lineWidth(0.4)
+          .moveTo(margin, doc.y)
+          .lineTo(pageWidth - margin, doc.y)
+          .stroke();
+        doc.y += 2;
+      });
+    });
+
+    this.drawFooterAndPages(doc, clinic, `${clinic.name} · Agenda Semanal Consolidada.`);
+    doc.end();
+
+    const buffer = await bufferPromise;
+    const filename = `Agenda_Semanal_${startDateStr}_${endDateStr}.pdf`;
+    return { buffer, filename, documentNumber: 'AGE-SEM' };
   }
 
   /**

@@ -132,6 +132,65 @@ class PDFDownloadService {
     const safeNum = prescNumber ? `_${prescNumber}` : '';
     return this.download(`/prescriptions/${prescriptionId}`, `Receta${safeNum}.pdf`);
   }
+
+  /**
+   * Descarga la agenda médica en formato PDF oficial.
+   */
+  async downloadAgenda({ date, slotDuration = 30, doctorId = null, mode = 'daily' } = {}) {
+    const params = new URLSearchParams();
+    if (date) params.set('date', date);
+    if (slotDuration) params.set('slot_duration', slotDuration);
+    if (doctorId) params.set('doctor_id', doctorId);
+    if (mode) params.set('mode', mode);
+
+    const filename = mode === 'weekly'
+      ? `Agenda_Semanal_${date || 'semana'}.pdf`
+      : `Agenda_Dia_${date || 'hoy'}.pdf`;
+
+    return this.download(`/agenda?${params.toString()}`, filename);
+  }
+
+  /**
+   * Obtiene el Blob URL del PDF de la agenda para vista previa e impresión directa.
+   */
+  async getAgendaBlobUrl({ date, slotDuration = 30, doctorId = null, mode = 'daily' } = {}) {
+    const token = state.get('token');
+    const activeClinicId = state.get('activeClinicId');
+
+    const headers = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    if (activeClinicId) {
+      headers['X-Clinic-Id'] = activeClinicId;
+    }
+
+    const params = new URLSearchParams();
+    if (date) params.set('date', date);
+    if (slotDuration) params.set('slot_duration', slotDuration);
+    if (doctorId) params.set('doctor_id', doctorId);
+    if (mode) params.set('mode', mode);
+
+    const url = `${this.baseUrl}/agenda?${params.toString()}`;
+    const response = await fetch(url, { method: 'GET', headers });
+
+    if (!response.ok) {
+      let errMsg = 'Error al generar la agenda en PDF';
+      try {
+        const errJson = await response.json();
+        if (errJson.message) errMsg = errJson.message;
+      } catch {}
+      throw new Error(errMsg);
+    }
+
+    const filename = mode === 'weekly'
+      ? `Agenda_Semanal_${date || 'semana'}.pdf`
+      : `Agenda_Dia_${date || 'hoy'}.pdf`;
+
+    const blob = await response.blob();
+    const blobUrl = window.URL.createObjectURL(blob);
+    return { blobUrl, blob, filename };
+  }
 }
 
 const pdfService = new PDFDownloadService();

@@ -6,6 +6,7 @@ import holidayService from '../../services/holiday.service.js';
 import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
 import state from '../../scripts/state.js';
+import pdfService from '../../services/pdf.service.js';
 import { formatDate, formatTime } from '../../utils/helpers.js';
 
 export class Appointments {
@@ -27,7 +28,8 @@ export class Appointments {
     this.allDoctorUnavail = {};
     this.allDoctorSchedules = {};
     this.allDoctorWorkdays = {};
-    this.slotDuration = 30;
+    const savedDuration = parseInt(localStorage.getItem('appointments_slot_duration'), 10);
+    this.slotDuration = [15, 30, 60].includes(savedDuration) ? savedDuration : 30;
     
     // Bind handlers
     this.handleContainerClick = this._handleContainerClick.bind(this);
@@ -52,7 +54,11 @@ export class Appointments {
 
   _handleContainerChange(e) {
     if (e.target && e.target.id === 'slot-duration') {
-      this.slotDuration = parseInt(e.target.value, 10) || 30;
+      const val = parseInt(e.target.value, 10);
+      this.slotDuration = [15, 30, 60].includes(val) ? val : 30;
+      try {
+        localStorage.setItem('appointments_slot_duration', String(this.slotDuration));
+      } catch (_) {}
       this.renderView();
     }
   }
@@ -91,7 +97,9 @@ export class Appointments {
         this.showChangeStatusModal(e.target.dataset.id);
       }
       if (e.target.id === 'print-daily-btn') this.printDailyAgenda();
+      if (e.target.id === 'download-daily-pdf-btn') this.downloadDailyAgendaPDF();
       if (e.target.id === 'print-weekly-btn') this.printWeeklyAgenda();
+      if (e.target.id === 'download-weekly-pdf-btn') this.downloadWeeklyAgendaPDF();
       if (e.target.id === 'print-toggle-btn') {
         const menu = this.container.querySelector('#print-dropdown-menu');
         if (menu) menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
@@ -498,16 +506,18 @@ export class Appointments {
         </div>
         <div style="display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap;">
           <select id="slot-duration" class="form-select" style="width: auto; min-width: 80px;">
-            <option value="15">15 min</option>
-            <option value="30" selected>30 min</option>
-            <option value="60">60 min</option>
+            <option value="15" ${Number(this.slotDuration) === 15 ? 'selected' : ''}>15 min</option>
+            <option value="30" ${Number(this.slotDuration) === 30 || !this.slotDuration ? 'selected' : ''}>30 min</option>
+            <option value="60" ${Number(this.slotDuration) === 60 ? 'selected' : ''}>60 min</option>
           </select>
           <div style="position: relative; display: inline-block;">
             <button id="print-toggle-btn" class="btn btn-outline">🖨️ Imprimir ▾</button>
-            <div id="print-dropdown-menu" style="display: none; position: absolute; right: 0; top: 100%; margin-top: 4px; background: var(--color-surface, #fff); border: 1px solid var(--color-border, #ddd); border-radius: var(--radius-md, 8px); box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 100; min-width: 220px; overflow: hidden;">
-              <button id="print-daily-btn" class="btn print-dropdown-btn-item">📅 Imprimir Agenda del Día</button>
+            <div id="print-dropdown-menu" style="display: none; position: absolute; right: 0; top: 100%; margin-top: 4px; background: var(--color-surface, #fff); border: 1px solid var(--color-border, #ddd); border-radius: var(--radius-md, 8px); box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 100; min-width: 250px; overflow: hidden;">
+              <button id="print-daily-btn" class="btn print-dropdown-btn-item" style="display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 9px 14px; border: none; background: transparent; cursor: pointer; font-size: 13px;">📅 Imprimir Agenda del Día (PDF)</button>
+              <button id="download-daily-pdf-btn" class="btn print-dropdown-btn-item" style="display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 9px 14px; border: none; background: transparent; cursor: pointer; font-size: 13px; color: var(--primary-700);">📥 Descargar Agenda del Día (PDF)</button>
               <div style="height: 1px; background: var(--color-border, #eee); margin: 0 12px;"></div>
-              <button id="print-weekly-btn" class="btn print-dropdown-btn-item">📋 Imprimir Agenda Semanal</button>
+              <button id="print-weekly-btn" class="btn print-dropdown-btn-item" style="display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 9px 14px; border: none; background: transparent; cursor: pointer; font-size: 13px;">📋 Imprimir Agenda Semanal (PDF)</button>
+              <button id="download-weekly-pdf-btn" class="btn print-dropdown-btn-item" style="display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 9px 14px; border: none; background: transparent; cursor: pointer; font-size: 13px; color: var(--primary-700);">📥 Descargar Agenda Semanal (PDF)</button>
             </div>
           </div>
           ${(state.get('user')?.role_name === 'propietario' || state.get('user')?.role_name === 'direccion') ? `
@@ -1013,23 +1023,196 @@ export class Appointments {
     this.render({});
   }
 
-  async printDailyAgenda() {
-    const slotDuration = parseInt(this.container.querySelector('#slot-duration')?.value || '30', 10);
-    const printDate = this.toDateStr(this.currentDate);
+  /**
+   * Renderiza el visor con el PDF generado por el servicio de PDF
+   * e inicia automáticamente la ventana de impresión nativa.
+   */
+  _renderPdfInWindow(printWindow, { blobUrl, filename, title, subtitle = '' }) {
+    printWindow.document.open();
+    printWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>${title}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #525659; }
+    .toolbar { display: flex; align-items: center; justify-content: space-between; padding: 8px 20px; background: #1e293b; color: #fff; height: 48px; box-shadow: 0 2px 8px rgba(0,0,0,0.25); z-index: 10; position: relative; }
+    .toolbar-title { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    .toolbar-sub { font-size: 12px; color: #94a3b8; font-weight: normal; margin-left: 6px; }
+    .toolbar-actions { display: flex; gap: 10px; align-items: center; }
+    .btn { padding: 6px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; transition: background 0.15s; }
+    .btn-print { background: #0f86ec; color: white; }
+    .btn-print:hover { background: #0b6cc4; }
+    .btn-download { background: #16a34a; color: white; }
+    .btn-download:hover { background: #15803d; }
+    iframe { width: 100%; height: calc(100% - 48px); border: none; background: #fff; }
+    @media print {
+      .toolbar { display: none !important; }
+      iframe { height: 100% !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <div class="toolbar-title">
+      <span>📄</span> ${title} ${subtitle ? `<span class="toolbar-sub">(${subtitle})</span>` : ''}
+    </div>
+    <div class="toolbar-actions">
+      <button class="btn btn-print" id="btn-print" onclick="triggerPrint()">🖨️ Imprimir PDF</button>
+      <a class="btn btn-download" id="btn-download" href="${blobUrl}" download="${filename}">📥 Descargar PDF</a>
+    </div>
+  </div>
+  <iframe id="pdf-frame" src="${blobUrl}"></iframe>
+  <script>
+    function triggerPrint() {
+      const frame = document.getElementById('pdf-frame');
+      try {
+        frame.contentWindow.focus();
+        frame.contentWindow.print();
+      } catch (e) {
+        window.print();
+      }
+    }
+    const frame = document.getElementById('pdf-frame');
+    frame.onload = function() {
+      setTimeout(triggerPrint, 600);
+    };
+  </script>
+</body>
+</html>`);
+    printWindow.document.close();
+  }
 
-    // Close dropdown
+  /**
+   * Imprime la Agenda del Día convirtiéndola previamente en PDF mediante el PDFService.
+   * Renderiza todas las citas simultáneas por doctor y bloque horario (15, 30 o 60 min).
+   */
+  async printDailyAgenda() {
+    const slotDurationSelect = this.container.querySelector('#slot-duration');
+    const slotDuration = slotDurationSelect ? (parseInt(slotDurationSelect.value, 10) || this.slotDuration || 30) : (this.slotDuration || 30);
+    this.slotDuration = slotDuration;
+    const printDate = this.toDateStr(this.currentDate);
+    const doctorId = this.container.querySelector('#filter-doctor')?.value || this.filters.doctor_id || null;
+
+    // Cerrar menú desplegable
     const menu = this.container.querySelector('#print-dropdown-menu');
     if (menu) menu.style.display = 'none';
 
-    // Open print window synchronously to bypass popup blocker
+    // Abrir ventana inmediatamente para evitar bloqueo de popups
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
       toast.error('El bloqueador de ventanas emergentes impidió abrir la agenda. Por favor, permita las ventanas emergentes.');
       return;
     }
-    printWindow.document.write('<html><head><title>Cargando Agenda...</title></head><body style="font-family:Arial,sans-serif;text-align:center;padding-top:100px;color:#555;"><h2>Cargando Agenda del Día, por favor espere...</h2></body></html>');
+    printWindow.document.write('<!DOCTYPE html><html><head><title>Cargando Agenda en PDF...</title></head><body style="font-family:Arial,sans-serif;text-align:center;padding-top:100px;color:#555;"><h2>📄 Generando documento PDF mediante el servicio de PDF, por favor espere...</h2></body></html>');
     printWindow.document.close();
 
+    try {
+      // 1. Convertir en PDF usando el servicio de PDF del sistema
+      const { blobUrl, filename } = await pdfService.getAgendaBlobUrl({
+        date: printDate,
+        slotDuration,
+        doctorId,
+        mode: 'daily',
+      });
+
+      const dateParts = new Date(printDate + 'T12:00:00');
+      const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+      const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+      const dateLabel = `${dayNames[dateParts.getDay()]}, ${dateParts.getDate()} de ${monthNames[dateParts.getMonth()]} de ${dateParts.getFullYear()}`;
+
+      this._renderPdfInWindow(printWindow, {
+        blobUrl,
+        filename,
+        title: `Agenda del Día — ${dateLabel}`,
+        subtitle: `Intervalo: ${slotDuration} min`,
+      });
+    } catch (err) {
+      console.warn('Fallo generación PDF de agenda en backend, ejecutando fallback local:', err);
+      await this._printDailyAgendaHtmlFallback(printWindow, printDate, slotDuration, doctorId);
+    }
+  }
+
+  /**
+   * Descarga directa del archivo PDF oficial de la Agenda del Día.
+   */
+  async downloadDailyAgendaPDF() {
+    const slotDurationSelect = this.container.querySelector('#slot-duration');
+    const slotDuration = slotDurationSelect ? (parseInt(slotDurationSelect.value, 10) || this.slotDuration || 30) : (this.slotDuration || 30);
+    this.slotDuration = slotDuration;
+    const printDate = this.toDateStr(this.currentDate);
+    const doctorId = this.container.querySelector('#filter-doctor')?.value || this.filters.doctor_id || null;
+
+    const menu = this.container.querySelector('#print-dropdown-menu');
+    if (menu) menu.style.display = 'none';
+
+    await pdfService.downloadAgenda({ date: printDate, slotDuration, doctorId, mode: 'daily' });
+  }
+
+  /**
+   * Imprime la Agenda Semanal convirtiéndola previamente en PDF mediante el PDFService.
+   */
+  async printWeeklyAgenda() {
+    const slotDurationSelect = this.container.querySelector('#slot-duration');
+    const slotDuration = slotDurationSelect ? (parseInt(slotDurationSelect.value, 10) || this.slotDuration || 30) : (this.slotDuration || 30);
+    this.slotDuration = slotDuration;
+    const printDate = this.toDateStr(this.currentDate);
+    const doctorId = this.container.querySelector('#filter-doctor')?.value || this.filters.doctor_id || null;
+
+    const menu = this.container.querySelector('#print-dropdown-menu');
+    if (menu) menu.style.display = 'none';
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast.error('El bloqueador de ventanas emergentes impidió abrir la agenda. Por favor, permita las ventanas emergentes.');
+      return;
+    }
+    printWindow.document.write('<!DOCTYPE html><html><head><title>Cargando Agenda Semanal (PDF)...</title></head><body style="font-family:Arial,sans-serif;text-align:center;padding-top:100px;color:#555;"><h2>📄 Generando Agenda Semanal en PDF con el servicio de PDF, por favor espere...</h2></body></html>');
+    printWindow.document.close();
+
+    try {
+      const { blobUrl, filename } = await pdfService.getAgendaBlobUrl({
+        date: printDate,
+        slotDuration,
+        doctorId,
+        mode: 'weekly',
+      });
+
+      this._renderPdfInWindow(printWindow, {
+        blobUrl,
+        filename,
+        title: `Agenda Semanal — ${printDate}`,
+        subtitle: `Intervalo: ${slotDuration} min`,
+      });
+    } catch (err) {
+      console.error(err);
+      if (printWindow) printWindow.close();
+      toast.error('Error al generar agenda semanal en PDF: ' + err.message);
+    }
+  }
+
+  /**
+   * Descarga directa del archivo PDF oficial de la Agenda Semanal.
+   */
+  async downloadWeeklyAgendaPDF() {
+    const slotDurationSelect = this.container.querySelector('#slot-duration');
+    const slotDuration = slotDurationSelect ? (parseInt(slotDurationSelect.value, 10) || this.slotDuration || 30) : (this.slotDuration || 30);
+    this.slotDuration = slotDuration;
+    const printDate = this.toDateStr(this.currentDate);
+    const doctorId = this.container.querySelector('#filter-doctor')?.value || this.filters.doctor_id || null;
+
+    const menu = this.container.querySelector('#print-dropdown-menu');
+    if (menu) menu.style.display = 'none';
+
+    await pdfService.downloadAgenda({ date: printDate, slotDuration, doctorId, mode: 'weekly' });
+  }
+
+  /**
+   * Fallback visual HTML en caso de contingencia.
+   * Renderiza exactamente el formato solicitado para citas simultáneas y bloques de horario.
+   */
+  async _printDailyAgendaHtmlFallback(printWindow, printDate, slotDuration, doctorId) {
     try {
       const [appointments, allDoctors] = await Promise.all([
         appointmentService.getAll({
@@ -1042,7 +1225,6 @@ export class Appointments {
       const list = Array.isArray(appointments) ? appointments : [];
       const activeDoctors = (allDoctors || []).filter(d => d.is_active);
 
-      // Fetch schedules and unavailability for all active doctors for printDate
       const [unavailResults, scheduleResults] = await Promise.all([
         Promise.all(activeDoctors.map(d =>
           doctorService.getUnavailability(d.id, printDate, printDate).catch(() => [])
@@ -1059,14 +1241,7 @@ export class Appointments {
       const getPatientPhone = (a) => a.patient_phone || a.patient?.phone || '';
       const getTreatment = (a) => a.treatment || a.treatment_name || a.reason || '';
       const getID = (a) => a.custom_id || a.customId || a.patient_custom_id || a.patient?.customId || a.patient?.custom_id || (a.patient_id || a.patientId ? `PAC-${String(a.patient_id || a.patientId).padStart(5, '0')}` : '');
-      const getPatientWithId = (a) => {
-        const idStr = getID(a);
-        const nameStr = getPatientName(a)
-        const phoneStr = getPatientPhone(a);
-        return idStr ? `[${idStr}] ${nameStr} - ${phoneStr}` : `${nameStr} - ${phoneStr}`;
-      };
 
-      // Group appointments by doctor id
       const groupsByDocId = {};
       list.forEach(a => {
         const docId = getDocId(a);
@@ -1077,10 +1252,11 @@ export class Appointments {
         groupsByDocId[key].appointments.push(a);
       });
 
-      // Build a list of doctors to print: only those who work on this day or have appointments
       const dow = new Date(printDate + 'T12:00:00').getDay();
       const doctorsToShow = [];
       activeDoctors.forEach((d, idx) => {
+        if (doctorId && Number(d.id) !== Number(doctorId)) return;
+
         const unavail = unavailResults[idx] || [];
         const schedules = scheduleResults[idx] || [];
         
@@ -1094,7 +1270,7 @@ export class Appointments {
         const worksOnThisDay = !isUnavailable && !!daySchedule;
         const hasAppointments = (groupsByDocId[d.id]?.appointments || []).length > 0;
         
-        if (worksOnThisDay || hasAppointments) {
+        if (worksOnThisDay || hasAppointments || (doctorId && Number(d.id) === Number(doctorId))) {
           doctorsToShow.push({
             id: d.id,
             name: d.fullName || `${d.first_name || ''} ${d.last_name || ''}`.trim() || 'Doctor',
@@ -1105,73 +1281,102 @@ export class Appointments {
         }
       });
 
-      // Also include any leftover groups that didn't match an active doctor
-      const matchedIds = new Set(activeDoctors.map(d => d.id));
-      Object.values(groupsByDocId).forEach(g => {
-        if (!matchedIds.has(g.doctor_id)) {
-          doctorsToShow.push({
-            id: g.doctor_id,
-            name: g.doctor_name,
-            specialty: g.doctor_specialty,
-            appointments: g.appointments.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''))
-          });
+      let minHourMinutes = 540;
+      let maxHourMinutes = 1200;
+      list.forEach(a => {
+        if (a.start_time) {
+          const [h, m] = a.start_time.substring(0, 5).split(':').map(Number);
+          const mins = (h || 0) * 60 + (m || 0);
+          if (mins < minHourMinutes) minHourMinutes = mins;
+        }
+        if (a.end_time) {
+          const [h, m] = a.end_time.substring(0, 5).split(':').map(Number);
+          const mins = (h || 0) * 60 + (m || 0);
+          if (mins > maxHourMinutes) maxHourMinutes = Math.min(mins, 1440);
         }
       });
+      minHourMinutes = Math.floor(minHourMinutes / slotDuration) * slotDuration;
+      maxHourMinutes = Math.ceil(maxHourMinutes / slotDuration) * slotDuration;
 
-      // Time slots
       const slots = [];
-      for (let m = 540; m < 1200; m += slotDuration) {
-        slots.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
+      for (let m = minHourMinutes; m < maxHourMinutes; m += slotDuration) {
+        const hStr = String(Math.floor(m / 60)).padStart(2, '0');
+        const mStr = String(m % 60).padStart(2, '0');
+        const nextM = m + slotDuration;
+        const nextHStr = String(Math.floor(nextM / 60)).padStart(2, '0');
+        const nextMStr = String(nextM % 60).padStart(2, '0');
+        slots.push({
+          label: `${hStr}:${mStr}`,
+          nextLabel: `${nextHStr}:${nextMStr}`,
+        });
       }
 
-      // Date label using the selected date
       const clinic = state.get('clinicInfo') || {};
       const dateParts = new Date(printDate + 'T12:00:00');
       const dayNames = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
       const monthNames = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
       const dateLabel = `${dayNames[dateParts.getDay()]}, ${dateParts.getDate()} de ${monthNames[dateParts.getMonth()]} de ${dateParts.getFullYear()}`;
 
-      const allIds = new Set(list.map(a => a.id));
-      const totalAppts = allIds.size;
-
-      // Styles
-      const cellStyle = 'border: 1px solid #ddd; padding: 6px 10px; font-size: 12px;';
-      const thStyle = `${cellStyle} background: #f0f0f0; font-weight: 600; text-align: left;`;
-      
-      // Build one page section per doctor
       const doctorPages = doctorsToShow.map((doc, idx) => {
-        const docApptCount = doc.appointments.length;
-
-        // Build table rows: one row per time slot
-        let rows = '';
+        let rowsHtml = '';
         slots.forEach(slot => {
           const matches = doc.appointments.filter(a => {
             const s = a.start_time ? a.start_time.substring(0, 5) : '';
-            const e = a.end_time ? a.end_time.substring(0, 5) : '';
-            return s <= slot && e > slot;
+            let e = a.end_time ? a.end_time.substring(0, 5) : '';
+            if (!e || e <= s) {
+              if (!s) return false;
+              const [sh, sm] = s.split(':').map(Number);
+              const totalMins = (sh || 0) * 60 + (sm || 0) + slotDuration;
+              e = `${String(Math.floor(totalMins / 60)).padStart(2, '0')}:${String(totalMins % 60).padStart(2, '0')}`;
+            }
+            return s < slot.nextLabel && e > slot.label;
           });
-          if (matches.length > 0) {
-            const patientHtml = matches.map(m => {
-              const cabText = m.gabinete ? ` [${m.gabinete}]` : '';
-              const timeText = ` (${formatTime(m.start_time)}-${formatTime(m.end_time)})`;
-              return `<div style="margin-bottom: 2px;"><strong>${getPatientWithId(m)}</strong>${cabText}<span style="color:#666;font-size:11px;">${timeText}</span></div>`;
-            }).join('');
 
-            const treatmentHtml = matches.map(m => {
-              return `<div style="margin-bottom: 2px;">${getTreatment(m) || '—'}</div>`;
-            }).join('');
-
-            rows += `<tr>
-              <td style="${cellStyle}font-weight:600;color:#555;width:60px;">${slot}</td>
-              <td style="${cellStyle}">${patientHtml}</td>
-              <td style="${cellStyle}">${treatmentHtml}</td>
-            </tr>`;
+          if (matches.length === 0) {
+            rowsHtml += `
+              <div style="padding: 5px 0; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 12px;">
+                <span style="font-weight: 700; color: #94a3b8; width: 48px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 2px 4px; text-align: center; font-size: 11px;">${slot.label}</span>
+                <span style="color: #cbd5e1; font-size: 12px;"> -   ....   (Disponible)</span>
+              </div>`;
           } else {
-            rows += `<tr>
-              <td style="${cellStyle}font-weight:600;color:#555;width:60px;">${slot}</td>
-              <td style="${cellStyle}color:#ccc;">—</td>
-              <td style="${cellStyle}color:#ccc;"></td>
-            </tr>`;
+            rowsHtml += `
+              <div style="padding: 6px 0; border-bottom: 1px solid #e2e8f0; display: flex; gap: 12px; align-items: flex-start;">
+                <div style="font-weight: 700; color: #1d4ed8; width: 48px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 4px; padding: 3px 4px; text-align: center; font-size: 11.5px; flex-shrink: 0;">
+                  ${slot.label}
+                </div>
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 5px;">
+                  ${matches.map(m => {
+                    const s = m.start_time ? m.start_time.substring(0, 5) : '';
+                    const isContinuation = s < slot.label;
+                    const idStr = `ID [${getID(m) || '—'}]`;
+                    const patName = getPatientName(m);
+                    const phoneStr = getPatientPhone(m) || 'Sin teléfono';
+                    const timeRange = `Horario Cita (${formatTime(m.start_time)} - ${formatTime(m.end_time)})`;
+                    const statusName = m.status_name ? m.status_name.charAt(0).toUpperCase() + m.status_name.slice(1) : '';
+                    const extra = [
+                      isContinuation ? `(En curso · Inició ${s})` : null,
+                      getTreatment(m) ? `Tratamiento: ${getTreatment(m)}` : null,
+                      m.gabinete ? `Gabinete: ${m.gabinete}` : null,
+                    ].filter(Boolean).join(' · ');
+
+                    return `
+                      <div style="background: ${isContinuation ? '#fefce8' : '#f8fafc'}; border: 1px solid ${isContinuation ? '#fef08a' : '#e2e8f0'}; border-left: 4px solid ${isContinuation ? '#f59e0b' : (m.status_name === 'confirmada' ? '#10b981' : '#0284c7')}; border-radius: 4px; padding: 6px 12px;">
+                        <div style="font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+                          <strong style="color: #0284c7;">${idStr}</strong>
+                          <span style="color: #94a3b8;">-</span>
+                          <strong style="color: #0f172a; font-size: 13px;">${patName}</strong>
+                          <span style="color: #94a3b8;">-</span>
+                          <span style="color: #475569;">${phoneStr ? 'Tel: ' + phoneStr : 'Sin tel.'}</span>
+                          <span style="color: #94a3b8;">-</span>
+                          <span style="color: ${isContinuation ? '#b45309' : '#0369a1'}; font-weight: 700; background: ${isContinuation ? '#fef3c7' : '#e0f2fe'}; padding: 1px 6px; border-radius: 3px;">${timeRange}</span>
+                          ${statusName ? `<span style="color: #64748b; font-size: 11px;">[${statusName}]</span>` : ''}
+                        </div>
+                        ${extra ? `<div style="font-size: 11px; color: ${isContinuation ? '#92400e' : '#64748b'}; margin-top: 3px; font-style: italic;">${extra}</div>` : ''}
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              </div>`;
           }
         });
 
@@ -1191,309 +1396,33 @@ export class Appointments {
                 <p style="margin: 2px 0 0; font-size: 13px; color: #666;">${dateLabel}</p>
               </div>
             </div>
-            <table style="width: 100%; border-collapse: collapse;">
-              <thead>
-                <tr>
-                  <th style="${thStyle}width:60px;">Hora</th>
-                  <th style="${thStyle}">Paciente</th>
-                  <th style="${thStyle}">Tratamiento</th>
-                </tr>
-              </thead>
-              <tbody>${rows}</tbody>
-            </table>
+            <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px 16px; background: #fff;">
+              ${rowsHtml}
+            </div>
             <div style="margin-top: 16px; padding-top: 10px; border-top: 1px solid #ddd; font-size: 13px; color: #555; display: flex; justify-content: space-between;">
-              <span>Citas: <strong>${docApptCount}</strong></span>
+              <span>Citas: <strong>${doc.appointments.length}</strong></span>
               <span>Intervalo: ${slotDuration} min</span>
             </div>
           </div>`;
       }).join('');
 
-      // Print
       printWindow.document.open();
       printWindow.document.write(`<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Agenda del Día — ${dateLabel}</title>
 <style>
   @media print { body { margin: 0; } }
-  @page { margin: 20mm 15mm; }
+  @page { margin: 15mm; }
 </style>
 </head>
 <body style="font-family: Arial, sans-serif; color: #333; margin: 0;">
   ${doctorPages}
-  <div style="padding: 0 40px 20px; font-size: 12px; color: #888; text-align: center; border-top: 1px solid #eee; padding-top: 10px;">
-    Resumen general: <strong>${totalAppts}</strong> cita${totalAppts !== 1 ? 's' : ''} programada${totalAppts !== 1 ? 's' : ''} — ${doctorsToShow.length} doctor${doctorsToShow.length !== 1 ? 'es' : ''}
-  </div>
 </body></html>`);
       printWindow.document.close();
       printWindow.print();
-    } catch (err) {
-      console.error(err);
+    } catch (fallbackErr) {
+      console.error(fallbackErr);
       if (printWindow) printWindow.close();
-      toast.error('Error al cargar la agenda del día: ' + err.message);
-    }
-  }
-
-  async printWeeklyAgenda() {
-    const slotDuration = parseInt(this.container.querySelector('#slot-duration')?.value || '30', 10);
-    const monday = this.getMonday(this.currentDate);
-    const saturday = new Date(monday);
-    saturday.setDate(monday.getDate() + 5);
-    const startDate = this.toDateStr(monday);
-    const endDate = this.toDateStr(saturday);
-
-    // Close dropdown
-    const menu = this.container.querySelector('#print-dropdown-menu');
-    if (menu) menu.style.display = 'none';
-
-    // Open print window synchronously to bypass popup blocker
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      toast.error('El bloqueador de ventanas emergentes impidió abrir la agenda. Por favor, permita las ventanas emergentes.');
-      return;
-    }
-    printWindow.document.write('<html><head><title>Cargando Agenda...</title></head><body style="font-family:Arial,sans-serif;text-align:center;padding-top:100px;color:#555;"><h2>Cargando Agenda Semanal, por favor espere...</h2></body></html>');
-    printWindow.document.close();
-
-    try {
-      const [appointments, allDoctors] = await Promise.all([
-        appointmentService.getAll({
-          date_from: startDate, date_to: endDate,
-          limit: 9999,
-          sortBy: 'a.start_time', sortOrder: 'ASC'
-        }),
-        doctorService.getAll()
-      ]);
-      const list = Array.isArray(appointments) ? appointments : [];
-      const activeDoctors = (allDoctors || []).filter(d => d.is_active);
-
-      // Fetch schedules and unavailability for all active doctors for the weekly range
-      const [unavailResults, scheduleResults] = await Promise.all([
-        Promise.all(activeDoctors.map(d =>
-          doctorService.getUnavailability(d.id, startDate, endDate).catch(() => [])
-        )),
-        Promise.all(activeDoctors.map(d =>
-          doctorService.getSchedule(d.id).catch(() => [])
-        ))
-      ]);
-
-      const getDocId = (a) => a.doctor_id || a.doctor?.id || null;
-      const getDocName = (a) => a.doctor_name || a.doctor?.fullName || a.doctorName || 'Sin doctor';
-      const getDocSpec = (a) => a.doctor_specialty || a.doctor?.specialty || '';
-      const getPatientName = (a) => a.patient_name || a.patient?.fullName || 'Sin paciente';
-      const getTreatment = (a) => a.treatment || a.treatment_name || a.reason || '';
-      const getStatus = (a) => a.status_label || a.status_name || '';
-      const getPhone = (a) => a.patient_phone || a.patient?.phone || '';
-      const getID = (a) => a.custom_id || a.customId || a.patient_custom_id || a.patient?.customId || a.patient?.custom_id || (a.patient_id || a.patientId ? `PAC-${String(a.patient_id || a.patientId).padStart(5, '0')}` : '');
-      const getPatientWithId = (a) => {
-        const idStr = getID(a);
-        const nameStr = getPatientName(a);
-        const phoneStr = getPhone(a);
-        return idStr ? `[${idStr}] ${nameStr} - ${phoneStr}` : `${nameStr} - ${phoneStr}`;
-      };
-
-      // Group appointments by doctor id then by date
-      const groupsByDocId = {};
-      list.forEach(a => {
-        const docId = getDocId(a);
-        const key = docId || getDocName(a);
-        if (!groupsByDocId[key]) {
-          groupsByDocId[key] = { doctor_id: docId, doctor_name: getDocName(a), doctor_specialty: getDocSpec(a), appointments: [] };
-        }
-        groupsByDocId[key].appointments.push(a);
-      });
-
-      // Build doctors to print: only those who work at least one day of this week or have appointments
-      const doctorsToShow = [];
-      activeDoctors.forEach((d, idx) => {
-        const unavailList = unavailResults[idx] || [];
-        const schedules = scheduleResults[idx] || [];
-        
-        let worksAtLeastOneDay = false;
-        // Check Mon-Sat (6 days)
-        for (let i = 0; i < 6; i++) {
-          const date = new Date(monday);
-          date.setDate(monday.getDate() + i);
-          const dateStr = this.toDateStr(date);
-          const currentDow = date.getDay();
-          
-          const isUnavailable = unavailList.some(rec => {
-            const start = rec.start_date.slice(0, 10);
-            const end = rec.end_date.slice(0, 10);
-            return dateStr >= start && dateStr <= end;
-          });
-          
-          const daySchedule = schedules.find(s => s.day_of_week === currentDow && s.is_active);
-          
-          if (!isUnavailable && !!daySchedule) {
-            worksAtLeastOneDay = true;
-            break;
-          }
-        }
-        
-        const hasAppointments = (groupsByDocId[d.id]?.appointments || []).length > 0;
-        
-        if (worksAtLeastOneDay || hasAppointments) {
-          doctorsToShow.push({
-            id: d.id,
-            name: d.fullName || `${d.first_name || ''} ${d.last_name || ''}`.trim() || 'Doctor',
-            specialty: d.specialty || '',
-            appointments: (groupsByDocId[d.id]?.appointments || [])
-              .sort((a, b) => {
-                const dateA = a.appointment_date ? String(a.appointment_date).substring(0, 10) : '';
-                const dateB = b.appointment_date ? String(b.appointment_date).substring(0, 10) : '';
-                if (dateA !== dateB) return dateA.localeCompare(dateB);
-                return (a.start_time || '').localeCompare(b.start_time || '');
-              })
-          });
-        }
-      });
-
-      // Also include leftover groups
-      const matchedIds = new Set(activeDoctors.map(d => d.id));
-      Object.values(groupsByDocId).forEach(g => {
-        if (!matchedIds.has(g.doctor_id)) {
-          doctorsToShow.push({
-            id: g.doctor_id,
-            name: g.doctor_name,
-            specialty: g.doctor_specialty,
-            appointments: g.appointments.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''))
-          });
-        }
-      });
-
-      // Build day columns (Mon-Sat)
-      const weekDays = [];
-      const dayNamesShort = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-      const dayNamesFull = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
-      const monthNames = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-      for (let i = 0; i < 6; i++) {
-        const d = new Date(monday);
-        d.setDate(monday.getDate() + i);
-        weekDays.push({
-          dateStr: this.toDateStr(d),
-          label: `${dayNamesShort[i]} ${d.getDate()}`,
-          fullLabel: `${dayNamesFull[d.getDay()]} ${d.getDate()}`
-        });
-      }
-
-      // Week label
-      const monDate = new Date(monday);
-      const satDate = new Date(saturday);
-      const weekLabel = monDate.getMonth() === satDate.getMonth()
-        ? `${monDate.getDate()} - ${satDate.getDate()} de ${monthNames[monDate.getMonth()]} de ${monDate.getFullYear()}`
-        : `${monDate.getDate()} ${monthNames[monDate.getMonth()]} - ${satDate.getDate()} ${monthNames[satDate.getMonth()]} ${satDate.getFullYear()}`;
-
-      // Time slots
-      const slots = [];
-      for (let m = 540; m < 1200; m += slotDuration) {
-        slots.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
-      }
-
-      const clinic = state.get('clinicInfo') || {};
-      const allIds = new Set(list.map(a => a.id));
-      const totalAppts = allIds.size;
-
-      // // Styles
-      const cellStyle = 'border: 1px solid #ddd; padding: 4px 6px; font-size: 10px; vertical-align: top; height: 20px';
-      const thStyle = `${cellStyle} background: #f0f0f0; font-weight: 600; text-align: center; font-size: 11px;`;
-      // const statusColors = {
-      //   scheduled: '#2563eb', confirmed: '#059669', completed: '#6b7280',
-      //   cancelled: '#dc2626', no_show: '#d97706', in_progress: '#7c3aed'
-      // };
-
-      // Build one page per doctor
-      const doctorPages = doctorsToShow.map((doc, idx) => {
-        const docApptCount = doc.appointments.length;
-
-        // Get appointments indexed by date
-        const apptsByDate = {};
-        doc.appointments.forEach(a => {
-          const aptDate = a.appointment_date ? String(a.appointment_date).substring(0, 10) : '';
-          if (!apptsByDate[aptDate]) apptsByDate[aptDate] = [];
-          apptsByDate[aptDate].push(a);
-        });
-
-        // Header columns
-        let headerCells = `<th style="${thStyle}width:55px;">Hora</th>`;
-        weekDays.forEach(wd => {
-          headerCells += `<th style="${thStyle}min-width:100px;">${wd.label}</th>`;
-        });
-
-        // Build rows
-        let rows = '';
-        slots.forEach(slot => {
-          rows += '<tr>';
-          rows += `<td style="${cellStyle}font-weight:600;color:#555;text-align:center;width:55px;">${slot}</td>`;
-          weekDays.forEach(wd => {
-            const dayAppts = apptsByDate[wd.dateStr] || [];
-            const matches = dayAppts.filter(a => {
-              const s = a.start_time ? a.start_time.substring(0, 5) : '';
-              const e = a.end_time ? a.end_time.substring(0, 5) : '';
-              return s <= slot && e > slot;
-            });
-            if (matches.length > 0) {
-              const content = matches.map(m => {
-                const cab = m.gabinete ? `[${m.gabinete}] ` : '';
-                return `<div style="border-bottom: 1px dashed #eee; padding-bottom: 2px; margin-bottom: 2px;">
-                  <div style="font-weight:600;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">${cab}${getPatientWithId(m)}</div>
-                  <div style="font-size:9px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;">${getTreatment(m)}</div>
-                </div>`;
-              }).join('');
-              rows += `<td style="${cellStyle}">${content}</td>`;
-            } else {
-              rows += `<td style="${cellStyle}color:#ddd;text-align:center;">—</td>`;
-            }
-          });
-          rows += '</tr>';
-        });
-
-        return `
-          <div style="page-break-after: ${idx < doctorsToShow.length - 1 ? 'always' : 'auto'}; padding: 20px 25px;">
-            <div style="text-align: center; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 3px double #ccc;">
-              <h1 style="margin: 0; font-size: 20px; color: #111;">${clinic.name || 'Clinica Vides Dental'}</h1>
-              <p style="margin: 4px 0 0; font-size: 12px; color: #555;">${clinic.address || ''}${clinic.phone ? ' — Tel: ' + clinic.phone : ''}</p>
-            </div>
-            <div style="margin-bottom: 14px; display: flex; justify-content: space-between; align-items: baseline;">
-              <div>
-                <h2 style="margin: 0; font-size: 16px; color: #222;">Dr. ${doc.name}</h2>
-                ${doc.specialty ? `<p style="margin: 2px 0 0; font-size: 12px; color: #666;">${doc.specialty}</p>` : ''}
-              </div>
-              <div style="text-align: right;">
-                <p style="margin: 0; font-size: 13px; font-weight: 600; color: #333;">Agenda Semanal</p>
-                <p style="margin: 2px 0 0; font-size: 12px; color: #666;">${weekLabel}</p>
-              </div>
-            </div>
-            <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
-              <thead><tr>${headerCells}</tr></thead>
-              <tbody>${rows}</tbody>
-            </table>
-            <div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid #ddd; font-size: 12px; color: #555; display: flex; justify-content: space-between;">
-              <span>Citas de la semana: <strong>${docApptCount}</strong></span>
-              <span>Intervalo: ${slotDuration} min</span>
-            </div>
-          </div>`;
-      }).join('');
-
-      // Print
-      printWindow.document.open();
-      printWindow.document.write(`<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Agenda Semanal — ${weekLabel}</title>
-<style>
-  @media print { body { margin: 0; } }
-  @page { size: landscape; margin: 12mm 10mm; }
-</style>
-</head>
-<body style="font-family: Arial, sans-serif; color: #333; margin: 0;">
-  ${doctorPages}
-  <div style="padding: 0 25px 16px; font-size: 11px; color: #888; text-align: center; border-top: 1px solid #eee; padding-top: 8px;">
-    Resumen semanal: <strong>${totalAppts}</strong> cita${totalAppts !== 1 ? 's' : ''} programada${totalAppts !== 1 ? 's' : ''} — ${doctorsToShow.length} doctor${doctorsToShow.length !== 1 ? 'es' : ''}
-  </div>
-</body></html>`);
-      printWindow.document.close();
-      printWindow.print();
-    } catch (err) {
-      console.error(err);
-      if (printWindow) printWindow.close();
-      toast.error('Error al cargar la agenda semanal: ' + err.message);
+      toast.error('Error al generar la agenda: ' + fallbackErr.message);
     }
   }
 
