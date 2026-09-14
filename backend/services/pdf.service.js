@@ -2170,6 +2170,13 @@ class PDFService {
 
     const weekTitle = `Semana: ${startDateStr} al ${endDateStr}`;
 
+    if (doctorsToShow.length === 0) {
+      this.drawHeader(doc, clinic, 'Agenda Semanal', weekTitle, 'SEMANAL', COLORS.primary);
+      doc.y += 30;
+      doc.fillColor(COLORS.textSecondary).font('Helvetica').fontSize(11)
+        .text('No hay citas ni doctores activos programados para esta semana.', margin, doc.y, { align: 'center', width: contentWidth });
+    }
+
     doctorsToShow.forEach((doctor, dIdx) => {
       if (dIdx > 0) doc.addPage();
 
@@ -2183,37 +2190,53 @@ class PDFService {
         apptsByDate[dStr].push(a);
       });
 
+      // Tarjeta de información del Doctor y Resumen de la Semana (estilo idéntico a Agenda Diaria)
+      const docCardY = doc.y + 3;
+      const docCardH = 34;
+      doc.roundedRect(margin, docCardY, contentWidth, docCardH, 4).fillAndStroke(COLORS.bgLight, COLORS.border);
+
+      doc.fillColor(COLORS.primaryDark).font('Helvetica-Bold').fontSize(10.5)
+        .text(`Dr/a. ${this.stripEmojis(doctor.name)}`, margin + 10, docCardY + 6);
+
+      doc.fillColor(COLORS.textSecondary).font('Helvetica').fontSize(8)
+        .text(`Especialidad: ${this.stripEmojis(doctor.specialty || 'Odontología General')} · Intervalo: ${validDuration} min`, margin + 10, docCardY + 19);
+
+      doc.fillColor(COLORS.text).font('Helvetica-Bold').fontSize(8.5)
+        .text(`Total Citas en Semana: ${docAppts.length}`, margin, docCardY + 12, { width: contentWidth - 14, align: 'right' });
+
+      doc.y = docCardY + docCardH + 8;
+
       // Encabezado de la tabla semanal
-      const timeColWidth = 45;
+      const timeColWidth = 46;
       const dayColWidth = (contentWidth - timeColWidth) / 6;
 
-      const theadY = doc.y + 4;
-      doc.rect(margin, theadY, contentWidth, 20).fill(COLORS.primary);
+      const drawTableHeader = () => {
+        const theadY = doc.y;
+        const theadH = 20;
+        doc.roundedRect(margin, theadY, contentWidth, theadH, 3).fill(COLORS.primary);
 
-      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8.5)
-        .text('Hora', margin + 4, theadY + 5, { width: timeColWidth - 8, align: 'center' });
+        doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8)
+          .text('HORA', margin + 2, theadY + 5.5, { width: timeColWidth - 4, align: 'center' });
 
-      weekDays.forEach((wd, wIdx) => {
-        doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8.5)
-          .text(wd.label, margin + timeColWidth + wIdx * dayColWidth, theadY + 5, {
-            width: dayColWidth,
-            align: 'center',
-          });
-      });
+        weekDays.forEach((wd, wIdx) => {
+          doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8)
+            .text(wd.label.toUpperCase(), margin + timeColWidth + wIdx * dayColWidth, theadY + 5.5, {
+              width: dayColWidth,
+              align: 'center',
+            });
+        });
 
-      doc.y = theadY + 22;
+        doc.y = theadY + theadH + 4;
+      };
+
+      drawTableHeader();
 
       slots.forEach(slot => {
-        if (doc.y > doc.page.height - 40) {
-          doc.addPage();
-          doc.y = 35;
-        }
-
-        const rowY = doc.y;
-        doc.fillColor(COLORS.primaryDark).font('Helvetica-Bold').fontSize(7.5)
-          .text(slot.label, margin, rowY + 3, { width: timeColWidth, align: 'center' });
-
-        let maxHeightInRow = 14;
+        // Precalcular citas coincidentes para calcular altura dinámica de la fila
+        const dayMatches = [];
+        let maxHeightInRow = 17;
+        const cardH = 20;
+        const cardGap = 2.5;
 
         weekDays.forEach((wd, wIdx) => {
           const dayList = apptsByDate[wd.dateStr] || [];
@@ -2221,40 +2244,111 @@ class PDFService {
             const { s, e } = this._getAppointmentRange(a, validDuration);
             return s < slot.nextLabel && e > slot.label;
           });
+          dayMatches[wIdx] = matches;
 
+          if (matches.length > 0) {
+            const cellHeight = matches.length * cardH + (matches.length - 1) * cardGap + 6;
+            if (cellHeight > maxHeightInRow) maxHeightInRow = cellHeight;
+          }
+        });
+
+        // Salto de página preventivo si el bloque excede el pie de página
+        if (doc.y + maxHeightInRow > doc.page.height - 40) {
+          doc.addPage();
+          doc.y = 35;
+          doc.fillColor(COLORS.textSecondary).font('Helvetica-Bold').fontSize(8)
+            .text(`Dr/a. ${this.stripEmojis(doctor.name)} — Agenda Semanal (Continuación) · ${weekTitle}`, margin, doc.y);
+          doc.y += 12;
+          doc.strokeColor(COLORS.border).lineWidth(0.5).moveTo(margin, doc.y).lineTo(pageWidth - margin, doc.y).stroke();
+          doc.y += 6;
+
+          drawTableHeader();
+        }
+
+        const rowY = doc.y;
+
+        // Badge estilizado de Hora en la columna izquierda
+        doc.roundedRect(margin + 2, rowY + 1.5, timeColWidth - 4, 14, 2.5).fillAndStroke('#eff6ff', '#bfdbfe');
+        doc.fillColor('#1d4ed8').font('Helvetica-Bold').fontSize(7.5)
+          .text(slot.label, margin + 2, rowY + 4.5, { width: timeColWidth - 4, align: 'center' });
+
+        // Renderizar cada día de la semana
+        weekDays.forEach((wd, wIdx) => {
+          const matches = dayMatches[wIdx];
           const colX = margin + timeColWidth + wIdx * dayColWidth + 2;
           const colW = dayColWidth - 4;
 
           if (matches.length > 0) {
-            let currentItemY = rowY + 2;
+            let currentCardY = rowY + 2;
             matches.forEach(m => {
-              const id = this.stripEmojis(this.getPatientCustomId(m));
-              const name = this.stripEmojis(this.getPatientName(m));
-              const time = `${(m.start_time || '').substring(0, 5)}-${(m.end_time || '').substring(0, 5)}`;
               const { s } = this._getAppointmentRange(m, validDuration);
               const isContinuation = s < slot.label;
-              const text = `[${id}] ${name} (${time})${isContinuation ? ' *' : ''}`;
+              const patName = this.stripEmojis(this.getPatientName(m));
+              const startTimeStr = (m.start_time || '').substring(0, 5);
+              const endTimeStr = (m.end_time || '').substring(0, 5);
+              const timeRange = `${startTimeStr} - ${endTimeStr}`;
 
-              doc.fillColor(isContinuation ? '#b45309' : COLORS.text)
-                .font(isContinuation ? 'Helvetica-Oblique' : 'Helvetica')
+              let accentColor = '#0284c7';
+              if (isContinuation) {
+                accentColor = '#f59e0b';
+              } else if (m.status_name === 'confirmada') {
+                accentColor = '#10b981';
+              } else if (m.status_name === 'en_consulta') {
+                accentColor = '#2563eb';
+              } else if (m.status_name === 'completada') {
+                accentColor = '#0284c7';
+              } else if (m.status_name === 'cancelada') {
+                accentColor = '#ef4444';
+              } else if (m.status_name === 'pendiente') {
+                accentColor = '#f59e0b';
+              }
+
+              const bgCard = isContinuation ? '#fefce8' : '#f8fafc';
+              const borderCard = isContinuation ? '#fef08a' : '#e2e8f0';
+
+              // Tarjeta visual elegante de la cita
+              doc.roundedRect(colX, currentCardY, colW, cardH, 2.5).fillAndStroke(bgCard, borderCard);
+
+              // Barra lateral indicadora de estado / continuación
+              doc.roundedRect(colX, currentCardY, 3, cardH, 1.5).fill(accentColor);
+
+              // Contenido: Texto Línea 1 (Horario)
+              const textX = colX + 5.5;
+              const textW = colW - 7.5;
+              const line1Y = currentCardY + 2.5;
+
+              doc.fillColor(isContinuation ? '#b45309' : '#0369a1')
+                .font('Helvetica-Bold')
                 .fontSize(6.5)
-                .text(text, colX, currentItemY, { width: colW });
-              currentItemY += 9;
+                .text(timeRange, textX, line1Y, { continued: isContinuation, width: textW, lineBreak: false });
+
+              if (isContinuation) {
+                doc.fillColor('#b45309').font('Helvetica-Oblique').fontSize(5.8).text(' (En curso)');
+              }
+
+              // Contenido: Texto Línea 2 (Nombre del paciente con elipsis para recorte limpio)
+              const line2Y = currentCardY + 10.5;
+              doc.fillColor('#0f172a')
+                .font('Helvetica-Bold')
+                .fontSize(7.2)
+                .text(patName, textX, line2Y, { width: textW, height: 8.5, ellipsis: true, lineBreak: false });
+
+              currentCardY += cardH + cardGap;
             });
-            const cellHeight = matches.length * 9 + 4;
-            if (cellHeight > maxHeightInRow) maxHeightInRow = cellHeight;
           } else {
-            doc.fillColor(COLORS.textMuted).font('Helvetica').fontSize(6.5)
-              .text('—', colX, rowY + 3, { width: colW, align: 'center' });
+            // Celda sin citas: sutil guión indicador
+            doc.fillColor('#cbd5e1').font('Helvetica').fontSize(7.5)
+              .text('—', colX, rowY + 5, { width: colW, align: 'center' });
           }
         });
 
+        // Línea divisoria de fila horaria
         doc.y = rowY + maxHeightInRow;
-        doc.strokeColor(COLORS.border).lineWidth(0.4)
+        doc.strokeColor('#e2e8f0').lineWidth(0.4)
           .moveTo(margin, doc.y)
           .lineTo(pageWidth - margin, doc.y)
           .stroke();
-        doc.y += 2;
+        doc.y += 1.5;
       });
     });
 
