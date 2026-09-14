@@ -162,9 +162,15 @@ async function runAgendaPdfTests() {
     // 4. Probar generación de Agenda Semanal (Landscape)
     console.log('\n🔹 4. Probando generación de Agenda Semanal en formato Horizontal...');
     await als.run({ clinicId: 1, isOwner: true, roleName: 'propietario' }, async () => {
+      // Validar normalizador de fechas formatToYMD
+      assert(pdfService.formatToYMD('2026-09-14') === '2026-09-14', 'formatToYMD normaliza string YYYY-MM-DD');
+      assert(pdfService.formatToYMD('2026-09-14T00:00:00.000Z') === '2026-09-14', 'formatToYMD normaliza string ISO');
+      assert(pdfService.formatToYMD(new Date('2026-09-14T12:00:00')) === '2026-09-14', 'formatToYMD normaliza objeto Date');
+
       const weeklyResult = await pdfService.generateAgendaPDF({
         date: testDate,
         slotDuration: 30,
+        doctorId: testDoctorId,
         mode: 'weekly',
       });
 

@@ -1672,6 +1672,25 @@ class PDFService {
   }
 
   /**
+   * Normaliza cualquier formato de fecha (Date, string ISO, etc.) a YYYY-MM-DD local.
+   */
+  formatToYMD(val) {
+    if (!val) return '';
+    if (typeof val === 'string') {
+      const match = val.match(/^(\d{4}-\d{2}-\d{2})/);
+      if (match) return match[1];
+      val = new Date(val);
+    }
+    if (val instanceof Date && !isNaN(val.getTime())) {
+      const y = val.getFullYear();
+      const m = String(val.getMonth() + 1).padStart(2, '0');
+      const d = String(val.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+    return '';
+  }
+
+  /**
    * Helper para obtener el rango horario de una cita con duración por defecto segura.
    */
   _getAppointmentRange(a, defaultDuration = 30) {
@@ -2064,8 +2083,8 @@ class PDFService {
     const saturday = new Date(monday);
     saturday.setDate(monday.getDate() + 5);
 
-    const startDateStr = monday.toISOString().slice(0, 10);
-    const endDateStr = saturday.toISOString().slice(0, 10);
+    const startDateStr = this.formatToYMD(monday);
+    const endDateStr = this.formatToYMD(saturday);
 
     const appointmentsResult = await appointmentRepository.findAllWithDetails({
       limit: 9999,
@@ -2086,14 +2105,31 @@ class PDFService {
 
     const apptsByDoctor = {};
     appointments.forEach(a => {
-      const docKey = a.doctor_id || 0;
+      const docKey = a.doctor_id ? Number(a.doctor_id) : 0;
       if (!apptsByDoctor[docKey]) apptsByDoctor[docKey] = [];
       apptsByDoctor[docKey].push(a);
     });
 
     const doctorsToShow = activeDoctors.filter(d => {
       if (doctorId && Number(d.id) !== Number(doctorId)) return false;
-      return (apptsByDoctor[d.id] || []).length > 0 || (doctorId && Number(d.id) === Number(doctorId));
+      return (apptsByDoctor[Number(d.id)] || []).length > 0 || (doctorId && Number(d.id) === Number(doctorId));
+    });
+
+    // Incluir cualquier doctor con citas asignadas aunque no esté en activeDoctors
+    const matchedDoctorIds = new Set(doctorsToShow.map(d => Number(d.id)));
+    Object.keys(apptsByDoctor).forEach(key => {
+      const docAppts = apptsByDoctor[key];
+      const nKey = Number(key);
+      if (docAppts.length > 0 && !matchedDoctorIds.has(nKey)) {
+        if (!doctorId || nKey === Number(doctorId)) {
+          doctorsToShow.push({
+            id: nKey,
+            name: docAppts[0].doctor_name || 'Doctor',
+            specialty: docAppts[0].doctor_specialty || 'Odontología General',
+          });
+          matchedDoctorIds.add(nKey);
+        }
+      }
     });
 
     if (doctorsToShow.length === 0 && activeDoctors.length > 0 && !doctorId) {
@@ -2106,7 +2142,7 @@ class PDFService {
       const d = new Date(monday);
       d.setDate(monday.getDate() + i);
       weekDays.push({
-        dateStr: d.toISOString().slice(0, 10),
+        dateStr: this.formatToYMD(d),
         label: `${dayNamesShort[i]} ${d.getDate()}/${d.getMonth() + 1}`,
       });
     }
@@ -2139,10 +2175,10 @@ class PDFService {
 
       this.drawHeader(doc, clinic, 'Agenda Semanal', weekTitle, 'SEMANAL', COLORS.primary);
 
-      const docAppts = apptsByDoctor[doctor.id] || [];
+      const docAppts = apptsByDoctor[Number(doctor.id)] || [];
       const apptsByDate = {};
       docAppts.forEach(a => {
-        const dStr = String(a.appointment_date).slice(0, 10);
+        const dStr = this.formatToYMD(a.appointment_date);
         if (!apptsByDate[dStr]) apptsByDate[dStr] = [];
         apptsByDate[dStr].push(a);
       });

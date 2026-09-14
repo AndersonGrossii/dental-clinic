@@ -1025,63 +1025,12 @@ export class Appointments {
 
   /**
    * Renderiza el visor con el PDF generado por el servicio de PDF
-   * e inicia automáticamente la ventana de impresión nativa.
+   * navegando directamente la ventana abierta al Blob URL para visualización e impresión nativa sin bloqueos de iframe.
    */
-  _renderPdfInWindow(printWindow, { blobUrl, filename, title, subtitle = '' }) {
-    printWindow.document.open();
-    printWindow.document.write(`<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>${title}</title>
-  <style>
-    * { box-sizing: border-box; }
-    body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #525659; }
-    .toolbar { display: flex; align-items: center; justify-content: space-between; padding: 8px 20px; background: #1e293b; color: #fff; height: 48px; box-shadow: 0 2px 8px rgba(0,0,0,0.25); z-index: 10; position: relative; }
-    .toolbar-title { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-    .toolbar-sub { font-size: 12px; color: #94a3b8; font-weight: normal; margin-left: 6px; }
-    .toolbar-actions { display: flex; gap: 10px; align-items: center; }
-    .btn { padding: 6px 16px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; transition: background 0.15s; }
-    .btn-print { background: #0f86ec; color: white; }
-    .btn-print:hover { background: #0b6cc4; }
-    .btn-download { background: #16a34a; color: white; }
-    .btn-download:hover { background: #15803d; }
-    iframe { width: 100%; height: calc(100% - 48px); border: none; background: #fff; }
-    @media print {
-      .toolbar { display: none !important; }
-      iframe { height: 100% !important; }
+  _renderPdfInWindow(printWindow, { blobUrl }) {
+    if (printWindow) {
+      printWindow.location.href = blobUrl;
     }
-  </style>
-</head>
-<body>
-  <div class="toolbar">
-    <div class="toolbar-title">
-      <span>📄</span> ${title} ${subtitle ? `<span class="toolbar-sub">(${subtitle})</span>` : ''}
-    </div>
-    <div class="toolbar-actions">
-      <button class="btn btn-print" id="btn-print" onclick="triggerPrint()">🖨️ Imprimir PDF</button>
-      <a class="btn btn-download" id="btn-download" href="${blobUrl}" download="${filename}">📥 Descargar PDF</a>
-    </div>
-  </div>
-  <iframe id="pdf-frame" src="${blobUrl}"></iframe>
-  <script>
-    function triggerPrint() {
-      const frame = document.getElementById('pdf-frame');
-      try {
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-      } catch (e) {
-        window.print();
-      }
-    }
-    const frame = document.getElementById('pdf-frame');
-    frame.onload = function() {
-      setTimeout(triggerPrint, 600);
-    };
-  </script>
-</body>
-</html>`);
-    printWindow.document.close();
   }
 
   /**
