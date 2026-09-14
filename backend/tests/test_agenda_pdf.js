@@ -178,6 +178,33 @@ async function runAgendaPdfTests() {
       assert(weeklyResult.buffer.length > 2000, `Tamaño consistente de agenda semanal (${weeklyResult.buffer.length} bytes)`);
       assert(weeklyResult.filename.startsWith('Agenda_Semanal_'), `Nombre correcto de agenda semanal: ${weeklyResult.filename}`);
       assert(weeklyResult.documentNumber === 'AGE-SEM', 'Código de documento AGE-SEM asignado');
+
+      // Probar scope: 'both' para toda la clínica
+      const weeklyBoth = await pdfService.generateAgendaPDF({
+        date: testDate,
+        slotDuration: 30,
+        mode: 'weekly',
+        scope: 'both',
+      });
+      assert(Buffer.isBuffer(weeklyBoth.buffer) && weeklyBoth.buffer.length > 3000, 'Agenda semanal scope=both generada');
+
+      // Probar scope: 'doctors'
+      const weeklyDoctors = await pdfService.generateAgendaPDF({
+        date: testDate,
+        slotDuration: 30,
+        mode: 'weekly',
+        scope: 'doctors',
+      });
+      assert(Buffer.isBuffer(weeklyDoctors.buffer) && weeklyDoctors.buffer.length > 2000, 'Agenda semanal scope=doctors generada');
+
+      // Probar scope: 'general'
+      const weeklyGeneral = await pdfService.generateAgendaPDF({
+        date: testDate,
+        slotDuration: 30,
+        mode: 'weekly',
+        scope: 'general',
+      });
+      assert(Buffer.isBuffer(weeklyGeneral.buffer) && weeklyGeneral.buffer.length > 2000, 'Agenda semanal scope=general generada');
     });
 
     // 5. Probar el controlador HTTP getAgendaPDF
@@ -205,6 +232,24 @@ async function runAgendaPdfTests() {
       assert(headersSet['Content-Type'] === 'application/pdf', `Content-Type correcto: ${headersSet['Content-Type']}`);
       assert(headersSet['Content-Disposition'].includes('inline; filename="Agenda_Dia_'), `Content-Disposition inline correcto: ${headersSet['Content-Disposition']}`);
       assert(Buffer.isBuffer(sentBuffer) && sentBuffer.length > 1000, 'Buffer enviado por el controlador es válido');
+
+      // Probar getAgendaPDF semanal con scope='doctors'
+      let weeklyHeaders = {};
+      let weeklySentBuffer = null;
+      const resWeekly = {
+        setHeader(name, value) {
+          weeklyHeaders[name] = value;
+        },
+        send(buffer) {
+          weeklySentBuffer = buffer;
+          return this;
+        },
+      };
+      await getAgendaPDF({ query: { date: testDate, slot_duration: '30', mode: 'weekly', scope: 'doctors' } }, resWeekly, (err) => {
+        if (err) throw err;
+      });
+      assert(weeklyHeaders['Content-Disposition'].includes('inline; filename="Agenda_Semanal_'), 'Content-Disposition semanal correcto');
+      assert(Buffer.isBuffer(weeklySentBuffer) && weeklySentBuffer.length > 2000, 'Buffer semanal enviado por el controlador es válido');
     });
 
     // Limpieza de datos de prueba

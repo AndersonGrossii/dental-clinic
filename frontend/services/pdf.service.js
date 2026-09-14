@@ -136,12 +136,13 @@ class PDFDownloadService {
   /**
    * Descarga la agenda médica en formato PDF oficial.
    */
-  async downloadAgenda({ date, slotDuration = 30, doctorId = null, mode = 'daily' } = {}) {
+  async downloadAgenda({ date, slotDuration = 30, doctorId = null, mode = 'daily', scope = null } = {}) {
     const params = new URLSearchParams();
     if (date) params.set('date', date);
     if (slotDuration) params.set('slot_duration', slotDuration);
     if (doctorId) params.set('doctor_id', doctorId);
     if (mode) params.set('mode', mode);
+    if (scope) params.set('scope', scope);
 
     const filename = mode === 'weekly'
       ? `Agenda_Semanal_${date || 'semana'}.pdf`
@@ -153,7 +154,7 @@ class PDFDownloadService {
   /**
    * Obtiene el Blob URL del PDF de la agenda para vista previa e impresión directa.
    */
-  async getAgendaBlobUrl({ date, slotDuration = 30, doctorId = null, mode = 'daily' } = {}) {
+  async getAgendaBlobUrl({ date, slotDuration = 30, doctorId = null, mode = 'daily', scope = null } = {}) {
     const token = state.get('token');
     const activeClinicId = state.get('activeClinicId');
 
@@ -170,6 +171,7 @@ class PDFDownloadService {
     if (slotDuration) params.set('slot_duration', slotDuration);
     if (doctorId) params.set('doctor_id', doctorId);
     if (mode) params.set('mode', mode);
+    if (scope) params.set('scope', scope);
 
     const url = `${this.baseUrl}/agenda?${params.toString()}`;
     const response = await fetch(url, { method: 'GET', headers });

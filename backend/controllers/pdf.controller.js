@@ -89,12 +89,13 @@ export const getReportPDF = async (req, res, next) => {
  */
 export const getAgendaPDF = async (req, res, next) => {
   try {
-    const { date, slot_duration, doctor_id, mode } = req.query;
+    const { date, slot_duration, doctor_id, mode, scope } = req.query;
     const result = await pdfService.generateAgendaPDF({
       date,
       slotDuration: parseInt(slot_duration || '30', 10),
       doctorId: doctor_id ? parseInt(doctor_id, 10) : null,
       mode: mode || 'daily',
+      scope: scope || undefined,
     });
     return sendPdfResponse(res, req, result);
   } catch (error) {

@@ -98,8 +98,9 @@ export class Appointments {
       }
       if (e.target.id === 'print-daily-btn') this.printDailyAgenda();
       if (e.target.id === 'download-daily-pdf-btn') this.downloadDailyAgendaPDF();
-      if (e.target.id === 'print-weekly-btn') this.printWeeklyAgenda();
-      if (e.target.id === 'download-weekly-pdf-btn') this.downloadWeeklyAgendaPDF();
+      if (e.target.id === 'print-weekly-btn') this.printWeeklyAgenda('doctors');
+      if (e.target.id === 'print-weekly-general-btn') this.printWeeklyAgenda('general');
+      if (e.target.id === 'download-weekly-pdf-btn') this.downloadWeeklyAgendaPDF('both');
       if (e.target.id === 'print-toggle-btn') {
         const menu = this.container.querySelector('#print-dropdown-menu');
         if (menu) menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
@@ -516,8 +517,9 @@ export class Appointments {
               <button id="print-daily-btn" class="btn print-dropdown-btn-item" style="display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 9px 14px; border: none; background: transparent; cursor: pointer; font-size: 13px;">📅 Imprimir Agenda del Día (PDF)</button>
               <button id="download-daily-pdf-btn" class="btn print-dropdown-btn-item" style="display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 9px 14px; border: none; background: transparent; cursor: pointer; font-size: 13px; color: var(--primary-700);">📥 Descargar Agenda del Día (PDF)</button>
               <div style="height: 1px; background: var(--color-border, #eee); margin: 0 12px;"></div>
-              <button id="print-weekly-btn" class="btn print-dropdown-btn-item" style="display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 9px 14px; border: none; background: transparent; cursor: pointer; font-size: 13px;">📋 Imprimir Agenda Semanal (PDF)</button>
-              <button id="download-weekly-pdf-btn" class="btn print-dropdown-btn-item" style="display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 9px 14px; border: none; background: transparent; cursor: pointer; font-size: 13px; color: var(--primary-700);">📥 Descargar Agenda Semanal (PDF)</button>
+              <button id="print-weekly-btn" class="btn print-dropdown-btn-item" style="display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 9px 14px; border: none; background: transparent; cursor: pointer; font-size: 13px;">📋 Imprimir Agenda Semanal (Por Doctor)</button>
+              <button id="print-weekly-general-btn" class="btn print-dropdown-btn-item" style="display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 9px 14px; border: none; background: transparent; cursor: pointer; font-size: 13px;">🏥 Imprimir Agenda Semanal (General Clínica)</button>
+              <button id="download-weekly-pdf-btn" class="btn print-dropdown-btn-item" style="display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 9px 14px; border: none; background: transparent; cursor: pointer; font-size: 13px; color: var(--primary-700);">📥 Descargar Agenda Semanal Completa (PDF)</button>
             </div>
           </div>
           ${(state.get('user')?.role_name === 'propietario' || state.get('user')?.role_name === 'direccion') ? `
@@ -1101,8 +1103,9 @@ export class Appointments {
 
   /**
    * Imprime la Agenda Semanal convirtiéndola previamente en PDF mediante el PDFService.
+   * @param {'doctors'|'general'|'both'} scope - Ámbito de impresión ('doctors' por doctor, 'general' clínica, 'both' ambos)
    */
-  async printWeeklyAgenda() {
+  async printWeeklyAgenda(scope = 'doctors') {
     const slotDurationSelect = this.container.querySelector('#slot-duration');
     const slotDuration = slotDurationSelect ? (parseInt(slotDurationSelect.value, 10) || this.slotDuration || 30) : (this.slotDuration || 30);
     this.slotDuration = slotDuration;
@@ -1117,7 +1120,8 @@ export class Appointments {
       toast.error('El bloqueador de ventanas emergentes impidió abrir la agenda. Por favor, permita las ventanas emergentes.');
       return;
     }
-    printWindow.document.write('<!DOCTYPE html><html><head><title>Cargando Agenda Semanal (PDF)...</title></head><body style="font-family:Arial,sans-serif;text-align:center;padding-top:100px;color:#555;"><h2>📄 Generando Agenda Semanal en PDF con el servicio de PDF, por favor espere...</h2></body></html>');
+    const labelTitle = scope === 'general' ? 'Agenda Semanal General' : 'Agenda Semanal por Doctor';
+    printWindow.document.write(`<!DOCTYPE html><html><head><title>Cargando ${labelTitle} (PDF)...</title></head><body style="font-family:Arial,sans-serif;text-align:center;padding-top:100px;color:#555;"><h2>📄 Generando ${labelTitle} en PDF, por favor espere...</h2></body></html>`);
     printWindow.document.close();
 
     try {
@@ -1126,12 +1130,13 @@ export class Appointments {
         slotDuration,
         doctorId,
         mode: 'weekly',
+        scope,
       });
 
       this._renderPdfInWindow(printWindow, {
         blobUrl,
         filename,
-        title: `Agenda Semanal — ${printDate}`,
+        title: `${labelTitle} — ${printDate}`,
         subtitle: `Intervalo: ${slotDuration} min`,
       });
     } catch (err) {
@@ -1143,8 +1148,9 @@ export class Appointments {
 
   /**
    * Descarga directa del archivo PDF oficial de la Agenda Semanal.
+   * @param {'both'|'doctors'|'general'} scope - Ámbito de descarga (por defecto 'both' incluye general y todos los doctores)
    */
-  async downloadWeeklyAgendaPDF() {
+  async downloadWeeklyAgendaPDF(scope = 'both') {
     const slotDurationSelect = this.container.querySelector('#slot-duration');
     const slotDuration = slotDurationSelect ? (parseInt(slotDurationSelect.value, 10) || this.slotDuration || 30) : (this.slotDuration || 30);
     this.slotDuration = slotDuration;
@@ -1154,7 +1160,7 @@ export class Appointments {
     const menu = this.container.querySelector('#print-dropdown-menu');
     if (menu) menu.style.display = 'none';
 
-    await pdfService.downloadAgenda({ date: printDate, slotDuration, doctorId, mode: 'weekly' });
+    await pdfService.downloadAgenda({ date: printDate, slotDuration, doctorId, mode: 'weekly', scope });
   }
 
   /**

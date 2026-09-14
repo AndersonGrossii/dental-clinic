@@ -1736,7 +1736,7 @@ class PDFService {
    * respetando los intervalos de tiempo seleccionados (15, 30 o 60 min)
    * y mostrando todas las citas simultáneas por doctor.
    */
-  async generateAgendaPDF({ date, slotDuration = 30, doctorId = null, mode = 'daily' } = {}) {
+  async generateAgendaPDF({ date, slotDuration = 30, doctorId = null, mode = 'daily', scope = null } = {}) {
     const store = als.getStore();
     const clinicId = store?.clinicId || 1;
     const clinic = await this.getClinicInfo(clinicId);
@@ -1749,8 +1749,9 @@ class PDFService {
       return String(timeStr).substring(0, 5);
     };
 
-    if (mode === 'weekly') {
-      return this._generateWeeklyAgendaPDF({ clinic, printDate, validDuration, doctorId });
+    if (mode === 'weekly' || mode === 'weekly_general') {
+      const effectiveScope = mode === 'weekly_general' ? 'general' : (scope || (doctorId ? 'doctor' : 'both'));
+      return this._generateWeeklyAgendaPDF({ clinic, printDate, validDuration, doctorId, scope: effectiveScope });
     }
 
     // ============================================
@@ -2072,8 +2073,9 @@ class PDFService {
 
   /**
    * Genera el documento PDF oficial de la Agenda Semanal en formato Horizontal.
+   * Soporta vista por doctores (hojas individuales por profesional) y vista general consolidada.
    */
-  async _generateWeeklyAgendaPDF({ clinic, printDate, validDuration, doctorId }) {
+  async _generateWeeklyAgendaPDF({ clinic, printDate, validDuration, doctorId, scope = 'both' }) {
     const baseDate = new Date(printDate + 'T12:00:00');
     const dayOfWeek = baseDate.getDay();
     const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
@@ -2101,7 +2103,12 @@ class PDFService {
 
     const doctorsResult = await doctorRepository.findAllWithUsers({ limit: 500 });
     const allDoctors = doctorsResult.rows || [];
-    const activeDoctors = allDoctors.filter(d => d.is_active);
+    const activeDoctors = allDoctors.filter(d => d.is_active).map(d => ({
+      id: Number(d.id),
+      name: `${d.first_name || ''} ${d.last_name || ''}`.trim() || 'Doctor',
+      specialty: d.specialty || 'Odontología General',
+      color: d.color || '#0f86ec',
+    }));
 
     const apptsByDoctor = {};
     appointments.forEach(a => {
@@ -2110,30 +2117,89 @@ class PDFService {
       apptsByDoctor[docKey].push(a);
     });
 
-    const doctorsToShow = activeDoctors.filter(d => {
-      if (doctorId && Number(d.id) !== Number(doctorId)) return false;
-      return (apptsByDoctor[Number(d.id)] || []).length > 0 || (doctorId && Number(d.id) === Number(doctorId));
-    });
-
-    // Incluir cualquier doctor con citas asignadas aunque no esté en activeDoctors
-    const matchedDoctorIds = new Set(doctorsToShow.map(d => Number(d.id)));
-    Object.keys(apptsByDoctor).forEach(key => {
-      const docAppts = apptsByDoctor[key];
-      const nKey = Number(key);
-      if (docAppts.length > 0 && !matchedDoctorIds.has(nKey)) {
-        if (!doctorId || nKey === Number(doctorId)) {
+    let doctorsToShow = [];
+    if (doctorId) {
+      doctorsToShow = activeDoctors.filter(d => Number(d.id) === Number(doctorId));
+      if (doctorsToShow.length === 0) {
+        const docAppts = apptsByDoctor[Number(doctorId)] || [];
+        doctorsToShow.push({
+          id: Number(doctorId),
+          name: docAppts[0]?.doctor_name || 'Doctor',
+          specialty: docAppts[0]?.doctor_specialty || 'Odontología General',
+          color: '#0f86ec',
+        });
+      }
+    } else {
+      doctorsToShow = [...activeDoctors];
+      const matchedDoctorIds = new Set(doctorsToShow.map(d => Number(d.id)));
+      Object.keys(apptsByDoctor).forEach(key => {
+        const docAppts = apptsByDoctor[key];
+        const nKey = Number(key);
+        if (docAppts.length > 0 && !matchedDoctorIds.has(nKey)) {
           doctorsToShow.push({
             id: nKey,
             name: docAppts[0].doctor_name || 'Doctor',
             specialty: docAppts[0].doctor_specialty || 'Odontología General',
+            color: '#0f86ec',
           });
           matchedDoctorIds.add(nKey);
         }
-      }
-    });
+      });
+    }
 
     if (doctorsToShow.length === 0 && activeDoctors.length > 0 && !doctorId) {
-      doctorsToShow.push(activeDoctors[0]);
+      doctorsToShow = [...activeDoctors];
+    }
+
+    // Determinar las secciones a generar según el ámbito solicitado
+    let sections = [];
+    if (doctorId) {
+      // Filtrado por doctor específico: hoja individual para ese doctor
+      sections = doctorsToShow.map(doc => ({
+        type: 'doctor',
+        doctor: doc,
+        appts: apptsByDoctor[doc.id] || [],
+      }));
+    } else if (scope === 'general') {
+      // Forzado a sólo agenda general consolidada
+      sections = [{
+        type: 'general',
+        doctor: null,
+        appts: appointments,
+      }];
+    } else if (scope === 'doctors') {
+      // Forzado a sólo hojas individuales por doctor
+      sections = doctorsToShow.map(doc => ({
+        type: 'doctor',
+        doctor: doc,
+        appts: apptsByDoctor[doc.id] || [],
+      }));
+    } else {
+      // Ámbito 'both' o predeterminado sin filtro de doctor:
+      // Si la clínica cuenta con doctores, incluye la agenda general consolidada (donde cada tarjeta muestra el doctor asignado)
+      // seguida de la agenda semanal individual de cada doctor.
+      if (doctorsToShow.length > 1) {
+        sections.push({
+          type: 'general',
+          doctor: null,
+          appts: appointments,
+        });
+      }
+      doctorsToShow.forEach(doc => {
+        sections.push({
+          type: 'doctor',
+          doctor: doc,
+          appts: apptsByDoctor[doc.id] || [],
+        });
+      });
+    }
+
+    if (sections.length === 0 && doctorsToShow.length > 0) {
+      sections = doctorsToShow.map(doc => ({
+        type: 'doctor',
+        doctor: doc,
+        appts: apptsByDoctor[doc.id] || [],
+      }));
     }
 
     const weekDays = [];
@@ -2170,45 +2236,58 @@ class PDFService {
 
     const weekTitle = `Semana: ${startDateStr} al ${endDateStr}`;
 
-    if (doctorsToShow.length === 0) {
+    if (sections.length === 0) {
       this.drawHeader(doc, clinic, 'Agenda Semanal', weekTitle, 'SEMANAL', COLORS.primary);
       doc.y += 30;
       doc.fillColor(COLORS.textSecondary).font('Helvetica').fontSize(11)
         .text('No hay citas ni doctores activos programados para esta semana.', margin, doc.y, { align: 'center', width: contentWidth });
     }
 
-    doctorsToShow.forEach((doctor, dIdx) => {
-      if (dIdx > 0) doc.addPage();
+    const timeColWidth = 46;
+    const dayColWidth = (contentWidth - timeColWidth) / 6;
 
-      this.drawHeader(doc, clinic, 'Agenda Semanal', weekTitle, 'SEMANAL', COLORS.primary);
+    sections.forEach((sec, sIdx) => {
+      if (sIdx > 0) doc.addPage();
 
-      const docAppts = apptsByDoctor[Number(doctor.id)] || [];
-      const apptsByDate = {};
-      docAppts.forEach(a => {
+      const isGeneral = sec.type === 'general';
+      const pageTitle = isGeneral ? 'Agenda Semanal General' : 'Agenda Semanal';
+      const badgeText = isGeneral ? 'GENERAL' : 'DOCTOR';
+      this.drawHeader(doc, clinic, pageTitle, weekTitle, badgeText, COLORS.primary);
+
+      // Tarjeta de información (General de la Clínica o Específica del Doctor)
+      const bannerY = doc.y + 3;
+      const bannerH = 34;
+      doc.roundedRect(margin, bannerY, contentWidth, bannerH, 4).fillAndStroke(COLORS.bgLight, COLORS.border);
+
+      if (isGeneral) {
+        doc.fillColor(COLORS.primaryDark).font('Helvetica-Bold').fontSize(10.5)
+          .text(`${this.stripEmojis(clinic.name || 'Clínica Dental')} — Agenda Semanal Consolidada`, margin + 10, bannerY + 6);
+
+        doc.fillColor(COLORS.textSecondary).font('Helvetica').fontSize(8)
+          .text(`Vista General de Todos los Doctores · Intervalo: ${validDuration} min`, margin + 10, bannerY + 19);
+
+        doc.fillColor(COLORS.text).font('Helvetica-Bold').fontSize(8.5)
+          .text(`Total Citas en Clínica: ${sec.appts.length}`, margin, bannerY + 12, { width: contentWidth - 14, align: 'right' });
+      } else {
+        doc.fillColor(COLORS.primaryDark).font('Helvetica-Bold').fontSize(10.5)
+          .text(`Dr/a. ${this.stripEmojis(sec.doctor.name)}`, margin + 10, bannerY + 6);
+
+        doc.fillColor(COLORS.textSecondary).font('Helvetica').fontSize(8)
+          .text(`Especialidad: ${this.stripEmojis(sec.doctor.specialty || 'Odontología General')} · Intervalo: ${validDuration} min`, margin + 10, bannerY + 19);
+
+        doc.fillColor(COLORS.text).font('Helvetica-Bold').fontSize(8.5)
+          .text(`Total Citas en Semana: ${sec.appts.length}`, margin, bannerY + 12, { width: contentWidth - 14, align: 'right' });
+      }
+
+      doc.y = bannerY + bannerH + 8;
+
+      // Agrupar citas de la sección por fecha
+      const secApptsByDate = {};
+      sec.appts.forEach(a => {
         const dStr = this.formatToYMD(a.appointment_date);
-        if (!apptsByDate[dStr]) apptsByDate[dStr] = [];
-        apptsByDate[dStr].push(a);
+        if (!secApptsByDate[dStr]) secApptsByDate[dStr] = [];
+        secApptsByDate[dStr].push(a);
       });
-
-      // Tarjeta de información del Doctor y Resumen de la Semana (estilo idéntico a Agenda Diaria)
-      const docCardY = doc.y + 3;
-      const docCardH = 34;
-      doc.roundedRect(margin, docCardY, contentWidth, docCardH, 4).fillAndStroke(COLORS.bgLight, COLORS.border);
-
-      doc.fillColor(COLORS.primaryDark).font('Helvetica-Bold').fontSize(10.5)
-        .text(`Dr/a. ${this.stripEmojis(doctor.name)}`, margin + 10, docCardY + 6);
-
-      doc.fillColor(COLORS.textSecondary).font('Helvetica').fontSize(8)
-        .text(`Especialidad: ${this.stripEmojis(doctor.specialty || 'Odontología General')} · Intervalo: ${validDuration} min`, margin + 10, docCardY + 19);
-
-      doc.fillColor(COLORS.text).font('Helvetica-Bold').fontSize(8.5)
-        .text(`Total Citas en Semana: ${docAppts.length}`, margin, docCardY + 12, { width: contentWidth - 14, align: 'right' });
-
-      doc.y = docCardY + docCardH + 8;
-
-      // Encabezado de la tabla semanal
-      const timeColWidth = 46;
-      const dayColWidth = (contentWidth - timeColWidth) / 6;
 
       const drawTableHeader = () => {
         const theadY = doc.y;
@@ -2231,15 +2310,16 @@ class PDFService {
 
       drawTableHeader();
 
+      const cardH = isGeneral ? 26 : 20;
+      const cardGap = isGeneral ? 2 : 2.5;
+      const baseEmptyH = isGeneral ? 18 : 17;
+
       slots.forEach(slot => {
-        // Precalcular citas coincidentes para calcular altura dinámica de la fila
         const dayMatches = [];
-        let maxHeightInRow = 17;
-        const cardH = 20;
-        const cardGap = 2.5;
+        let maxHeightInRow = baseEmptyH;
 
         weekDays.forEach((wd, wIdx) => {
-          const dayList = apptsByDate[wd.dateStr] || [];
+          const dayList = secApptsByDate[wd.dateStr] || [];
           const matches = dayList.filter(a => {
             const { s, e } = this._getAppointmentRange(a, validDuration);
             return s < slot.nextLabel && e > slot.label;
@@ -2252,12 +2332,15 @@ class PDFService {
           }
         });
 
-        // Salto de página preventivo si el bloque excede el pie de página
+        // Salto de página preventivo con repetición de cabeceras
         if (doc.y + maxHeightInRow > doc.page.height - 40) {
           doc.addPage();
           doc.y = 35;
+          const continuationTitle = isGeneral
+            ? `Agenda Semanal General (Continuación) · ${weekTitle}`
+            : `Dr/a. ${this.stripEmojis(sec.doctor.name)} — Agenda Semanal (Continuación) · ${weekTitle}`;
           doc.fillColor(COLORS.textSecondary).font('Helvetica-Bold').fontSize(8)
-            .text(`Dr/a. ${this.stripEmojis(doctor.name)} — Agenda Semanal (Continuación) · ${weekTitle}`, margin, doc.y);
+            .text(continuationTitle, margin, doc.y);
           doc.y += 12;
           doc.strokeColor(COLORS.border).lineWidth(0.5).moveTo(margin, doc.y).lineTo(pageWidth - margin, doc.y).stroke();
           doc.y += 6;
@@ -2267,12 +2350,12 @@ class PDFService {
 
         const rowY = doc.y;
 
-        // Badge estilizado de Hora en la columna izquierda
+        // Badge estilizado de Hora en columna izquierda
         doc.roundedRect(margin + 2, rowY + 1.5, timeColWidth - 4, 14, 2.5).fillAndStroke('#eff6ff', '#bfdbfe');
         doc.fillColor('#1d4ed8').font('Helvetica-Bold').fontSize(7.5)
           .text(slot.label, margin + 2, rowY + 4.5, { width: timeColWidth - 4, align: 'center' });
 
-        // Renderizar cada día de la semana
+        // Renderizado de las columnas de días
         weekDays.forEach((wd, wIdx) => {
           const matches = dayMatches[wIdx];
           const colX = margin + timeColWidth + wIdx * dayColWidth + 2;
@@ -2291,6 +2374,8 @@ class PDFService {
               let accentColor = '#0284c7';
               if (isContinuation) {
                 accentColor = '#f59e0b';
+              } else if (isGeneral && m.doctor_color) {
+                accentColor = m.doctor_color;
               } else if (m.status_name === 'confirmada') {
                 accentColor = '#10b981';
               } else if (m.status_name === 'en_consulta') {
@@ -2309,7 +2394,7 @@ class PDFService {
               // Tarjeta visual elegante de la cita
               doc.roundedRect(colX, currentCardY, colW, cardH, 2.5).fillAndStroke(bgCard, borderCard);
 
-              // Barra lateral indicadora de estado / continuación
+              // Barra lateral indicadora de estado / doctor
               doc.roundedRect(colX, currentCardY, 3, cardH, 1.5).fill(accentColor);
 
               // Contenido: Texto Línea 1 (Horario)
@@ -2326,19 +2411,29 @@ class PDFService {
                 doc.fillColor('#b45309').font('Helvetica-Oblique').fontSize(5.8).text(' (En curso)');
               }
 
-              // Contenido: Texto Línea 2 (Nombre del paciente con elipsis para recorte limpio)
-              const line2Y = currentCardY + 10.5;
+              // Contenido: Texto Línea 2 (Nombre del paciente)
+              const line2Y = currentCardY + 10;
               doc.fillColor('#0f172a')
                 .font('Helvetica-Bold')
-                .fontSize(7.2)
+                .fontSize(7)
                 .text(patName, textX, line2Y, { width: textW, height: 8.5, ellipsis: true, lineBreak: false });
+
+              // Contenido: Texto Línea 3 (En agenda general: Nombre del doctor asignado)
+              if (isGeneral) {
+                const line3Y = currentCardY + 18;
+                const docName = this.stripEmojis(m.doctor_name || 'Sin doctor');
+                doc.fillColor('#475569')
+                  .font('Helvetica-Bold')
+                  .fontSize(6)
+                  .text(`Dr/a. ${docName}`, textX, line3Y, { width: textW, height: 7.5, ellipsis: true, lineBreak: false });
+              }
 
               currentCardY += cardH + cardGap;
             });
           } else {
             // Celda sin citas: sutil guión indicador
             doc.fillColor('#cbd5e1').font('Helvetica').fontSize(7.5)
-              .text('—', colX, rowY + 5, { width: colW, align: 'center' });
+              .text('—', colX, rowY + (isGeneral ? 6 : 5), { width: colW, align: 'center' });
           }
         });
 
@@ -2352,7 +2447,7 @@ class PDFService {
       });
     });
 
-    this.drawFooterAndPages(doc, clinic, `${clinic.name} · Agenda Semanal Consolidada.`);
+    this.drawFooterAndPages(doc, clinic, `${clinic.name} · Agenda Semanal.`);
     doc.end();
 
     const buffer = await bufferPromise;
