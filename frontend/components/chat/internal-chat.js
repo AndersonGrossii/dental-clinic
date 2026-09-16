@@ -17,6 +17,18 @@ class InternalChatWidget {
     this.currentUser = null;
     this.pollInterval = null;
     this.sseListener = null;
+
+    // Gestión de posición y arrastre
+    this.position = this.loadSavedPosition();
+    this.isDragging = false;
+    this.dragMoved = false;
+    this.dragStartX = 0;
+    this.dragStartY = 0;
+    this.initialLeft = 0;
+    this.initialTop = 0;
+
+    this.onResizeHandler = () => this.handleResize();
+    window.addEventListener('resize', this.onResizeHandler);
   }
 
   /**
@@ -90,6 +102,153 @@ class InternalChatWidget {
     if (this.sseListener) window.removeEventListener('dental:internal_chat_received', this.sseListener);
     if (this.container) this.container.innerHTML = '';
     this.isOpen = false;
+  }
+
+  loadSavedPosition() {
+    try {
+      const raw = localStorage.getItem('internal_chat_position');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  savePosition(pos) {
+    this.position = pos;
+    try {
+      if (pos) {
+        localStorage.setItem('internal_chat_position', JSON.stringify(pos));
+      } else {
+        localStorage.removeItem('internal_chat_position');
+      }
+    } catch {}
+  }
+
+  clampPosition(left, top, width, height) {
+    const margin = 10;
+    const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+    const maxTop = Math.max(margin, window.innerHeight - height - margin);
+    return {
+      left: Math.round(Math.min(Math.max(margin, left), maxLeft)),
+      top: Math.round(Math.min(Math.max(margin, top), maxTop)),
+    };
+  }
+
+  applyPosition() {
+    const widget = this.container?.querySelector('.internal-chat-widget');
+    if (!widget) return;
+
+    if (this.position) {
+      const rect = widget.getBoundingClientRect();
+      const currentWidth = rect.width || (this.isOpen ? 380 : 160);
+      const currentHeight = rect.height || (this.isOpen ? 520 : 44);
+      const clamped = this.clampPosition(this.position.left, this.position.top, currentWidth, currentHeight);
+
+      widget.style.left = `${clamped.left}px`;
+      widget.style.top = `${clamped.top}px`;
+      widget.style.right = 'auto';
+      widget.style.bottom = 'auto';
+    } else {
+      widget.style.left = '';
+      widget.style.top = '';
+      widget.style.right = '24px';
+      widget.style.bottom = '24px';
+    }
+  }
+
+  handleResize() {
+    if (this.position) {
+      this.applyPosition();
+      const widget = this.container?.querySelector('.internal-chat-widget');
+      if (widget) {
+        const rect = widget.getBoundingClientRect();
+        this.savePosition({ left: rect.left, top: rect.top });
+      }
+    }
+  }
+
+  setupDraggable(handleEl, targetEl, isLauncher = false) {
+    if (!handleEl || !targetEl) return;
+
+    handleEl.addEventListener('pointerdown', (e) => {
+      // Solo botón primario
+      if (e.button !== 0) return;
+      // En modo ventana, ignorar clics en botones de acción
+      if (!isLauncher && e.target.closest('.ic-btn-icon')) {
+        return;
+      }
+
+      this.isDragging = false;
+      this.dragMoved = false;
+      this.dragStartX = e.clientX;
+      this.dragStartY = e.clientY;
+
+      const rect = targetEl.getBoundingClientRect();
+      this.initialLeft = rect.left;
+      this.initialTop = rect.top;
+
+      try {
+        handleEl.setPointerCapture(e.pointerId);
+      } catch {}
+
+      const onPointerMove = (moveEvent) => {
+        const dx = moveEvent.clientX - this.dragStartX;
+        const dy = moveEvent.clientY - this.dragStartY;
+
+        if (!this.dragMoved && Math.hypot(dx, dy) > 5) {
+          this.dragMoved = true;
+          this.isDragging = true;
+          targetEl.classList.add('is-dragging');
+        }
+
+        if (this.isDragging) {
+          const newLeft = this.initialLeft + dx;
+          const newTop = this.initialTop + dy;
+          const clamped = this.clampPosition(newLeft, newTop, targetEl.offsetWidth, targetEl.offsetHeight);
+
+          targetEl.style.left = `${clamped.left}px`;
+          targetEl.style.top = `${clamped.top}px`;
+          targetEl.style.right = 'auto';
+          targetEl.style.bottom = 'auto';
+        }
+      };
+
+      const onPointerUp = (upEvent) => {
+        handleEl.removeEventListener('pointermove', onPointerMove);
+        handleEl.removeEventListener('pointerup', onPointerUp);
+        handleEl.removeEventListener('pointercancel', onPointerUp);
+
+        try {
+          handleEl.releasePointerCapture(upEvent.pointerId);
+        } catch {}
+
+        if (this.isDragging) {
+          targetEl.classList.remove('is-dragging');
+          this.isDragging = false;
+
+          const rect = targetEl.getBoundingClientRect();
+          const clamped = this.clampPosition(rect.left, rect.top, targetEl.offsetWidth, targetEl.offsetHeight);
+          this.savePosition(clamped);
+
+          if (isLauncher) {
+            setTimeout(() => {
+              this.dragMoved = false;
+            }, 60);
+          }
+        }
+      };
+
+      handleEl.addEventListener('pointermove', onPointerMove);
+      handleEl.addEventListener('pointerup', onPointerUp);
+      handleEl.addEventListener('pointercancel', onPointerUp);
+    });
+
+    // Doble clic para devolver a la posición por defecto
+    handleEl.addEventListener('dblclick', (e) => {
+      if (e.target.closest('.ic-btn-icon')) return;
+      this.savePosition(null);
+      this.applyPosition();
+    });
   }
 
   async loadInitialData() {
@@ -199,13 +358,15 @@ class InternalChatWidget {
       const total = this.unreadCounts?.total || 0;
       this.container.innerHTML = `
         <div class="internal-chat-widget">
-          <button class="ic-launcher-btn" id="ic-toggle-btn" title="Abrir Chat Interno">
+          <button class="ic-launcher-btn" id="ic-toggle-btn" title="Abrir Chat Interno (Arrastrar para mover, doble clic para restablecer)">
+            <span class="ic-drag-indicator ic-drag-indicator-btn" title="Mover">⠿</span>
             <span class="ic-launcher-icon">💬</span>
             <span>Chat Interno</span>
             ${total > 0 ? `<span class="ic-badge">${total > 99 ? '99+' : total}</span>` : ''}
           </button>
         </div>
       `;
+      this.applyPosition();
       this.bindLauncherEvents();
       return;
     }
@@ -225,12 +386,14 @@ class InternalChatWidget {
       <div class="internal-chat-widget">
         <div class="ic-window">
           <!-- Header -->
-          <div class="ic-header">
+          <div class="ic-header" title="Arrastra para mover la ventana (Doble clic para restablecer)">
             <div class="ic-header-left">
+              <span class="ic-drag-indicator" title="Mover ventana">⠿</span>
               ${backBtnHtml}
               <div class="ic-header-title">${titleText}</div>
             </div>
             <div class="ic-header-actions">
+              <button class="ic-btn-icon" id="ic-reset-pos-btn" title="Restablecer posición inicial (esquina)">↺</button>
               <button class="ic-btn-icon" id="ic-minimize-btn" title="Minimizar">_</button>
               <button class="ic-btn-icon" id="ic-close-btn" title="Cerrar">✕</button>
             </div>
@@ -270,6 +433,7 @@ class InternalChatWidget {
       </div>
     `;
 
+    this.applyPosition();
     this.bindWindowEvents();
     this.scrollToBottom();
   }
@@ -370,9 +534,16 @@ class InternalChatWidget {
   }
 
   bindLauncherEvents() {
+    const widget = this.container?.querySelector('.internal-chat-widget');
     const toggleBtn = this.container?.querySelector('#ic-toggle-btn');
-    if (toggleBtn) {
+    if (toggleBtn && widget) {
+      this.setupDraggable(toggleBtn, widget, true);
+
       toggleBtn.addEventListener('click', async () => {
+        if (this.dragMoved) {
+          this.dragMoved = false;
+          return;
+        }
         this.isOpen = true;
         await this.loadCurrentMessages();
         this.render();
@@ -381,6 +552,22 @@ class InternalChatWidget {
   }
 
   bindWindowEvents() {
+    const widget = this.container?.querySelector('.internal-chat-widget');
+    const header = this.container?.querySelector('.ic-header');
+    if (header && widget) {
+      this.setupDraggable(header, widget, false);
+    }
+
+    // Restablecer posición a la esquina
+    const resetBtn = this.container?.querySelector('#ic-reset-pos-btn');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.savePosition(null);
+        this.applyPosition();
+      });
+    }
+
     // Minimizar / Cerrar
     const minBtn = this.container?.querySelector('#ic-minimize-btn');
     const closeBtn = this.container?.querySelector('#ic-close-btn');
