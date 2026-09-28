@@ -62,8 +62,8 @@ const config = {
     file: process.env.LOG_FILE || './logs/app.log',
   },
   features: {
-    aiAutomations: process.env.FEATURE_AI_AUTOMATIONS === 'true',
-    omnichannelMessaging: process.env.FEATURE_OMNICHANNEL_MESSAGING === 'true',
+    aiAutomations: process.env.FEATURE_AI_AUTOMATIONS !== 'false',
+    omnichannelMessaging: process.env.FEATURE_OMNICHANNEL_MESSAGING !== 'false',
     notesAndOdontogram: true,
   },
 };
