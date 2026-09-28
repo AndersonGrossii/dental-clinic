@@ -422,24 +422,41 @@ class MessagingService {
       }
 
       if (replyBody) {
-        const sendRes = await instagramService.sendDirectMessage({
-          recipientId: contact.phone, // IGSID
-          text: replyBody,
-          clinicId: conversation.clinic_id,
-        });
+        let externalId = null;
+        let deliveryStatus = 'SENT';
 
-        await messagingRepository.createMessage({
+        try {
+          const sendRes = await instagramService.sendDirectMessage({
+            recipientId: contact.phone, // IGSID
+            text: replyBody,
+            clinicId: conversation.clinic_id,
+          });
+          externalId = sendRes?.message_id || null;
+        } catch (sendErr) {
+          logger.warn(`No se pudo entregar DM por Instagram Graph API a ${contact.phone}: ${sendErr.message}. Guardando mensaje en conversación.`);
+          deliveryStatus = 'FAILED';
+        }
+
+        const outboundMsg = await messagingRepository.createMessage({
           conversationId: conversation.id,
           clinicId: conversation.clinic_id,
           direction: 'OUTBOUND',
           messageType: 'TEXT',
           body: replyBody,
-          externalId: sendRes.message_id || null,
-          status: 'SENT',
+          externalId,
+          status: deliveryStatus,
           rawPayload: { autoReply: true, isTransfer, channel: 'INSTAGRAM' },
         });
 
-        logger.info(`Respuesta automática de Sofía (Instagram) enviada a ${contact.phone} en conversación #${conversation.id}`);
+        // Emitir evento SSE saliente en tiempo real a la interfaz web
+        eventStreamService.broadcastToClinic(conversation.clinic_id, 'MESSAGING_OUTGOING', {
+          conversationId: conversation.id,
+          channel: 'INSTAGRAM',
+          body: replyBody,
+          messageId: outboundMsg.id,
+        });
+
+        logger.info(`Respuesta automática de Sofía (Instagram) registrada para ${contact.phone} en conversación #${conversation.id}`);
       }
     } catch (err) {
       logger.error('Error al procesar auto-reply de Instagram:', err.message);
