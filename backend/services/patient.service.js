@@ -88,8 +88,18 @@ class PatientService {
       nextNum = parseInt(parts[1], 10) + 1;
     }
     
-    const paddedNum = String(nextNum).padStart(4, '0');
-    return `${currentYear}-${paddedNum}-${clinicCode}`;
+    let candidateId = `${currentYear}-${String(nextNum).padStart(4, '0')}-${clinicCode}`;
+    // Garantizar que el candidateId no colisione con ningún registro existente o histórico
+    while (true) {
+      const checkRes = await query('SELECT id FROM patients WHERE custom_id = $1', [candidateId]);
+      if (checkRes.rows.length === 0) {
+        break;
+      }
+      nextNum++;
+      candidateId = `${currentYear}-${String(nextNum).padStart(4, '0')}-${clinicCode}`;
+    }
+
+    return candidateId;
   }
 
   /**
@@ -99,17 +109,32 @@ class PatientService {
    * @returns {Promise<object>}
    */
   async create(data, createdBy) {
+    // Si viene custom_id, validar unicidad
+    if (data.custom_id && data.custom_id.trim()) {
+      const trimmedCustomId = data.custom_id.trim();
+      const existingByCustomId = await query(
+        'SELECT id FROM patients WHERE custom_id = $1 AND deleted_at IS NULL',
+        [trimmedCustomId]
+      );
+      if (existingByCustomId.rows.length > 0) {
+        throw new AppError(`El código de paciente '${trimmedCustomId}' ya está en uso. Ingrese otro o déjelo en blanco para generarlo automáticamente.`, 409);
+      }
+      data.custom_id = trimmedCustomId;
+    } else {
+      data.custom_id = null;
+    }
+
     // Verificar DNI duplicado si se proporciona
-    if (data.dni) {
-      const existingByDni = await patientRepository.findByField('dni', data.dni);
+    if (data.dni && data.dni.trim()) {
+      const existingByDni = await patientRepository.findByField('dni', data.dni.trim());
       if (existingByDni) {
         throw new AppError('Ya existe un paciente con ese DNI.', 409);
       }
     }
 
     // Verificar email duplicado si se proporciona
-    if (data.email) {
-      const existingByEmail = await patientRepository.findByField('email', data.email);
+    if (data.email && data.email.trim()) {
+      const existingByEmail = await patientRepository.findByField('email', data.email.trim().toLowerCase());
       if (existingByEmail) {
         throw new AppError('Ya existe un paciente con ese correo electrónico.', 409);
       }

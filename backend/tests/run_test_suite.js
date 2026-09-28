@@ -19,6 +19,9 @@ const suites = [
   { name: 'Generación de Reportes PDF de Alta Calidad (11 pruebas)', file: 'test_report_pdf.js' },
   { name: 'Paquetes Promocionales de Tratamientos (40 pruebas)', file: 'test_promotional_packs.js' },
   { name: 'Generación de Agenda PDF e Impresión con Citas Simultáneas (21 pruebas)', file: 'test_agenda_pdf.js' },
+  { name: 'CRM Comercial, Pipeline & Aislamiento de Leads (33 pruebas)', file: 'test_crm_foundation.js' },
+  { name: 'IA en Mensajería, Leads CRM y Supervisión Humana (10 pruebas)', file: 'test_ai_leads_messaging.js' },
+  { name: 'Instagram Messaging API & Multi-Tenant Routing (5 pruebas)', file: 'test_instagram_integration.js' },
 ];
 
 console.log('\n╔══════════════════════════════════════════════════════════════════╗');

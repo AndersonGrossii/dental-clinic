@@ -10,13 +10,16 @@ import { formatDate } from '../../utils/helpers.js';
 export class Automations {
   constructor(container) {
     this.container = container;
-    this.activeTab = 'rules'; // 'rules' | 'logs' | 'briefing' | 'explainer'
+    this.activeTab = 'rules'; // 'rules' | 'supervision' | 'knowledge' | 'logs' | 'briefing' | 'explainer'
     this.rules = [];
     this.stats = { kpis: {}, recentLogs: [], summary: [] };
     this.briefing = null;
     this.logStatusFilter = 'ALL';
     this.logSearch = '';
     this.patientsList = [];
+    this.approvals = [];
+    this.approvalFilter = 'PENDING_APPROVAL'; // 'PENDING_APPROVAL' | 'APPROVED' | 'DISCARDED' | 'ALL'
+    this.knowledgeArticles = [];
 
     this.handleContainerClick = this._handleContainerClick.bind(this);
     this.handleContainerChange = this._handleContainerChange.bind(this);
@@ -47,15 +50,19 @@ export class Automations {
 
   async loadData() {
     try {
-      const [rulesRes, statsRes, patientsRes] = await Promise.all([
+      const [rulesRes, statsRes, patientsRes, approvalsRes, knowledgeRes] = await Promise.all([
         aiService.getRules().catch(() => ({ data: [] })),
         aiService.getAutomationStats().catch(() => ({ data: {} })),
         patientService.getAll({ limit: 100 }).catch(() => ({ data: [] })),
+        aiService.getApprovals('ALL').catch(() => ({ data: [] })),
+        aiService.getKnowledge().catch(() => ({ data: [] })),
       ]);
 
       this.rules = rulesRes?.data || rulesRes || [];
       this.stats = statsRes?.data || statsRes || { kpis: {}, recentLogs: [], summary: [] };
       this.patientsList = patientsRes?.data || (Array.isArray(patientsRes) ? patientsRes : []);
+      this.approvals = approvalsRes?.data || (Array.isArray(approvalsRes) ? approvalsRes : []);
+      this.knowledgeArticles = knowledgeRes?.data || (Array.isArray(knowledgeRes) ? knowledgeRes : []);
     } catch (err) {
       toast.error('Error al cargar datos de automatizaciones');
     }
@@ -130,10 +137,16 @@ export class Automations {
         <!-- Navigation Tabs -->
         <div class="auto-tabs">
           <button class="auto-tab-btn ${this.activeTab === 'rules' ? 'auto-tab-btn--active' : ''}" data-tab="rules">
-            <span>⚙️</span> Reglas de Automatización & Flujos
+            <span>⚙️</span> Reglas & Flujos
+          </button>
+          <button class="auto-tab-btn ${this.activeTab === 'supervision' ? 'auto-tab-btn--active' : ''}" data-tab="supervision">
+            <span>🛡️</span> Supervisión Presupuestos ${this.approvals.filter(a => a.status === 'PENDING_APPROVAL').length > 0 ? `<span class="badge" style="background:#ef4444;color:#fff;margin-left:4px;padding:2px 7px;border-radius:10px;font-size:0.75rem;">${this.approvals.filter(a => a.status === 'PENDING_APPROVAL').length}</span>` : `(${this.approvals.length})`}
+          </button>
+          <button class="auto-tab-btn ${this.activeTab === 'knowledge' ? 'auto-tab-btn--active' : ''}" data-tab="knowledge">
+            <span>🧠</span> Base de Conocimiento IA (${this.knowledgeArticles.length})
           </button>
           <button class="auto-tab-btn ${this.activeTab === 'logs' ? 'auto-tab-btn--active' : ''}" data-tab="logs">
-            <span>📋</span> Registro de Ejecución & Auditoría (${(this.stats.recentLogs || []).length})
+            <span>📋</span> Registro & Auditoría (${(this.stats.recentLogs || []).length})
           </button>
           <button class="auto-tab-btn ${this.activeTab === 'briefing' ? 'auto-tab-btn--active' : ''}" data-tab="briefing">
             <span>☀️</span> Briefing Operativo IA
@@ -153,6 +166,8 @@ export class Automations {
 
   renderTabContent() {
     if (this.activeTab === 'rules') return this.renderRulesTab();
+    if (this.activeTab === 'supervision') return this.renderSupervisionTab();
+    if (this.activeTab === 'knowledge') return this.renderKnowledgeTab();
     if (this.activeTab === 'logs') return this.renderLogsTab();
     if (this.activeTab === 'briefing') return this.renderBriefingTab();
     if (this.activeTab === 'explainer') return this.renderExplainerTab();
@@ -411,6 +426,207 @@ export class Automations {
     `;
   }
 
+  renderSupervisionTab() {
+    const filteredApprovals = this.approvals.filter(a => {
+      if (this.approvalFilter === 'ALL') return true;
+      if (this.approvalFilter === 'APPROVED') return a.status === 'APPROVED' || a.status === 'SENT';
+      return a.status === this.approvalFilter;
+    });
+
+    const pendingCount = this.approvals.filter(a => a.status === 'PENDING_APPROVAL').length;
+    const approvedCount = this.approvals.filter(a => a.status === 'APPROVED' || a.status === 'SENT').length;
+    const discardedCount = this.approvals.filter(a => a.status === 'DISCARDED').length;
+
+    return `
+      <div>
+        <!-- Human-in-the-Loop Header Banner -->
+        <div class="auto-supervision-header">
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 1.25rem;">🛡️</span>
+              <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700; color: #92400e;">
+                Cola de Supervisión Humana — Presupuestos (+48h)
+              </h3>
+            </div>
+            <p style="margin: 6px 0 0 0; font-size: 0.88rem; color: #78350f; max-width: 680px; line-height: 1.45;">
+              Seguimiento supervisado de presupuestos entregados hace más de 48 horas sin respuesta. Por protocolo de clínica, <strong>ningún mensaje se envía automáticamente</strong> sin validación previa por parte del equipo de recepción o dirección.
+            </p>
+          </div>
+          <div>
+            <button id="btn-scan-quotations" class="btn btn-primary" style="display: flex; align-items: center; gap: 8px;">
+              <span>🔄</span> Escanear Presupuestos (+48h)
+            </button>
+          </div>
+        </div>
+
+        <!-- Filter Bar -->
+        <div class="auto-supervision-filter-bar">
+          <button class="btn btn-sm ${this.approvalFilter === 'PENDING_APPROVAL' ? 'btn-primary' : 'btn-outline'} filter-approval-status" data-status="PENDING_APPROVAL">
+            ⏳ Pendientes de Revisión (${pendingCount})
+          </button>
+          <button class="btn btn-sm ${this.approvalFilter === 'APPROVED' ? 'btn-primary' : 'btn-outline'} filter-approval-status" data-status="APPROVED">
+            ✅ Aprobados / Enviados (${approvedCount})
+          </button>
+          <button class="btn btn-sm ${this.approvalFilter === 'DISCARDED' ? 'btn-primary' : 'btn-outline'} filter-approval-status" data-status="DISCARDED">
+            ❌ Descartados (${discardedCount})
+          </button>
+          <button class="btn btn-sm ${this.approvalFilter === 'ALL' ? 'btn-primary' : 'btn-outline'} filter-approval-status" data-status="ALL">
+            Todos (${this.approvals.length})
+          </button>
+        </div>
+
+        <!-- Approvals Grid / Empty State -->
+        ${filteredApprovals.length === 0 ? `
+          <div style="text-align: center; padding: 48px; background: #ffffff; border-radius: 12px; border: 1px dashed var(--color-border, #e5e7eb);">
+            <div style="font-size: 2.2rem; margin-bottom: 8px;">🛡️</div>
+            <h4 style="margin: 0 0 6px 0; font-size: 1.1rem; color: var(--color-text-primary);">No hay mensajes en esta bandeja</h4>
+            <p style="margin: 0; font-size: 0.88rem; color: var(--color-text-secondary);">
+              ${this.approvalFilter === 'PENDING_APPROVAL' 
+                ? '¡Excelente! Todos los seguimientos de presupuestos pendientes han sido revisados.'
+                : 'No existen registros para el filtro seleccionado.'}
+            </p>
+          </div>
+        ` : `
+          <div class="auto-supervision-grid">
+            ${filteredApprovals.map(a => {
+              const isPending = a.status === 'PENDING_APPROVAL';
+              const isApproved = a.status === 'APPROVED' || a.status === 'SENT';
+              const isDiscarded = a.status === 'DISCARDED';
+
+              const statusBadge = isPending
+                ? `<span class="auto-badge" style="background:#fef3c7; color:#b45309; border:1px solid #fde68a;">⏳ Pendiente de Aprobación</span>`
+                : isApproved
+                ? `<span class="auto-badge" style="background:#dcfce7; color:#15803d; border:1px solid #86efac;">✅ Aprobado / Enviado</span>`
+                : `<span class="auto-badge" style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5;">❌ Descartado</span>`;
+
+              const patientName = a.patient_name || `${a.first_name || ''} ${a.last_name || ''}`.trim() || 'Paciente sin nombre';
+              const phone = a.patient_phone || a.phone || 'Teléfono no registrado';
+              const createdDate = new Date(a.created_at).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
+
+              return `
+                <div class="auto-approval-card" data-id="${a.id}">
+                  <div>
+                    <div class="auto-approval-card__header">
+                      <div>
+                        <div class="auto-approval-card__patient">👤 ${this.escapeHtml(patientName)}</div>
+                        <div class="auto-approval-card__meta">
+                          📞 ${this.escapeHtml(phone)} &bull; Presupuesto #${a.quotation_id || a.reference_id || 'N/A'}
+                        </div>
+                      </div>
+                      ${statusBadge}
+                    </div>
+
+                    <div style="margin-top: 14px;">
+                      <div style="font-size: 0.78rem; font-weight: 700; color: #4b5563; text-transform: uppercase; margin-bottom: 6px;">
+                        Mensaje WhatsApp Propuesto por Sofía:
+                      </div>
+                      <div class="auto-approval-card__bubble">
+                        ${this.escapeHtml(a.proposed_message || '').replace(/\n/g, '<br/>')}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div style="font-size: 0.76rem; color: #9ca3af; margin-bottom: 10px;">
+                      Generado: ${createdDate} ${a.reviewed_at ? `&bull; Revisado: ${new Date(a.reviewed_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` : ''}
+                    </div>
+
+                    ${isPending ? `
+                      <div class="auto-approval-card__actions">
+                        <button class="btn btn-sm btn-primary btn-approve-approval" data-id="${a.id}" title="Aprobar y disparar mensaje por WhatsApp">
+                          <span>✓</span> Aprobar y Enviar
+                        </button>
+                        <button class="btn btn-sm btn-outline btn-edit-approval" data-id="${a.id}" title="Editar texto antes de enviar">
+                          <span>✏️</span> Modificar
+                        </button>
+                        <button class="btn btn-sm btn-outline btn-discard-approval" data-id="${a.id}" style="color: #b91c1c;" title="Descartar este seguimiento">
+                          <span>✕</span> Descartar
+                        </button>
+                      </div>
+                    ` : `
+                      <div style="font-size: 0.82rem; color: #6b7280; font-style: italic;">
+                        ${isApproved ? '✓ Mensaje procesado y despachado al canal de WhatsApp.' : '✕ Mensaje descartado por el equipo.'}
+                      </div>
+                    `}
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `}
+      </div>
+    `;
+  }
+
+  renderKnowledgeTab() {
+    return `
+      <div>
+        <!-- RAG Header Banner -->
+        <div class="auto-knowledge-header">
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 1.25rem;">🧠</span>
+              <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700; color: #1e40af;">
+                Base de Conocimiento IA (RAG Sofía)
+              </h3>
+            </div>
+            <p style="margin: 6px 0 0 0; font-size: 0.88rem; color: #1e3a8a; max-width: 680px; line-height: 1.45;">
+              Respuestas oficiales y contexto clínico por sede. Sofía consulta estos artículos para responder dudas de pacientes, <strong>garantizando el protocolo de cero precios</strong> y promoviendo la primera revisión gratuita en clínica.
+            </p>
+          </div>
+          <div>
+            <button id="btn-new-knowledge" class="btn btn-primary" style="display: flex; align-items: center; gap: 8px;">
+              <span>➕</span> Nuevo Artículo RAG
+            </button>
+          </div>
+        </div>
+
+        <!-- Articles Grid / Empty State -->
+        ${this.knowledgeArticles.length === 0 ? `
+          <div style="text-align: center; padding: 48px; background: #ffffff; border-radius: 12px; border: 1px dashed var(--color-border, #e5e7eb);">
+            <div style="font-size: 2.2rem; margin-bottom: 8px;">📚</div>
+            <h4 style="margin: 0 0 6px 0; font-size: 1.1rem; color: var(--color-text-primary);">No hay artículos de conocimiento registrados</h4>
+            <p style="margin: 0 0 16px 0; font-size: 0.88rem; color: var(--color-text-secondary);">
+              Añada artículos para alimentar la memoria de Sofía y guiar las respuestas a los pacientes.
+            </p>
+            <button id="btn-new-knowledge-empty" class="btn btn-primary">➕ Añadir Primer Artículo</button>
+          </div>
+        ` : `
+          <div class="auto-knowledge-grid">
+            ${this.knowledgeArticles.map(art => `
+              <div class="auto-knowledge-card">
+                <div>
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <span class="auto-badge" style="background:#dbeafe; color:#1d4ed8; text-transform:uppercase; font-size:0.7rem;">
+                      ${this.escapeHtml(art.category || 'General')}
+                    </span>
+                    <span style="font-size: 0.75rem; color: #9ca3af;">
+                      ${art.is_active !== false ? '🟢 Activo' : '⚪ Inactivo'}
+                    </span>
+                  </div>
+                  <div class="auto-knowledge-card__topic">
+                    ❓ ${this.escapeHtml(art.topic || '')}
+                  </div>
+                  <div class="auto-knowledge-card__answer">
+                    💡 ${this.escapeHtml(art.answer || '').replace(/\n/g, '<br/>')}
+                  </div>
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; border-top: 1px solid #f3f4f6; padding-top: 10px;">
+                  <button class="btn btn-xs btn-outline btn-edit-knowledge" data-id="${art.id}">
+                    ✏️ Editar
+                  </button>
+                  <button class="btn btn-xs btn-outline btn-delete-knowledge" data-id="${art.id}" style="color: #dc2626;">
+                    🗑️ Eliminar
+                  </button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `}
+      </div>
+    `;
+  }
+
   formatTemplateBubble(templateStr) {
     if (!templateStr) return '';
     return this.escapeHtml(templateStr)
@@ -443,6 +659,58 @@ export class Automations {
       this.activeTab = 'briefing';
       this.renderView();
       this.fetchAndRenderBriefing();
+      return;
+    }
+
+    // Acciones de Supervisión Humana
+    if (e.target.id === 'btn-scan-quotations' || e.target.closest('#btn-scan-quotations')) {
+      await this.scanQuotations();
+      return;
+    }
+
+    const filterApprovalBtn = e.target.closest('.filter-approval-status');
+    if (filterApprovalBtn?.dataset.status) {
+      this.approvalFilter = filterApprovalBtn.dataset.status;
+      const content = this.container.querySelector('.auto-tab-content');
+      if (content && this.activeTab === 'supervision') {
+        content.innerHTML = this.renderSupervisionTab();
+      }
+      return;
+    }
+
+    const approveBtn = e.target.closest('.btn-approve-approval');
+    if (approveBtn?.dataset.id) {
+      await this.approveApproval(parseInt(approveBtn.dataset.id, 10));
+      return;
+    }
+
+    const editApprovalBtn = e.target.closest('.btn-edit-approval');
+    if (editApprovalBtn?.dataset.id) {
+      this.showEditApprovalModal(parseInt(editApprovalBtn.dataset.id, 10));
+      return;
+    }
+
+    const discardApprovalBtn = e.target.closest('.btn-discard-approval');
+    if (discardApprovalBtn?.dataset.id) {
+      await this.discardApproval(parseInt(discardApprovalBtn.dataset.id, 10));
+      return;
+    }
+
+    // Acciones de Base de Conocimiento RAG
+    if (e.target.id === 'btn-new-knowledge' || e.target.closest('#btn-new-knowledge') || e.target.id === 'btn-new-knowledge-empty') {
+      this.showNewKnowledgeModal();
+      return;
+    }
+
+    const editKnowledgeBtn = e.target.closest('.btn-edit-knowledge');
+    if (editKnowledgeBtn?.dataset.id) {
+      this.showEditKnowledgeModal(parseInt(editKnowledgeBtn.dataset.id, 10));
+      return;
+    }
+
+    const deleteKnowledgeBtn = e.target.closest('.btn-delete-knowledge');
+    if (deleteKnowledgeBtn?.dataset.id) {
+      await this.deleteKnowledge(parseInt(deleteKnowledgeBtn.dataset.id, 10));
       return;
     }
 
@@ -703,6 +971,195 @@ export class Automations {
       if (copyBtn) copyBtn.style.display = 'block';
     } catch {
       outputBox.innerHTML = '<span style="color: #b91c1c;">Error al generar explicación.</span>';
+    }
+  }
+
+  async scanQuotations() {
+    try {
+      toast.info('Escaneando presupuestos sin aceptar (+48h)...');
+      const res = await aiService.triggerQuotationFollowupScan();
+      const count = res?.count ?? res?.data?.count ?? 0;
+      toast.success(`✅ Escaneo completado: ${count} seguimiento(s) pendientes añadidos a la cola.`);
+      await this.loadData();
+      this.renderView();
+    } catch (err) {
+      toast.error('Error al escanear presupuestos: ' + (err.message || ''));
+    }
+  }
+
+  async approveApproval(id) {
+    try {
+      toast.info('Aprobando y despachando mensaje por WhatsApp...');
+      await aiService.approveMessage(id);
+      toast.success('✅ ¡Mensaje aprobado y enviado al paciente!');
+      await this.loadData();
+      this.renderView();
+    } catch (err) {
+      toast.error('Error al aprobar mensaje: ' + (err.message || ''));
+    }
+  }
+
+  showEditApprovalModal(id) {
+    const approval = this.approvals.find(a => a.id === id);
+    if (!approval) return;
+
+    const content = `
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <p style="margin: 0; font-size: 0.86rem; color: var(--color-text-secondary);">
+          Modifique el texto del mensaje antes de que sea validado y enviado por WhatsApp.
+        </p>
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.8rem;">Mensaje para el Paciente</label>
+          <textarea id="modal-edit-approval-input" class="form-textarea" rows="6">${this.escapeHtml(approval.proposed_message || '')}</textarea>
+        </div>
+      </div>
+    `;
+
+    Modal.show({
+      title: '✏️ Modificar Mensaje de Seguimiento',
+      content,
+      confirmText: 'Guardar Cambios',
+      cancelText: 'Cancelar',
+      onConfirm: async () => {
+        const newText = document.getElementById('modal-edit-approval-input')?.value.trim();
+        if (!newText) {
+          toast.error('El mensaje no puede estar vacío');
+          return false;
+        }
+        try {
+          await aiService.editApprovalMessage(id, newText);
+          toast.success('¡Mensaje modificado con éxito!');
+          await this.loadData();
+          this.renderView();
+          return true;
+        } catch (err) {
+          toast.error('Error al actualizar mensaje: ' + (err.message || ''));
+          return false;
+        }
+      }
+    });
+  }
+
+  async discardApproval(id) {
+    try {
+      await aiService.discardApprovalMessage(id);
+      toast.success('Seguimiento descartado.');
+      await this.loadData();
+      this.renderView();
+    } catch (err) {
+      toast.error('Error al descartar mensaje: ' + (err.message || ''));
+    }
+  }
+
+  showNewKnowledgeModal() {
+    const content = `
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <p style="margin: 0; font-size: 0.85rem; color: var(--color-text-secondary);">
+          Añada información oficial para que Sofía asista a los pacientes por WhatsApp / Instagram.
+        </p>
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.8rem;">Categoría / Especialidad</label>
+          <input type="text" id="modal-kb-category" class="form-input" placeholder="Ej: Primera Visita, Implantes, Ortodoncia, Horarios" required />
+        </div>
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.8rem;">Pregunta / Tema de Consulta</label>
+          <input type="text" id="modal-kb-topic" class="form-input" placeholder="Ej: ¿Tiene coste la primera valoración médica?" required />
+        </div>
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.8rem;">Respuesta Oficial (Protocolo Clínico)</label>
+          <textarea id="modal-kb-answer" class="form-textarea" rows="4" placeholder="Ej: La primera consulta de valoración y diagnóstico es 100% gratuita y sin compromiso..." required></textarea>
+        </div>
+      </div>
+    `;
+
+    Modal.show({
+      title: '➕ Añadir Artículo a Base de Conocimiento RAG',
+      content,
+      confirmText: 'Guardar Artículo',
+      cancelText: 'Cancelar',
+      onConfirm: async () => {
+        const category = document.getElementById('modal-kb-category')?.value.trim();
+        const topic = document.getElementById('modal-kb-topic')?.value.trim();
+        const answer = document.getElementById('modal-kb-answer')?.value.trim();
+
+        if (!topic || !answer) {
+          toast.error('Debe completar el tema y la respuesta oficial.');
+          return false;
+        }
+
+        try {
+          await aiService.createKnowledge({ category: category || 'General', topic, answer, is_active: true });
+          toast.success('¡Artículo RAG añadido con éxito!');
+          await this.loadData();
+          this.renderView();
+          return true;
+        } catch (err) {
+          toast.error('Error al guardar artículo: ' + (err.message || ''));
+          return false;
+        }
+      }
+    });
+  }
+
+  showEditKnowledgeModal(id) {
+    const art = this.knowledgeArticles.find(a => a.id === id);
+    if (!art) return;
+
+    const content = `
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.8rem;">Categoría / Especialidad</label>
+          <input type="text" id="modal-kb-category" class="form-input" value="${this.escapeHtml(art.category || 'General')}" required />
+        </div>
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.8rem;">Pregunta / Tema de Consulta</label>
+          <input type="text" id="modal-kb-topic" class="form-input" value="${this.escapeHtml(art.topic || '')}" required />
+        </div>
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.8rem;">Respuesta Oficial (Protocolo Clínico)</label>
+          <textarea id="modal-kb-answer" class="form-textarea" rows="4" required>${this.escapeHtml(art.answer || '')}</textarea>
+        </div>
+      </div>
+    `;
+
+    Modal.show({
+      title: '✏️ Editar Artículo de Conocimiento',
+      content,
+      confirmText: 'Guardar Cambios',
+      cancelText: 'Cancelar',
+      onConfirm: async () => {
+        const category = document.getElementById('modal-kb-category')?.value.trim();
+        const topic = document.getElementById('modal-kb-topic')?.value.trim();
+        const answer = document.getElementById('modal-kb-answer')?.value.trim();
+
+        if (!topic || !answer) {
+          toast.error('Debe completar el tema y la respuesta.');
+          return false;
+        }
+
+        try {
+          await aiService.updateKnowledge(id, { category: category || 'General', topic, answer });
+          toast.success('¡Artículo actualizado!');
+          await this.loadData();
+          this.renderView();
+          return true;
+        } catch (err) {
+          toast.error('Error al actualizar artículo: ' + (err.message || ''));
+          return false;
+        }
+      }
+    });
+  }
+
+  async deleteKnowledge(id) {
+    if (!confirm('¿Desea eliminar este artículo de la base de conocimiento?')) return;
+    try {
+      await aiService.deleteKnowledge(id);
+      toast.success('Artículo eliminado.');
+      await this.loadData();
+      this.renderView();
+    } catch (err) {
+      toast.error('Error al eliminar artículo: ' + (err.message || ''));
     }
   }
 

@@ -3,6 +3,8 @@
 // ============================================
 import messagingService from '../../services/messaging.service.js';
 import patientService from '../../services/patient.service.js';
+import crmService from '../../services/crm.service.js';
+import aiService from '../../services/ai.service.js';
 import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
 import state from '../../scripts/state.js';
@@ -257,6 +259,12 @@ export class Messages {
       ? `<a href="#/patients/${conv.patient_id}" class="badge badge-primary" style="text-decoration: none;">📂 Ver Paciente (${conv.patient_custom_id || 'ID #' + conv.patient_id})</a>`
       : `<button type="button" class="btn btn-sm btn-outline" id="btn-link-patient">🔗 Vincular a Paciente</button>`;
 
+    const userRole = (state.get('user')?.role_name || '').toLowerCase();
+    const canAccessCrm = ['propietario', 'direccion', 'recepcionista'].includes(userRole);
+    const crmPlaceholder = canAccessCrm
+      ? `<span>•</span><span id="chat-crm-container"><span class="badge" style="background:var(--bg-tertiary); font-size:0.75rem;">...</span></span>`
+      : '';
+
     const channelTitle = isIg ? `📸 Instagram Direct (@${conv.contact_phone})` : `📱 WhatsApp (${conv.contact_phone})`;
     const placeholderText = isIg ? 'Escribe un mensaje directo de Instagram...' : 'Escribe un mensaje de WhatsApp...';
 
@@ -270,10 +278,17 @@ export class Messages {
               <span>${channelTitle}</span>
               <span>•</span>
               ${patientSection}
+              ${crmPlaceholder}
             </div>
           </div>
         </div>
-        <div class="chat-header-actions">
+        <div class="chat-header-actions" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <button type="button" class="btn btn-sm btn-outline" id="btn-copilot-suggest" title="Sugerir respuesta con IA según historial y protocolo clínico" style="border-color: #38bdf8; color: #0284c7; font-weight: 600;">
+            ✨ Sugerir Respuesta
+          </button>
+          <button type="button" class="btn btn-sm btn-outline" id="btn-copilot-summarize" title="Crear resumen clínico y comercial en el CRM" style="border-color: #a855f7; color: #7e22ce; font-weight: 600;">
+            📝 Resumir en CRM
+          </button>
           <button type="button" class="automation-toggle-btn ${isAuto ? 'active' : 'human'}" id="btn-toggle-automation">
             ${isAuto ? '🤖 Auto-Bot Activo' : '👤 Modo Atención Humana'}
           </button>
@@ -288,6 +303,9 @@ export class Messages {
       <div class="messages-timeline" id="messages-timeline"></div>
 
       <div class="chat-input-container">
+        <button type="button" class="chat-template-btn" id="btn-copilot-suggest-bar" title="Sugerencia rápida de Sofía" style="border-color: #bae6fd; background: #f0f9ff; color: #0369a1; font-weight: 600;">
+          ✨ Sugerencia IA
+        </button>
         ${!isIg ? `
           <button type="button" class="chat-template-btn" id="btn-open-templates" title="Insertar Plantilla">
             📄 Plantillas
@@ -388,6 +406,9 @@ export class Messages {
     const statusSelect = document.getElementById('select-conv-status');
     const linkPatientBtn = document.getElementById('btn-link-patient');
     const templatesBtn = document.getElementById('btn-open-templates');
+    const suggestBtn = document.getElementById('btn-copilot-suggest');
+    const suggestBarBtn = document.getElementById('btn-copilot-suggest-bar');
+    const summarizeBtn = document.getElementById('btn-copilot-summarize');
 
     // Enviar mensaje
     const handleSend = async () => {
@@ -467,6 +488,146 @@ export class Messages {
         this.openTemplatesModal();
       });
     }
+
+    // Copilot IA: Sugerir Respuesta Asistida con RAG
+    const handleCopilotSuggest = async () => {
+      if (!this.activeConversationId) return;
+      try {
+        toast.info('Consultando a Sofía (analizando contexto clínico y RAG)...');
+        const res = await aiService.suggestReply(this.activeConversationId);
+        const reply = res?.suggestion || res?.data?.suggestion || '';
+        if (reply) {
+          inputField.value = reply;
+          inputField.focus();
+          toast.success('✨ Sugerencia de Sofía cargada en el campo de texto.');
+        } else {
+          toast.info('No se obtuvo sugerencia para esta conversación.');
+        }
+      } catch (err) {
+        toast.error('Error al obtener sugerencia de Sofía: ' + (err.message || ''));
+      }
+    };
+
+    if (suggestBtn) suggestBtn.addEventListener('click', handleCopilotSuggest);
+    if (suggestBarBtn) suggestBarBtn.addEventListener('click', handleCopilotSuggest);
+
+    // Copilot IA: Resumir en CRM
+    if (summarizeBtn) {
+      summarizeBtn.addEventListener('click', async () => {
+        if (!this.activeConversationId) return;
+        try {
+          toast.info('Generando resumen clínico-comercial estructurado...');
+          const res = await aiService.summarizeConversation(this.activeConversationId);
+          const summary = res?.summary || res?.data?.summary || 'Resumen generado con éxito.';
+
+          Modal.show({
+            title: '📝 Resumen Clínico & Comercial IA (CRM)',
+            content: `
+              <div style="display: flex; flex-direction: column; gap: 12px; font-size: 0.9rem;">
+                <p style="margin: 0; color: var(--text-secondary);">
+                  Se ha registrado una nota en el CRM asociada a este contacto. Visible para <strong>Propietario, Dirección y Recepción</strong>.
+                </p>
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; line-height: 1.5; color: #1e293b;">
+                  ${this.escapeHtml(summary).replace(/\n/g, '<br/>')}
+                </div>
+              </div>
+            `,
+            cancelText: 'Cerrar',
+          });
+          toast.success('✅ ¡Resumen clínico guardado en notas de CRM!');
+        } catch (err) {
+          toast.error('Error al generar resumen CRM: ' + (err.message || ''));
+        }
+      });
+    }
+
+    // Cargar contexto de CRM si tiene permisos y contact_id
+    const crmContainer = document.getElementById('chat-crm-container');
+    const conv = this.activeConversation;
+    if (crmContainer && conv?.contact_id) {
+      crmService.getContactContext(conv.contact_id).then(context => {
+        if (!context) {
+          crmContainer.innerHTML = '';
+          return;
+        }
+        if (context.lead) {
+          crmContainer.innerHTML = `
+            <a href="#/crm/leads/${context.lead.id}" class="badge badge-warning" style="text-decoration: none; font-size: 0.75rem; font-weight: 600;" title="Ver Lead en CRM">
+              🎯 Lead CRM (${context.lead.status})
+            </a>
+          `;
+        } else {
+          crmContainer.innerHTML = `
+            <button type="button" class="btn btn-xs btn-outline" id="btn-quick-create-lead" style="font-size:0.75rem; padding: 2px 8px;" title="Registrar como Lead Comercial">
+              + 🎯 Crear Lead CRM
+            </button>
+          `;
+          const createBtn = document.getElementById('btn-quick-create-lead');
+          if (createBtn) {
+            createBtn.addEventListener('click', () => {
+              this.openCreateLeadModal(conv);
+            });
+          }
+        }
+      }).catch(() => {
+        crmContainer.innerHTML = '';
+      });
+    }
+  }
+
+  openCreateLeadModal(conv) {
+    const defaultSource = conv.channel === 'INSTAGRAM' ? 'instagram' : 'whatsapp';
+    const modalContent = `
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <p style="font-size: 0.85rem; color: var(--text-secondary);">
+          Registra a <strong>${conv.contact_name || conv.contact_phone}</strong> como nuevo Lead comercial en el CRM de la clínica.
+        </p>
+        <div>
+          <label class="form-label">Nombre del Contacto</label>
+          <input type="text" class="form-input" id="crm-modal-lead-name" value="${conv.contact_name || ''}" placeholder="Nombre..." />
+        </div>
+        <div>
+          <label class="form-label">Origen / Canal</label>
+          <select class="form-select" id="crm-modal-lead-source">
+            <option value="whatsapp" ${defaultSource === 'whatsapp' ? 'selected' : ''}>WhatsApp</option>
+            <option value="instagram" ${defaultSource === 'instagram' ? 'selected' : ''}>Instagram Direct</option>
+            <option value="manual">Entrada Manual / Teléfono</option>
+            <option value="website">Sitio Web / Formulario</option>
+            <option value="other">Otro</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label">Interés o Tratamiento Buscado</label>
+          <input type="text" class="form-input" id="crm-modal-lead-interest" placeholder="Ej: Implante, Ortodoncia invisible, Limpieza..." />
+        </div>
+      </div>
+    `;
+
+    Modal.show({
+      title: '🎯 Crear Lead en CRM',
+      content: modalContent,
+      confirmText: 'Crear Lead',
+      onConfirm: async () => {
+        const name = document.getElementById('crm-modal-lead-name')?.value.trim();
+        const source = document.getElementById('crm-modal-lead-source')?.value || 'manual';
+        const interest = document.getElementById('crm-modal-lead-interest')?.value.trim();
+
+        try {
+          const lead = await crmService.createLead({
+            contact_id: conv.contact_id,
+            name: name || conv.contact_name || 'Prospecto',
+            phone: conv.contact_phone || undefined,
+            source,
+            status: 'contacted',
+            interest: interest || null,
+          });
+          toast.success('Lead creado exitosamente en el CRM');
+          window.location.hash = `#/crm/leads/${lead.id}`;
+        } catch (err) {
+          toast.error(err.message || 'Error al crear el Lead');
+        }
+      },
+    });
   }
 
   openTemplatesModal() {

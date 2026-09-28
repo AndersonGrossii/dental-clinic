@@ -28,6 +28,7 @@ import internalChatRoutes from './internal-chat.routes.js';
 import holidayRoutes from './holiday.routes.js';
 import pdfRoutes from './pdf.routes.js';
 import promotionalPackRoutes from './promotional-pack.routes.js';
+import crmRoutes from './crm.routes.js';
 
 const router = Router();
 
@@ -58,5 +59,6 @@ router.use('/events', eventsRoutes);
 router.use('/internal-chat', internalChatRoutes);
 router.use('/holidays', holidayRoutes);
 router.use('/pdf', pdfRoutes);
+router.use('/crm', crmRoutes);
 
 export default router;

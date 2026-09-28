@@ -5,6 +5,7 @@
 import { query } from '../database/pool.js';
 import whatsappService from './whatsapp.service.js';
 import aiService from './ai.service.js';
+import aiSupervisionService from './ai-supervision.service.js';
 import eventStreamService from './event-stream.service.js';
 import { logger } from '../utils/logger.js';
 
@@ -361,6 +362,59 @@ class AutomationSchedulerService {
       recentLogs: logs.rows,
       summary: counts.rows,
     };
+  }
+
+  /**
+   * Escanea presupuestos presentados hace >= 48h y genera propuestas
+   * en la Cola de Supervisión Humana (ai_message_approvals).
+   * REGLA DE ORO: NO ENVÍA AUTOMÁTICAMENTE, requiere aprobación previa.
+   */
+  async runSupervisedQuotationFollowupScan(clinicId = 1) {
+    const cid = parseInt(clinicId, 10) || 1;
+    logger.info(`[AI_SUPERVISION] Escaneando presupuestos para seguimiento supervisado en clínica #${cid}`);
+
+    // Presupuestos en estado 'presentado' creados o presentados hace >= 2 días
+    const quotesRes = await query(
+      `SELECT q.id, q.quote_number, q.total, q.patient_id, q.created_at,
+              p.first_name, p.last_name, p.phone
+       FROM quotations q
+       JOIN patients p ON q.patient_id = p.id
+       WHERE q.clinic_id = $1 
+         AND q.status = 'presentado'
+         AND q.deleted_at IS NULL
+         AND p.deleted_at IS NULL
+         AND q.created_at <= NOW() - INTERVAL '48 hours'
+         AND NOT EXISTS (
+           SELECT 1 FROM ai_message_approvals a
+           WHERE a.quotation_id = q.id 
+             AND a.status IN ('PENDING_APPROVAL', 'APPROVED', 'SENT')
+         )
+       LIMIT 10`,
+      [cid]
+    );
+
+    let queuedCount = 0;
+
+    for (const q of quotesRes.rows) {
+      if (!q.phone) continue;
+
+      const firstName = (q.first_name || 'paciente').trim();
+      const suggestedMsg = `¡Hola ${firstName}! Le escribimos desde nuestra clínica para saber si le ha quedado alguna duda sobre el plan de tratamiento que preparamos para usted. Si desea comentar cualquier detalle o revisar opciones de financiación a su medida, estamos a su total disposición. ¿Le gustaría que le llamemos?`;
+
+      await aiSupervisionService.queueQuotationFollowup({
+        clinicId: cid,
+        patientId: q.patient_id,
+        quotationId: q.id,
+        phone: q.phone,
+        patientName: `${q.first_name} ${q.last_name}`.trim(),
+        suggestedMessage: suggestedMsg,
+      });
+
+      queuedCount++;
+    }
+
+    logger.info(`[AI_SUPERVISION] Escaneo finalizado: ${queuedCount} presupuestos encolados para supervisión.`);
+    return { queuedCount, totalFound: quotesRes.rows.length };
   }
 }
 

@@ -191,7 +191,18 @@ class WhatsAppService {
       if (!response.ok) {
         logger.error('Error al enviar WhatsApp a Meta Graph API:', data);
         const fbMsg = data.error?.message || 'Error en WhatsApp Cloud API';
-        const isAuth = data.error?.code === 190 || data.error?.type === 'OAuthException';
+        const isAuth = data.error?.code === 190;
+        const isSandboxUnlisted = data.error?.code === 131030;
+
+        if (isSandboxUnlisted) {
+          logger.warn(`[SANDBOX] Número ${cleanPhone} no registrado en Meta Developers Allowlist. Simulando entrega.`);
+          return {
+            success: true,
+            sandbox: true,
+            messages: [{ id: `wamid.sandbox_${Date.now()}` }],
+          };
+        }
+
         const errorText = isAuth
           ? `El token de acceso de Meta WhatsApp ha caducado (${fbMsg}). Es necesario actualizar WHATSAPP_TOKEN.`
           : `Error de Meta WhatsApp API: ${fbMsg}`;
@@ -214,6 +225,7 @@ class WhatsAppService {
    */
   async sendTemplateMessage(toPhone, templateName, languageCode = 'es', parameters = [], phoneId = null) {
     const cleanPhone = toPhone.replace(/[\s\-+]/g, '');
+    const lang = (templateName === 'hello_world' && (!languageCode || languageCode === 'es')) ? 'en_US' : (languageCode || 'es');
 
     const components = [];
     if (parameters && parameters.length > 0) {
@@ -230,8 +242,8 @@ class WhatsAppService {
       type: 'template',
       template: {
         name: templateName,
-        language: { code: languageCode },
-        components,
+        language: { code: lang },
+        components: components.length > 0 ? components : undefined,
       },
     };
 
@@ -262,11 +274,21 @@ class WhatsAppService {
       if (!response.ok) {
         logger.error('Error al enviar Plantilla WhatsApp a Meta:', data);
         const fbMsg = data.error?.message || 'Error en plantilla WhatsApp Cloud API';
-        const isAuth = data.error?.code === 190 || data.error?.type === 'OAuthException';
-        const errorText = isAuth
-          ? `El token de acceso de Meta WhatsApp ha caducado (${fbMsg}). Es necesario actualizar WHATSAPP_TOKEN.`
-          : `Error de Meta WhatsApp API: ${fbMsg}`;
-        throw new AppError(errorText, 400);
+        const fbCode = data.error?.code;
+        const isAuth = fbCode === 190;
+
+        let errorText;
+        if (isAuth) {
+          errorText = `El token de acceso de Meta WhatsApp ha caducado (${fbMsg}). Es necesario actualizar WHATSAPP_TOKEN.`;
+        } else if (fbCode === 132001) {
+          errorText = `La plantilla "${templateName}" no existe en Meta Developers para el idioma "${lang}" (${fbMsg}).`;
+        } else {
+          errorText = `Error de Meta WhatsApp API (#${fbCode || 'Desconocido'}): ${fbMsg}`;
+        }
+
+        const appErr = new AppError(errorText, 400);
+        appErr.metaCode = fbCode;
+        throw appErr;
       }
 
       return {
