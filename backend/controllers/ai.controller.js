@@ -1,8 +1,12 @@
 // ============================================
-// Controlador de Inteligencia Artificial & Automações Clínicas
+// Controlador de Inteligencia Artificial & Automatizaciones Clínicas
 // ============================================
 import aiService from '../services/ai.service.js';
 import automationSchedulerService from '../services/automation-scheduler.service.js';
+import aiSupervisionService from '../services/ai-supervision.service.js';
+import aiKnowledgeRepository from '../repositories/ai-knowledge.repository.js';
+import aiBookingService from '../services/ai-booking.service.js';
+import messagingRepository from '../repositories/messaging.repository.js';
 import { query } from '../database/pool.js';
 import { ApiResponse } from '../utils/response.js';
 
@@ -74,7 +78,7 @@ export const getAutomationRules = async (req, res, next) => {
 };
 
 /**
- * Actualiza una regla de automatización (estado activo/inactivo, plantilla o timing).
+ * Actualiza una regla de automatización.
  */
 export const updateAutomationRule = async (req, res, next) => {
   try {
@@ -130,14 +134,13 @@ export const triggerRecallSweep = async (req, res, next) => {
 };
 
 /**
- * Obtiene logs detallados y métricas KPI de automatizaciones.
+ * Obtiene métricas y logs de automatizaciones.
  */
 export const getAutomationStats = async (req, res, next) => {
   try {
     const clinicId = req.user?.clinic_id || 1;
     const stats = await automationSchedulerService.getAutomationStats(clinicId);
 
-    // Calcular KPIs
     let totalSent = 0;
     let totalConfirmed = 0;
     let totalCancelled = 0;
@@ -171,7 +174,7 @@ export const getAutomationStats = async (req, res, next) => {
         totalCancelled,
         totalRecallSent,
         confirmationRate,
-      }
+      },
     });
   } catch (err) {
     next(err);
@@ -192,7 +195,7 @@ export const classifyIntent = async (req, res, next) => {
 };
 
 /**
- * Genera explicación amable de presupuesto.
+ * Genera explicación pedagógica de un presupuesto.
  */
 export const explainQuotation = async (req, res, next) => {
   try {
@@ -204,6 +207,240 @@ export const explainQuotation = async (req, res, next) => {
       tone: tone || 'friendly',
     });
     return ApiResponse.success(res, explanation);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ============================================
+// NUEVOS CONTROLADORES: SUPERVISIÓN HUMANA (HUMAN-IN-THE-LOOP)
+// ============================================
+
+/**
+ * Lista los mensajes de la cola de supervisión humana (ai_message_approvals).
+ */
+export const getApprovals = async (req, res, next) => {
+  try {
+    const clinicId = req.user?.clinic_id || 1;
+    const status = req.query.status || 'PENDING_APPROVAL';
+    const items = await aiSupervisionService.getApprovals(clinicId, status);
+    return ApiResponse.success(res, items);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Aprueba y envía un mensaje pendiente de la cola.
+ */
+export const approveMessage = async (req, res, next) => {
+  try {
+    const clinicId = req.user?.clinic_id || 1;
+    const userId = req.user?.id;
+    const approvalId = parseInt(req.params.id, 10);
+
+    const approved = await aiSupervisionService.approveAndSend(approvalId, clinicId, userId);
+    return ApiResponse.success(res, approved, 'Mensaje aprobado y enviado correctamente.');
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Modifica el texto de una propuesta antes de aprobarla.
+ */
+export const editApprovalMessage = async (req, res, next) => {
+  try {
+    const clinicId = req.user?.clinic_id || 1;
+    const userId = req.user?.id;
+    const approvalId = parseInt(req.params.id, 10);
+    const { message } = req.body;
+
+    const updated = await aiSupervisionService.editMessage(approvalId, clinicId, message, userId);
+    return ApiResponse.success(res, updated, 'Propuesta de mensaje actualizada correctamente.');
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Descarta una propuesta para que no se envíe.
+ */
+export const discardApprovalMessage = async (req, res, next) => {
+  try {
+    const clinicId = req.user?.clinic_id || 1;
+    const userId = req.user?.id;
+    const approvalId = parseInt(req.params.id, 10);
+
+    const discarded = await aiSupervisionService.discard(approvalId, clinicId, userId);
+    return ApiResponse.success(res, discarded, 'Propuesta descartada correctamente.');
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Dispara el escaneo de presupuestos presentados hace >= 48h para generar propuestas en cola.
+ */
+export const triggerQuotationFollowupScan = async (req, res, next) => {
+  try {
+    const clinicId = req.user?.clinic_id || 1;
+    const result = await automationSchedulerService.runSupervisedQuotationFollowupScan(clinicId);
+    return ApiResponse.success(res, result, 'Escaneo de presupuestos completado exitosamente.');
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ============================================
+// NUEVOS CONTROLADORES: COPILOT DE RECEPCIÓN & CRM
+// ============================================
+
+/**
+ * Genera 2 sugerencias de respuesta en español europeo para la recepcionista en el chat.
+ */
+export const suggestReply = async (req, res, next) => {
+  try {
+    const clinicId = req.user?.clinic_id || 1;
+    const { conversation_id } = req.body;
+
+    let messages = [];
+    if (conversation_id) {
+      messages = await messagingRepository.getMessagesByConversation(conversation_id, { limit: 10 });
+    }
+
+    const suggestions = await aiService.suggestCopilotReplies({ clinicId, messages });
+    return ApiResponse.success(res, suggestions);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Resume una conversación omnicanal para generar una nota de CRM.
+ */
+export const summarizeConversation = async (req, res, next) => {
+  try {
+    const clinicId = req.user?.clinic_id || 1;
+    const { conversation_id } = req.body;
+
+    let messages = [];
+    if (conversation_id) {
+      messages = await messagingRepository.getMessagesByConversation(conversation_id, { limit: 20 });
+    }
+
+    const summary = await aiService.summarizeConversationForCRM({ clinicId, messages });
+    return ApiResponse.success(res, summary);
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * Califica automáticamente un lead del CRM extrayendo interés, urgencia y nota de IA.
+ */
+export const qualifyLead = async (req, res, next) => {
+  try {
+    const clinicId = req.user?.clinic_id || 1;
+    const userId = req.user?.id;
+    const leadId = parseInt(req.params.id, 10);
+
+    // Buscar mensajes vinculados al contacto del lead
+    const messagesRes = await query(
+      `SELECT m.* 
+       FROM messages m
+       JOIN conversations c ON m.conversation_id = c.id
+       JOIN crm_leads l ON c.contact_id = l.contact_id
+       WHERE l.id = $1 AND l.clinic_id = $2
+       ORDER BY m.created_at ASC
+       LIMIT 30`,
+      [leadId, clinicId]
+    );
+
+    const result = await aiService.qualifyLeadFromConversation(leadId, clinicId, messagesRes.rows, userId);
+    return ApiResponse.success(res, result, 'Lead calificado con IA exitosamente.');
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ============================================
+// BASE DE CONOCIMIENTO RAG
+// ============================================
+
+export const getKnowledgeBase = async (req, res, next) => {
+  try {
+    const clinicId = req.user?.clinic_id || 1;
+    const articles = await aiKnowledgeRepository.findByClinic(clinicId);
+    return ApiResponse.success(res, articles);
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const createKnowledgeArticle = async (req, res, next) => {
+  try {
+    const clinicId = req.user?.clinic_id || 1;
+    const { category, title, content, keywords } = req.body;
+    const created = await aiKnowledgeRepository.create({ clinicId, category, title, content, keywords });
+    return ApiResponse.success(res, created, 'Artículo de conocimiento creado.', 201);
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateKnowledgeArticle = async (req, res, next) => {
+  try {
+    const clinicId = req.user?.clinic_id || 1;
+    const id = parseInt(req.params.id, 10);
+    const updated = await aiKnowledgeRepository.update(id, clinicId, req.body);
+    return ApiResponse.success(res, updated, 'Artículo de conocimiento actualizado.');
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deleteKnowledgeArticle = async (req, res, next) => {
+  try {
+    const clinicId = req.user?.clinic_id || 1;
+    const id = parseInt(req.params.id, 10);
+    await aiKnowledgeRepository.delete(id, clinicId);
+    return ApiResponse.success(res, null, 'Artículo de conocimiento eliminado.');
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ============================================
+// AGENDAMIENTO DE PRIMERA VISITA
+// ============================================
+
+export const getAvailableBookingSlots = async (req, res, next) => {
+  try {
+    const clinicId = req.user?.clinic_id || 1;
+    const date = req.query.date || null;
+    const slots = await aiBookingService.getAvailableSlots(clinicId, date);
+    return ApiResponse.success(res, slots);
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const bookFirstVisit = async (req, res, next) => {
+  try {
+    const clinicId = req.user?.clinic_id || 1;
+    const { patient_id, guest_name, phone, appointment_date, start_time } = req.body;
+
+    const result = await aiBookingService.bookFirstVisit({
+      clinicId,
+      patientId: patient_id || null,
+      guestName: guest_name || null,
+      phone,
+      appointmentDate: appointment_date,
+      startTime: start_time,
+    });
+
+    return ApiResponse.success(res, result, 'Primera visita agendada correctamente.');
   } catch (err) {
     next(err);
   }

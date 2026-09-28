@@ -293,8 +293,8 @@ export class Patients {
       <form id="patient-modal-form" class="patient-form-grid">
         ${sectionTitle('Información Personal')}
         <div class="form-group">
-          <label class="form-label">Código / ID Paciente</label>
-          <input type="text" name="custom_id" class="form-input" value="${patientData.custom_id || ''}" placeholder="Ej: PAC-00001" ${canEditCustomId ? '' : 'readonly title="Solo gerentes y recepcionistas pueden modificar este código"'} />
+          <label class="form-label">Código / ID Paciente <small style="color: var(--text-secondary); font-weight: normal;">(Opcional - Automático)</small></label>
+          <input type="text" name="custom_id" class="form-input" value="${patientData.custom_id || ''}" placeholder="Dejar en blanco para generar automáticamente" ${canEditCustomId ? '' : 'readonly title="Solo gerentes y recepcionistas pueden modificar este código"'} />
         </div>
         <div class="form-group">
           <label class="form-label">Nombres</label>

@@ -32,6 +32,7 @@ services:
       - DB_HOST=postgres
     ports:
       - "${PORT:-4000}:4000"
+    command: npm run dev
     volumes:
       - ./backend:/app
       - /app/node_modules

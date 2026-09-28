@@ -1,5 +1,5 @@
 // ============================================
-// Servicio Frontend de Inteligencia Artificial & Automações
+// Servicio Frontend de Inteligencia Artificial & Automatizaciones
 // ============================================
 import api from './api.service.js';
 
@@ -19,7 +19,7 @@ class AIService {
   }
 
   /**
-   * Actualiza una regla de automatización (activar/pausar, plantilla, horario).
+   * Actualiza una regla de automatización.
    */
   async updateRule(id, data) {
     return api.put(`/ai/automations/rules/${id}`, data);
@@ -33,7 +33,7 @@ class AIService {
   }
 
   /**
-   * Ejecuta el barrido de recall diario de pacientes (limpiezas y post-quirúrgicos).
+   * Ejecuta el barrido de recall diario de pacientes.
    */
   async triggerRecallSweep() {
     return api.post('/ai/automations/run-recall', {});
@@ -47,7 +47,7 @@ class AIService {
   }
 
   /**
-   * Genera una explicación amable de un presupuesto para el paciente.
+   * Genera una explicación pedagógica de un presupuesto para el paciente.
    */
   async explainQuotation(patientName, items, totalAmount, tone = 'friendly') {
     return api.post('/ai/explain-quotation', {
@@ -56,6 +56,66 @@ class AIService {
       total_amount: totalAmount,
       tone,
     });
+  }
+
+  // ============================================
+  // COLA DE SUPERVISIÓN HUMANA (HUMAN-IN-THE-LOOP)
+  // ============================================
+
+  async getApprovals(status = 'PENDING_APPROVAL') {
+    return api.get(`/ai/approvals?status=${encodeURIComponent(status)}`);
+  }
+
+  async approveMessage(id) {
+    return api.post(`/ai/approvals/${id}/approve`, {});
+  }
+
+  async editApprovalMessage(id, message) {
+    return api.put(`/ai/approvals/${id}/edit`, { message });
+  }
+
+  async discardApprovalMessage(id) {
+    return api.post(`/ai/approvals/${id}/discard`, {});
+  }
+
+  async triggerQuotationFollowupScan() {
+    return api.post('/ai/approvals/scan-quotations', {});
+  }
+
+  // ============================================
+  // COPILOT DE RECEPCIÓN & CRM
+  // ============================================
+
+  async suggestReply(conversationId) {
+    return api.post('/ai/copilot/suggest-reply', { conversation_id: conversationId });
+  }
+
+  async summarizeConversation(conversationId) {
+    return api.post('/ai/copilot/summarize-conversation', { conversation_id: conversationId });
+  }
+
+  async qualifyLead(leadId) {
+    return api.post(`/ai/leads/${leadId}/qualify`, {});
+  }
+
+  // ============================================
+  // BASE DE CONOCIMIENTO RAG
+  // ============================================
+
+  async getKnowledge() {
+    return api.get('/ai/knowledge');
+  }
+
+  async createKnowledge(data) {
+    return api.post('/ai/knowledge', data);
+  }
+
+  async updateKnowledge(id, data) {
+    return api.put(`/ai/knowledge/${id}`, data);
+  }
+
+  async deleteKnowledge(id) {
+    return api.delete(`/ai/knowledge/${id}`);
   }
 }
 

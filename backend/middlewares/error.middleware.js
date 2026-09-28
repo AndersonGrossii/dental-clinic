@@ -36,9 +36,22 @@ export const errorMiddleware = (err, req, res, _next) => {
 
   // Error de PostgreSQL — violación de constraint único
   if (err.code === '23505') {
+    logger.warn(`Violación de restricción única [23505]: ${err.detail || err.message} (Constraint: ${err.constraint || 'n/a'})`);
+    let userMsg = 'El registro ya existe. Verifique los datos e intente de nuevo.';
+    if (err.constraint === 'patients_custom_id_key' || err.detail?.includes('custom_id')) {
+      userMsg = 'El código de paciente (ID) ya existe. Deje el campo en blanco para que el sistema lo genere automáticamente o use otro código.';
+    } else if (err.constraint?.includes('dni') || err.detail?.includes('dni')) {
+      userMsg = 'Ya existe un paciente registrado con ese DNI / Pasaporte.';
+    } else if (err.constraint?.includes('email') || err.detail?.includes('email')) {
+      userMsg = 'Ya existe un registro con ese correo electrónico.';
+    } else if (err.detail) {
+      userMsg = `El registro ya existe: ${err.detail}`;
+    }
     return res.status(409).json({
       success: false,
-      message: 'El registro ya existe. Verifique los datos e intente de nuevo.',
+      message: userMsg,
+      detail: err.detail || null,
+      constraint: err.constraint || null,
     });
   }
 
