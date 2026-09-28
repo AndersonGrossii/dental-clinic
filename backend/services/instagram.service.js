@@ -217,7 +217,9 @@ class InstagramService {
     }
 
     const baseUrl = this.getBaseUrl(creds.accessToken);
-    const endpoint = `${baseUrl}/${creds.pageId}/messages`;
+    const isInstagramToken = (creds.accessToken || '').startsWith('IG') || (creds.accessToken || '').startsWith('ig');
+    const targetId = isInstagramToken ? 'me' : (creds.pageId || 'me');
+    const endpoint = `${baseUrl}/${targetId}/messages`;
     const payload = {
       recipient: { id: recipientId },
       message: { text: text },
@@ -295,7 +297,9 @@ class InstagramService {
     }
 
     const baseUrl = this.getBaseUrl(creds.accessToken);
-    const endpoint = `${baseUrl}/${creds.pageId}/messages`;
+    const isInstagramToken = (creds.accessToken || '').startsWith('IG') || (creds.accessToken || '').startsWith('ig');
+    const targetId = isInstagramToken ? 'me' : (creds.pageId || 'me');
+    const endpoint = `${baseUrl}/${targetId}/messages`;
     const payload = {
       recipient: { id: recipientId },
       message: {
