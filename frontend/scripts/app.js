@@ -30,13 +30,37 @@ import settingsService from '../services/settings.service.js';
 import eventsService from '../services/events.service.js';
 import internalChatWidget from '../components/chat/internal-chat.js';
 
+// Helper para proteger rutas desactivadas por feature flags
+const guardRoute = (featureKey, PageClass) => {
+  return class GuardedPage {
+    constructor(container) {
+      this.container = container;
+      const features = state.get('features') || {};
+      if (!features[featureKey]) {
+        window.location.hash = '#/';
+        this.page = null;
+      } else {
+        this.page = new PageClass(container);
+      }
+    }
+    async render(params) {
+      if (this.page) return this.page.render(params);
+    }
+    destroy() {
+      if (this.page && typeof this.page.destroy === 'function') {
+        this.page.destroy();
+      }
+    }
+  };
+};
+
 // Configurar Rutas
 router.addRoute('#/login', Login);
 router.addRoute('#/', Dashboard);
 router.addRoute('#/patients', Patients);
 router.addRoute('#/patients/:id', PatientProfile);
-router.addRoute('#/crm', CrmPage);
-router.addRoute('#/crm/leads/:id', LeadDetailPage);
+router.addRoute('#/crm', guardRoute('crm', CrmPage));
+router.addRoute('#/crm/leads/:id', guardRoute('crm', LeadDetailPage));
 router.addRoute('#/appointments', Appointments);
 router.addRoute('#/personal-calendar', PersonalCalendarPage);
 router.addRoute('#/cabinets', Cabinets);
@@ -49,8 +73,8 @@ router.addRoute('#/payments', Payments);
 router.addRoute('#/reports', Reports);
 router.addRoute('#/settings', Settings);
 
-router.addRoute('#/messages', Messages);
-router.addRoute('#/automations', Automations);
+router.addRoute('#/messages', guardRoute('omnichannelMessaging', Messages));
+router.addRoute('#/automations', guardRoute('aiAutomations', Automations));
 
 let sidebarInstance = null;
 let navbarInstance = null;
