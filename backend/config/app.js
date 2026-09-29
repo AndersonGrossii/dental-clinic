@@ -65,6 +65,7 @@ const config = {
     aiAutomations: process.env.FEATURE_AI_AUTOMATIONS === 'true',
     omnichannelMessaging: process.env.FEATURE_OMNICHANNEL_MESSAGING === 'true',
     notesAndOdontogram: true,
+    crm: process.env.FEATURE_CRM === 'true',
   },
 };
 

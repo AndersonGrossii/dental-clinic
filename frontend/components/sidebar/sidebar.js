@@ -50,7 +50,7 @@ export class Sidebar {
     const menuItems = [
       { path: '#/', label: 'Dashboard', icon: icons.dashboard, roles: ['propietario', 'direccion', 'recepcionista', 'doctor', 'higienista'] },
       { path: '#/patients', label: 'Pacientes', icon: icons.patients, roles: ['propietario', 'direccion', 'recepcionista', 'doctor', 'higienista'] },
-      { path: '#/crm', label: 'CRM Leads', icon: icons.crm, roles: ['propietario', 'direccion', 'recepcionista'] },
+      ...(features.crm ? [{ path: '#/crm', label: 'CRM Leads', icon: icons.crm, roles: ['propietario', 'direccion', 'recepcionista'] }] : []),
       { path: '#/appointments', label: 'Citas', icon: icons.appointments, roles: ['propietario', 'direccion', 'recepcionista', 'doctor', 'higienista'] },
       { path: '#/personal-calendar', label: 'Agenda Personal', icon: icons.personalCalendar, roles: ['propietario', 'direccion', 'recepcionista', 'doctor', 'higienista'] },
       { path: '#/cabinets', label: 'Gabinetes', icon: icons.cabinets, roles: ['propietario', 'direccion', 'recepcionista', 'doctor', 'higienista'] },
