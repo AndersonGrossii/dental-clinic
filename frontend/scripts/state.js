@@ -17,7 +17,7 @@ class Store {
         aiAutomations: false,
         omnichannelMessaging: false,
         notesAndOdontogram: true,
-        crm: false,
+        crm: true,
       },
     };
     this.subscribers = {};

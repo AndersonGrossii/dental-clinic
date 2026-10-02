@@ -24,8 +24,8 @@ import { Settings } from '../pages/settings/settings.js';
 import { Cabinets } from '../pages/cabinets/cabinets.js';
 import { Messages } from '../pages/messages/messages.js';
 import { Automations } from '../pages/automations/automations.js';
-import { CrmPage } from '../pages/crm/crm.js?v=24';
-import { LeadDetailPage } from '../pages/crm/lead-detail.js?v=24';
+import { CrmPage } from '../pages/crm/crm.js?v=27';
+import { LeadDetailPage } from '../pages/crm/lead-detail.js?v=27';
 import settingsService from '../services/settings.service.js';
 import eventsService from '../services/events.service.js';
 import internalChatWidget from '../components/chat/internal-chat.js';
@@ -33,18 +33,19 @@ import internalChatWidget from '../components/chat/internal-chat.js';
 // Helper para proteger rutas desactivadas por feature flags
 const guardRoute = (featureKey, PageClass) => {
   return class GuardedPage {
-    constructor(container) {
+    constructor(container, params) {
       this.container = container;
+      this.params = params;
       const features = state.get('features') || {};
       if (!features[featureKey]) {
         window.location.hash = '#/';
         this.page = null;
       } else {
-        this.page = new PageClass(container);
+        this.page = new PageClass(container, params);
       }
     }
     async render(params) {
-      if (this.page) return this.page.render(params);
+      if (this.page) return this.page.render(params || this.params);
     }
     destroy() {
       if (this.page && typeof this.page.destroy === 'function') {
@@ -60,7 +61,10 @@ router.addRoute('#/', Dashboard);
 router.addRoute('#/patients', Patients);
 router.addRoute('#/patients/:id', PatientProfile);
 router.addRoute('#/crm', guardRoute('crm', CrmPage));
+router.addRoute('#/crm/leads', guardRoute('crm', CrmPage));
 router.addRoute('#/crm/leads/:id', guardRoute('crm', LeadDetailPage));
+router.addRoute('#/crm/opportunities', guardRoute('crm', CrmPage));
+router.addRoute('#/crm/tasks', guardRoute('crm', CrmPage));
 router.addRoute('#/appointments', Appointments);
 router.addRoute('#/personal-calendar', PersonalCalendarPage);
 router.addRoute('#/cabinets', Cabinets);

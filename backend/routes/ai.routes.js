@@ -48,4 +48,9 @@ router.delete('/knowledge/:id', staffOnly, aiController.deleteKnowledgeArticle);
 router.get('/booking/slots', allRoles, aiController.getAvailableBookingSlots);
 router.post('/booking/first-visit', allRoles, aiController.bookFirstVisit);
 
+// 9. Motor de Trabajos de Automatización (Jobs) & Seguimiento de Leads Inactivos
+router.get('/automations/jobs', allRoles, aiController.getAutomationJobs);
+router.post('/automations/jobs/run', staffOnly, aiController.processAutomationJobs);
+router.post('/automations/run-lead-followups', staffOnly, aiController.triggerInactiveLeadFollowupScan);
+
 export default router;

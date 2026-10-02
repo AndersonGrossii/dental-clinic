@@ -858,6 +858,150 @@ class CrmService {
       patient: pat || null,
     };
   }
+
+  /**
+   * Obtiene tareas vinculadas al dominio CRM (leads u oportunidades) con paginación y filtros.
+   */
+  async getCRMTasks(clinicId, { status, priority, assignedUserId, leadId, opportunityId, limit = 50, offset = 0 } = {}) {
+    const conditions = ['t.clinic_id = $1', 't.deleted_at IS NULL', '(t.lead_id IS NOT NULL OR t.opportunity_id IS NOT NULL OR t.contact_id IS NOT NULL)'];
+    const params = [clinicId];
+    let idx = 2;
+
+    if (status) {
+      conditions.push(`t.status = $${idx++}`);
+      params.push(status);
+    }
+    if (priority) {
+      conditions.push(`t.priority = $${idx++}`);
+      params.push(priority);
+    }
+    if (assignedUserId) {
+      conditions.push(`t.assigned_to_user_id = $${idx++}`);
+      params.push(assignedUserId);
+    }
+    if (leadId) {
+      conditions.push(`t.lead_id = $${idx++}`);
+      params.push(leadId);
+    }
+    if (opportunityId) {
+      conditions.push(`t.opportunity_id = $${idx++}`);
+      params.push(opportunityId);
+    }
+
+    const whereClause = conditions.join(' AND ');
+    const countSql = `SELECT COUNT(*)::int AS total FROM tasks t WHERE ${whereClause}`;
+    const totalRes = await query(countSql, params);
+
+    const dataSql = `
+      SELECT t.*,
+             u.first_name AS assigned_first_name, u.last_name AS assigned_last_name,
+             cl.interest AS lead_interest,
+             mc.name AS contact_name, mc.phone AS contact_phone,
+             co.name AS opportunity_name, co.estimated_value AS opportunity_value
+      FROM tasks t
+      LEFT JOIN users u ON u.id = t.assigned_to_user_id
+      LEFT JOIN crm_leads cl ON cl.id = t.lead_id
+      LEFT JOIN messaging_contacts mc ON mc.id = t.contact_id
+      LEFT JOIN crm_opportunities co ON co.id = t.opportunity_id
+      WHERE ${whereClause}
+      ORDER BY 
+        CASE WHEN t.status = 'PENDING' THEN 0 ELSE 1 END,
+        t.due_date ASC, t.due_time ASC
+      LIMIT $${idx++} OFFSET $${idx++}
+    `;
+    params.push(limit, offset);
+    const dataRes = await query(dataSql, params);
+
+    return {
+      rows: dataRes.rows,
+      total: totalRes.rows[0]?.total || 0,
+    };
+  }
+
+  /**
+   * Crea una nueva tarea comercial asociada a un lead u oportunidad.
+   */
+  async createCRMTask({ clinicId, title, description, dueDate, dueTime, priority = 'MEDIUM', assignedUserId, contactId, leadId, opportunityId, userId }) {
+    if (!title || !title.trim()) throw new ValidationError('El título de la tarea es obligatorio');
+    if (!dueDate) throw new ValidationError('La fecha de vencimiento es obligatoria');
+
+    let finalContactId = contactId;
+    if (!finalContactId && leadId) {
+      const l = await crmLeadRepository.findById(leadId);
+      if (l) finalContactId = l.contact_id;
+    }
+    if (!finalContactId && opportunityId) {
+      const o = await crmOpportunityRepository.findById(opportunityId);
+      if (o) finalContactId = o.contact_id;
+    }
+
+    const res = await query(
+      `INSERT INTO tasks (
+        clinic_id, title, description, due_date, due_time, priority, status,
+        assigned_to_user_id, assigned_user_ids, is_team_visible, created_by_user_id,
+        contact_id, lead_id, opportunity_id, created_by_type
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, 'PENDING',
+        $7, $8, TRUE, $9,
+        $10, $11, $12, 'human'
+      ) RETURNING *`,
+      [
+        clinicId, title.trim(), description ? description.trim() : null, dueDate, dueTime || null, priority,
+        assignedUserId || null, assignedUserId ? [assignedUserId] : [], userId,
+        finalContactId || null, leadId || null, opportunityId || null
+      ]
+    );
+
+    await crmActivityRepository.logActivity({
+      clinicId,
+      contactId: finalContactId,
+      leadId,
+      opportunityId,
+      userId,
+      activityType: 'CRM_TASK_CREATED',
+      title: `Tarea comercial: ${title.trim()}`,
+      description: `Vencimiento: ${dueDate} ${dueTime || ''} | Prioridad: ${priority}`,
+      actorType: 'human',
+      metadata: { taskId: res.rows[0].id, priority, dueDate }
+    });
+
+    return res.rows[0];
+  }
+
+  /**
+   * Actualiza el estado de una tarea comercial.
+   */
+  async updateCRMTaskStatus(taskId, status, clinicId, userId) {
+    const valid = ['PENDING', 'COMPLETED', 'CANCELLED'];
+    if (!valid.includes(status)) throw new ValidationError('Estado de tarea inválido');
+
+    const res = await query(
+      `UPDATE tasks 
+       SET status = $1::varchar, completed_at = CASE WHEN $1::varchar = 'COMPLETED' THEN NOW() ELSE NULL END, updated_at = NOW() 
+       WHERE id = $2 AND clinic_id = $3 AND deleted_at IS NULL
+       RETURNING *`,
+      [status, taskId, clinicId]
+    );
+    if (res.rows.length === 0) throw new NotFoundError('Tarea no encontrada');
+    const task = res.rows[0];
+
+    if (task.contact_id || task.lead_id || task.opportunity_id) {
+      await crmActivityRepository.logActivity({
+        clinicId,
+        contactId: task.contact_id,
+        leadId: task.lead_id,
+        opportunityId: task.opportunity_id,
+        userId,
+        activityType: 'CRM_TASK_STATUS_CHANGED',
+        title: `Tarea comercial ${status === 'COMPLETED' ? 'completada' : 'actualizada'}: ${task.title}`,
+        actorType: 'human',
+        metadata: { taskId: task.id, status }
+      });
+    }
+
+    return task;
+  }
 }
 
 export default new CrmService();
+

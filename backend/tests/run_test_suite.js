@@ -22,6 +22,7 @@ const suites = [
   { name: 'CRM Comercial, Pipeline & Aislamiento de Leads (33 pruebas)', file: 'test_crm_foundation.js' },
   { name: 'IA en Mensajería, Leads CRM y Supervisión Humana (10 pruebas)', file: 'test_ai_leads_messaging.js' },
   { name: 'Instagram Messaging API & Multi-Tenant Routing (5 pruebas)', file: 'test_instagram_integration.js' },
+  { name: 'Motor de Automatización, Idempotencia & Agendamiento Conversacional (21 pruebas)', file: 'test_ai_automation_engine.js' },
 ];
 
 console.log('\n╔══════════════════════════════════════════════════════════════════╗');

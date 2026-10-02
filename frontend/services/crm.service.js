@@ -38,6 +38,9 @@ class CrmService {
    * Obtiene el detalle consolidado de un lead por ID.
    */
   async getLeadById(id) {
+    if (!id || id === 'undefined') {
+      throw new Error('ID de lead inválido o no especificado');
+    }
     const res = await api.get(`/crm/leads/${id}`);
     return res?.data || res;
   }
@@ -127,6 +130,44 @@ class CrmService {
   }
 
   /**
+   * Obtiene las tareas comerciales del CRM con filtros y paginación.
+   */
+  async getCRMTasks(params = {}) {
+    const res = await api.get('/crm/tasks', params, { returnFullResponse: true });
+    if (res && res.pagination) {
+      return {
+        rows: res.data || [],
+        total: res.pagination.total ?? (res.data ? res.data.length : 0),
+        page: res.pagination.page || 1,
+        limit: res.pagination.limit || 50,
+      };
+    }
+    if (Array.isArray(res)) {
+      return { rows: res, total: res.length };
+    }
+    if (res && Array.isArray(res.data)) {
+      return { rows: res.data, total: res.pagination?.total ?? res.data.length };
+    }
+    return res || { rows: [], total: 0 };
+  }
+
+  /**
+   * Crea una nueva tarea comercial.
+   */
+  async createCRMTask(data) {
+    const res = await api.post('/crm/tasks', data);
+    return res?.data || res;
+  }
+
+  /**
+   * Actualiza el estado de una tarea comercial.
+   */
+  async updateCRMTaskStatus(id, status) {
+    const res = await api.patch(`/crm/tasks/${id}/status`, { status });
+    return res?.data || res;
+  }
+
+  /**
    * Obtiene el contexto CRM de un contacto de mensajería.
    */
   async getContactContext(contactId) {
@@ -137,3 +178,4 @@ class CrmService {
 
 const crmService = new CrmService();
 export default crmService;
+

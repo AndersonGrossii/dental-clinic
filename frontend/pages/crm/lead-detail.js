@@ -3,20 +3,31 @@
 // ============================================
 import crmService from '../../services/crm.service.js';
 import patientService from '../../services/patient.service.js';
+import userService from '../../services/user.service.js';
 import aiService from '../../services/ai.service.js';
 import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
-import { formatCurrency, formatDate } from '../../utils/helpers.js';
+import state from '../../scripts/state.js';
+import { formatCurrency, formatDate, escapeHtml } from '../../utils/helpers.js';
 
 export class LeadDetailPage {
   constructor(container, params = {}) {
     this.container = container;
-    this.leadId = params.id;
+    this.leadId = params?.id;
+    if (!this.leadId || this.leadId === 'undefined') {
+      const match = (window.location.hash || '').match(/#\/crm\/leads\/([^/?#]+)/);
+      if (match && match[1] && match[1] !== 'undefined') {
+        this.leadId = match[1];
+      }
+    }
     this.lead = null;
     this.isLoading = false;
   }
 
-  async render() {
+  async render(params = {}) {
+    if (params?.id && params.id !== 'undefined') {
+      this.leadId = params.id;
+    }
     this.injectStyles();
     await this.loadLeadData();
     if (!this.lead) {
@@ -44,6 +55,11 @@ export class LeadDetailPage {
   }
 
   async loadLeadData() {
+    if (!this.leadId || this.leadId === 'undefined' || isNaN(parseInt(this.leadId, 10))) {
+      console.warn('LeadDetailPage: ID de lead inválido o no especificado:', this.leadId);
+      this.lead = null;
+      return;
+    }
     this.isLoading = true;
     try {
       this.lead = await crmService.getLeadById(this.leadId);
@@ -57,6 +73,7 @@ export class LeadDetailPage {
 
   renderView() {
     const l = this.lead;
+    const features = state.get('features') || {};
     const opps = l.opportunities || [];
     const notes = l.notes || [];
     const activities = l.activities || [];
@@ -144,12 +161,17 @@ export class LeadDetailPage {
           <button id="btn-add-note" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 6px;">
             <span>📝</span> Nota
           </button>
+          <button id="btn-add-task-header" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 6px;">
+            <span>📋</span> + Tarea
+          </button>
           <button id="btn-add-opp" class="btn btn-primary btn-sm" style="display: inline-flex; align-items: center; gap: 6px;">
             <span>💼</span> + Oportunidad
           </button>
-          <a href="#/messages" class="btn btn-outline btn-sm" title="Ir al chat omnicanal" style="display: inline-flex; align-items: center; gap: 6px;">
-            <span>💬</span> Chat
-          </a>
+          ${features.omnichannelMessaging ? `
+            <a href="#/messages" class="btn btn-outline btn-sm" title="Ir al chat omnicanal" style="display: inline-flex; align-items: center; gap: 6px;">
+              <span>💬</span> Chat
+            </a>
+          ` : ''}
         </div>
       </div>
 
@@ -238,11 +260,75 @@ export class LeadDetailPage {
               </div>
             `}
           </div>
+
+          <!-- Tareas Comerciales de Seguimiento -->
+          <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: var(--space-4); margin-bottom: var(--space-4);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-3);">
+              <div>
+                <h3 style="margin: 0; font-size: 1.1rem;">📋 Tareas Comerciales (${tasks.length})</h3>
+                <small style="color: var(--text-secondary); font-size: 0.75rem;">Seguimiento y llamadas asignadas al equipo comercial</small>
+              </div>
+              <button id="btn-add-task-inner" class="btn btn-sm btn-outline">+ Nueva Tarea</button>
+            </div>
+
+            ${tasks.length === 0 ? `
+              <div style="text-align: center; color: var(--text-secondary); padding: var(--space-4); background: var(--bg-surface-2); border-radius: var(--radius-md); border: 1px dashed var(--border-color);">
+                Sin tareas pendientes para este lead.
+                <div style="margin-top: 8px;">
+                  <button id="btn-create-first-task" class="btn btn-sm btn-primary">+ Crear Tarea de Seguimiento</button>
+                </div>
+              </div>
+            ` : `
+              <div style="display: flex; flex-direction: column; gap: 8px;">
+                ${tasks.map(t => {
+                  const isCompleted = t.status === 'COMPLETED';
+                  const isOverdue = t.status === 'PENDING' && t.due_date && new Date(t.due_date) < new Date(new Date().setHours(0,0,0,0));
+                  return `
+                    <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; ${isCompleted ? 'opacity: 0.68;' : ''}">
+                      <div style="display: flex; align-items: center; gap: 10px;">
+                        <input 
+                          type="checkbox" 
+                          class="lead-task-checkbox" 
+                          data-id="${t.id}" 
+                          ${isCompleted ? 'checked' : ''} 
+                          style="cursor: pointer; width: 17px; height: 17px; accent-color: var(--crm-primary);"
+                          title="${isCompleted ? 'Reabrir tarea' : 'Completar tarea'}"
+                        />
+                        <div>
+                          <div style="font-weight: 600; font-size: 0.88rem; color: var(--text-primary); ${isCompleted ? 'text-decoration: line-through;' : ''}">
+                            ${this.escapeHtml(t.title)}
+                          </div>
+                          ${t.description ? `
+                            <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 2px;">
+                              ${this.escapeHtml(t.description)}
+                            </div>
+                          ` : ''}
+                          <div style="font-size: 0.72rem; color: var(--text-secondary); margin-top: 3px; display: flex; gap: 8px; align-items: center;">
+                            <span style="${isOverdue ? 'color: #dc2626; font-weight: 700;' : ''}">
+                              📅 ${t.due_date ? formatDate(t.due_date) : 'Sin fecha'} ${t.due_time ? t.due_time.substring(0, 5) : ''}
+                            </span>
+                            ${isOverdue ? '<span class="badge" style="background:#fee2e2; color:#b91c1c; font-size:0.65rem; padding: 0 4px;">Vencida</span>' : ''}
+                            ${t.assigned_first_name ? `<span>👤 ${this.escapeHtml(t.assigned_first_name)}</span>` : ''}
+                          </div>
+                        </div>
+                      </div>
+                      <div>
+                        <span class="badge" style="font-size: 0.7rem; font-weight: 600; ${t.priority === 'URGENT' ? 'background:#fee2e2; color:#b91c1c;' : t.priority === 'HIGH' ? 'background:#ffedd5; color:#c2410c;' : 'background:var(--bg-surface-2); color:var(--text-secondary);'}">
+                          ${t.priority === 'URGENT' ? '🔥 Urgente' : t.priority === 'HIGH' ? '⚡ Alta' : 'Normal'}
+                        </span>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            `}
+          </div>
         </div>
 
         <!-- Columna Derecha: Resumen Comercial, Conversaciones y Timeline -->
         <div>
           <!-- Panel de Inteligencia Artificial (Sofía) -->
+          ${features.aiAutomations ? `
           <div style="background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%); border: 1px solid #86efac; border-radius: var(--radius-lg); padding: var(--space-4); margin-bottom: var(--space-4);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
               <h4 style="margin: 0; font-size: 0.95rem; display: flex; align-items: center; gap: 6px; color: #166534;">
@@ -291,6 +377,7 @@ export class LeadDetailPage {
               </div>
             ` : ''}
           </div>
+          ` : ''}
 
           <!-- Resumen del Lead -->
           <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: var(--space-4); margin-bottom: var(--space-4);">
@@ -412,6 +499,16 @@ export class LeadDetailPage {
     return map[src] || src;
   }
 
+  escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
   bindEvents() {
     // Convertir en paciente
     const btnConvert = document.getElementById('btn-convert-patient');
@@ -527,6 +624,133 @@ export class LeadDetailPage {
           sel.disabled = false;
         }
       });
+    });
+
+    // Modal agregar tarea comercial
+    const btnTaskHeader = document.getElementById('btn-add-task-header');
+    const btnTaskInner = document.getElementById('btn-add-task-inner');
+    const btnCreateFirstTask = document.getElementById('btn-create-first-task');
+    if (btnTaskHeader) btnTaskHeader.addEventListener('click', () => this.openNewTaskModal());
+    if (btnTaskInner) btnTaskInner.addEventListener('click', () => this.openNewTaskModal());
+    if (btnCreateFirstTask) btnCreateFirstTask.addEventListener('click', () => this.openNewTaskModal());
+
+    // Checkbox de estado de tareas
+    document.querySelectorAll('.lead-task-checkbox').forEach(cb => {
+      cb.addEventListener('change', async (e) => {
+        const taskId = e.target.dataset.id;
+        const newStatus = e.target.checked ? 'COMPLETED' : 'PENDING';
+        try {
+          cb.disabled = true;
+          await crmService.updateCRMTaskStatus(taskId, newStatus);
+          toast.success(newStatus === 'COMPLETED' ? 'Tarea completada' : 'Tarea reabierta');
+          await this.render();
+        } catch (err) {
+          toast.error(err.message || 'Error al actualizar tarea');
+          cb.disabled = false;
+          cb.checked = !cb.checked;
+        }
+      });
+    });
+  }
+
+  async openNewTaskModal() {
+    let staffUsers = [];
+    try {
+      const uRes = await userService.getAll();
+      staffUsers = uRes?.data || (Array.isArray(uRes) ? uRes : (uRes?.rows || []));
+    } catch {
+      // Continuar si falla
+    }
+
+    const userOptions = staffUsers.map(u => `
+      <option value="${u.id}">${u.first_name} ${u.last_name || ''} (${u.role_name})</option>
+    `).join('');
+
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    const modalContent = `
+      <form id="new-lead-task-form">
+        <div class="form-group" style="margin-bottom: var(--space-3);">
+          <label class="form-label">Título de la Tarea Comercial *</label>
+          <input type="text" id="modal-lead-task-title" class="form-control" placeholder="Ej: Llamar para confirmar cita de valoración..." required />
+        </div>
+        <div class="form-group" style="margin-bottom: var(--space-3);">
+          <label class="form-label">Descripción / Instrucciones</label>
+          <textarea id="modal-lead-task-desc" class="form-control" rows="2" placeholder="Detalles de la gestión comercial a realizar..."></textarea>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Fecha de Vencimiento *</label>
+            <input type="date" id="modal-lead-task-due-date" class="form-control" value="${todayStr}" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Hora (opcional)</label>
+            <input type="time" id="modal-lead-task-due-time" class="form-control" />
+          </div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div class="form-group">
+            <label class="form-label">Prioridad</label>
+            <select id="modal-lead-task-priority" class="form-control">
+              <option value="LOW">Baja</option>
+              <option value="MEDIUM" selected>Normal (Media)</option>
+              <option value="HIGH">Alta</option>
+              <option value="URGENT">Urgente</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Asignado a</label>
+            <select id="modal-lead-task-assigned" class="form-control">
+              <option value="">-- Sin asignar --</option>
+              ${userOptions}
+            </select>
+          </div>
+        </div>
+      </form>
+    `;
+
+    Modal.show({
+      title: '📋 Nueva Tarea para Lead #' + this.lead.id,
+      content: modalContent,
+      confirmText: 'Guardar Tarea',
+      cancelText: 'Cancelar',
+      size: 'md',
+      onConfirm: async (modalBody) => {
+        const title = modalBody.querySelector('#modal-lead-task-title')?.value.trim();
+        const description = modalBody.querySelector('#modal-lead-task-desc')?.value.trim();
+        const dueDate = modalBody.querySelector('#modal-lead-task-due-date')?.value;
+        const dueTime = modalBody.querySelector('#modal-lead-task-due-time')?.value || null;
+        const priority = modalBody.querySelector('#modal-lead-task-priority')?.value || 'MEDIUM';
+        const assignedUserId = modalBody.querySelector('#modal-lead-task-assigned')?.value || null;
+
+        if (!title) {
+          toast.error('El título de la tarea es obligatorio');
+          return false;
+        }
+        if (!dueDate) {
+          toast.error('La fecha de vencimiento es obligatoria');
+          return false;
+        }
+
+        try {
+          await crmService.createCRMTask({
+            title,
+            description: description || null,
+            dueDate,
+            dueTime: dueTime || null,
+            priority,
+            assignedUserId: assignedUserId ? parseInt(assignedUserId, 10) : null,
+            leadId: this.lead.id,
+            contactId: this.lead.contact_id,
+          });
+          toast.success('¡Tarea de seguimiento registrada exitosamente!');
+          await this.render();
+          return true;
+        } catch (err) {
+          toast.error(err.message || 'Error al crear tarea comercial');
+          return false;
+        }
+      },
     });
   }
 

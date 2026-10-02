@@ -3,6 +3,8 @@
 // ============================================
 import aiService from '../services/ai.service.js';
 import automationSchedulerService from '../services/automation-scheduler.service.js';
+import automationOrchestratorService from '../services/automation-orchestrator.service.js';
+import automationJobRepository from '../repositories/automation-job.repository.js';
 import aiSupervisionService from '../services/ai-supervision.service.js';
 import aiKnowledgeRepository from '../repositories/ai-knowledge.repository.js';
 import aiBookingService from '../services/ai-booking.service.js';
@@ -445,3 +447,47 @@ export const bookFirstVisit = async (req, res, next) => {
     next(err);
   }
 };
+
+// ============================================
+// TRABAJOS DE AUTOMATIZACIÓN (JOBS) & LEADS INACTIVOS
+// ============================================
+
+export const getAutomationJobs = async (req, res, next) => {
+  try {
+    const clinicId = req.user?.clinic_id || 1;
+    const { status, job_type, limit, offset } = req.query;
+    const jobs = await automationJobRepository.getJobs(clinicId, {
+      status,
+      jobType: job_type,
+      limit: parseInt(limit, 10) || 50,
+      offset: parseInt(offset, 10) || 0,
+    });
+    const stats = await automationJobRepository.getJobStats(clinicId);
+    return ApiResponse.success(res, { jobs, stats });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const processAutomationJobs = async (req, res, next) => {
+  try {
+    const clinicId = req.user?.clinic_id || 1;
+    const limit = parseInt(req.body?.limit, 10) || 20;
+    const result = await automationOrchestratorService.processPendingJobs(clinicId, limit);
+    return ApiResponse.success(res, result, 'Trabajos de automatización procesados');
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const triggerInactiveLeadFollowupScan = async (req, res, next) => {
+  try {
+    const clinicId = req.user?.clinic_id || 1;
+    const enqueuedRes = await automationOrchestratorService.enqueueInactiveLeadFollowupJobs(clinicId);
+    const processRes = await automationOrchestratorService.processPendingJobs(clinicId);
+    return ApiResponse.success(res, { ...enqueuedRes, ...processRes }, 'Escaneo y tareas de leads inactivos completado');
+  } catch (err) {
+    next(err);
+  }
+};
+

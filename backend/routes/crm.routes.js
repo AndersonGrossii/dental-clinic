@@ -57,7 +57,21 @@ router.post(
   crmController.addNote
 );
 
+// Tareas Comerciales
+router.get('/tasks', crmController.getCRMTasks);
+router.post(
+  '/tasks',
+  auditMiddleware('CREAR_TAREA_CRM', 'tasks'),
+  crmController.createCRMTask
+);
+router.patch(
+  '/tasks/:id/status',
+  auditMiddleware('CAMBIAR_ESTADO_TAREA_CRM', 'tasks'),
+  crmController.updateCRMTaskStatus
+);
+
 // Contexto comercial unificado del contacto
 router.get('/contacts/:contactId/context', crmController.getContactCRMContext);
 
 export default router;
+

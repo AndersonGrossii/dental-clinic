@@ -6,6 +6,7 @@ import whatsappService from './whatsapp.service.js';
 import instagramService from './instagram.service.js';
 import automationSchedulerService from './automation-scheduler.service.js';
 import aiService from './ai.service.js';
+import aiBookingService from './ai-booking.service.js';
 import internalChatService from './internal-chat.service.js';
 import eventStreamService from './event-stream.service.js';
 import { query } from '../database/pool.js';
@@ -260,75 +261,121 @@ class MessagingService {
           replyBody = `🗓️ Hemos registrado la cancelación de su cita. Un asesor de nuestro equipo se pondrá en contacto para ayudarle a reprogramar. ¡Gracias por avisarnos!`;
         }
       } else {
-        // Cargar historial reciente de la conversación
-        const historyRes = await query(
-          `SELECT id, direction, body, created_at FROM messages WHERE conversation_id = $1 ORDER BY id DESC LIMIT 6`,
-          [conversation.id]
-        );
-        const conversationHistory = historyRes.rows.reverse();
+        // 1.5. Flujo interactivo de agendamiento (Selección de franja propuesta por Sofía)
+        let bookingHandled = false;
+        const currentConv = await messagingRepository.getConversationById(conversation.id, conversation.clinic_id);
+        const bookingFlow = currentConv?.context_state?.booking_flow;
 
-        // 2. Generar respuesta con el motor de Sofía (español europeo, cero precios, RAG, clínica abierta y nombre informado)
-        const sofiaRes = await aiService.generateSofiaReply({
-          clinicId: conversation.clinic_id,
-          incomingText,
-          senderName: contact.name,
-          isNameConfirmed: Boolean(contact.is_name_confirmed),
-          confirmedName: contact.confirmed_name,
-          conversationHistory,
-        });
-
-        // Si se detectó un nuevo nombre informado por el usuario, actualizar en BD, CRM y emitir SSE
-        if (sofiaRes.detectedName) {
-          await query(
-            `UPDATE messaging_contacts 
-             SET name = $1, confirmed_name = $1, is_name_confirmed = TRUE, updated_at = NOW() 
-             WHERE id = $2`,
-            [sofiaRes.detectedName, contact.id]
-          );
-          contact.name = sofiaRes.detectedName;
-          contact.confirmed_name = sofiaRes.detectedName;
-          contact.is_name_confirmed = true;
-
-          // Sincronizar en CRM Leads si existe
-          await query(
-            `UPDATE crm_leads SET updated_at = NOW() WHERE contact_id = $1 AND clinic_id = $2`,
-            [contact.id, conversation.clinic_id]
-          );
-
-          eventStreamService.broadcastToClinic(conversation.clinic_id, 'MESSAGING_CONTACT_UPDATED', {
-            contactId: contact.id,
-            name: contact.name,
-            phone: contact.phone,
+        if (bookingFlow && bookingFlow.step === 'AWAITING_SLOT_SELECTION') {
+          const bookingResult = await aiBookingService.handleConversationalBookingSelection({
+            clinicId: conversation.clinic_id,
+            contact,
+            incomingText: text,
+            bookingFlowState: bookingFlow,
           });
+
+          if (bookingResult.handled) {
+            bookingHandled = true;
+            replyBody = bookingResult.replyText;
+
+            if (bookingResult.success) {
+              await messagingRepository.updateContextState(conversation.id, { booking_flow: null }, conversation.clinic_id);
+            } else if (bookingResult.newSlots?.length > 0) {
+              await messagingRepository.updateContextState(conversation.id, {
+                booking_flow: {
+                  step: 'AWAITING_SLOT_SELECTION',
+                  offered_slots: bookingResult.newSlots,
+                  target_date: bookingResult.newSlots[0].date,
+                  offered_at: new Date().toISOString(),
+                }
+              }, conversation.clinic_id);
+            }
+          }
         }
 
-        replyBody = sofiaRes.replyText;
+        if (!bookingHandled) {
+          // Cargar historial reciente de la conversación
+          const historyRes = await query(
+            `SELECT id, direction, body, created_at FROM messages WHERE conversation_id = $1 ORDER BY id DESC LIMIT 6`,
+            [conversation.id]
+          );
+          const conversationHistory = historyRes.rows.reverse();
 
-        if (sofiaRes.action === 'TRANSFER_TO_HUMAN') {
-          isTransfer = true;
+          // 2. Generar respuesta con el motor de Sofía (español europeo, cero precios, RAG, clínica abierta y nombre informado)
+          const sofiaRes = await aiService.generateSofiaReply({
+            clinicId: conversation.clinic_id,
+            incomingText,
+            senderName: contact.name,
+            isNameConfirmed: Boolean(contact.is_name_confirmed),
+            confirmedName: contact.confirmed_name,
+            conversationHistory,
+          });
 
-          // Disparar notificación de traspaso en el CHAT INTERNO de la clínica
-          try {
-            await internalChatService.sendMessage({
-              clinicId: conversation.clinic_id,
-              senderId: 1, // ID del sistema
-              recipientId: null, // Canal general de esa clínica
-              message: `🔔 [TRASPASO URGENTE A RECEPCIÓN] El paciente ${contact.name || 'Desconocido'} (${contact.phone}) solicita atención humana por WhatsApp. Conversación transferida al mostrador de recepción.`,
-            });
-          } catch (chatErr) {
-            logger.error('Error al notificar traspaso al chat interno:', chatErr.message);
+          // Si se ofrecieron slots, guardar estado en la conversación para permitir reserva interactiva
+          if (sofiaRes.action === 'SLOTS_OFFERED' && sofiaRes.slots?.length > 0) {
+            await messagingRepository.updateContextState(conversation.id, {
+              booking_flow: {
+                step: 'AWAITING_SLOT_SELECTION',
+                offered_slots: sofiaRes.slots,
+                target_date: sofiaRes.slots[0].date,
+                offered_at: new Date().toISOString(),
+              }
+            }, conversation.clinic_id);
           }
 
-          // Pausar automatización para que el humano asuma la conversación
-          await messagingRepository.setAutomationEnabled(conversation.id, false, conversation.clinic_id);
-          await messagingRepository.setConversationStatus(conversation.id, 'OPEN', conversation.clinic_id);
+          // Si se detectó un nuevo nombre informado por el usuario, actualizar en BD, CRM y emitir SSE
+          if (sofiaRes.detectedName) {
+            await query(
+              `UPDATE messaging_contacts 
+               SET name = $1, confirmed_name = $1, is_name_confirmed = TRUE, updated_at = NOW() 
+               WHERE id = $2`,
+              [sofiaRes.detectedName, contact.id]
+            );
+            contact.name = sofiaRes.detectedName;
+            contact.confirmed_name = sofiaRes.detectedName;
+            contact.is_name_confirmed = true;
 
-          eventStreamService.broadcastToClinic(conversation.clinic_id, 'HUMAN_TAKEOVER_REQUIRED', {
-            conversationId: conversation.id,
-            contactName: contact.name,
-            phone: contact.phone,
-            channel: 'WHATSAPP',
-          });
+            // Sincronizar en CRM Leads si existe
+            await query(
+              `UPDATE crm_leads SET updated_at = NOW() WHERE contact_id = $1 AND clinic_id = $2`,
+              [contact.id, conversation.clinic_id]
+            );
+
+            eventStreamService.broadcastToClinic(conversation.clinic_id, 'MESSAGING_CONTACT_UPDATED', {
+              contactId: contact.id,
+              name: contact.name,
+              phone: contact.phone,
+            });
+          }
+
+          replyBody = sofiaRes.replyText;
+
+          if (sofiaRes.action === 'TRANSFER_TO_HUMAN') {
+            isTransfer = true;
+
+            // Disparar notificación de traspaso en el CHAT INTERNO de la clínica
+            try {
+              await internalChatService.sendMessage({
+                clinicId: conversation.clinic_id,
+                senderId: 1, // ID del sistema
+                recipientId: null, // Canal general de esa clínica
+                message: `🔔 [TRASPASO URGENTE A RECEPCIÓN] El paciente ${contact.name || 'Desconocido'} (${contact.phone}) solicita atención humana por WhatsApp. Conversación transferida al mostrador de recepción.`,
+              });
+            } catch (chatErr) {
+              logger.error('Error al notificar traspaso al chat interno:', chatErr.message);
+            }
+
+            // Pausar automatización para que el humano asuma la conversación
+            await messagingRepository.setAutomationEnabled(conversation.id, false, conversation.clinic_id);
+            await messagingRepository.setConversationStatus(conversation.id, 'OPEN', conversation.clinic_id);
+
+            eventStreamService.broadcastToClinic(conversation.clinic_id, 'HUMAN_TAKEOVER_REQUIRED', {
+              conversationId: conversation.id,
+              contactName: contact.name,
+              phone: contact.phone,
+              channel: 'WHATSAPP',
+            });
+          }
         }
       }
 
@@ -361,64 +408,112 @@ class MessagingService {
     try {
       const text = (incomingText || '').trim();
 
-      const historyRes = await query(
-        `SELECT id, direction, body, created_at FROM messages WHERE conversation_id = $1 ORDER BY id DESC LIMIT 6`,
-        [conversation.id]
-      );
-      const conversationHistory = historyRes.rows.reverse();
-
-      const sofiaRes = await aiService.generateSofiaReply({
-        clinicId: conversation.clinic_id,
-        incomingText: text,
-        senderName: contact.name,
-        isNameConfirmed: Boolean(contact.is_name_confirmed),
-        confirmedName: contact.confirmed_name,
-        conversationHistory,
-      });
-
-      // Si se detectó un nuevo nombre informado por el usuario, actualizar en BD, CRM y emitir SSE
-      if (sofiaRes.detectedName) {
-        await query(
-          `UPDATE messaging_contacts 
-           SET name = $1, confirmed_name = $1, is_name_confirmed = TRUE, updated_at = NOW() 
-           WHERE id = $2`,
-          [sofiaRes.detectedName, contact.id]
-        );
-        contact.name = sofiaRes.detectedName;
-        contact.confirmed_name = sofiaRes.detectedName;
-        contact.is_name_confirmed = true;
-
-        await query(
-          `UPDATE crm_leads SET updated_at = NOW() WHERE contact_id = $1 AND clinic_id = $2`,
-          [contact.id, conversation.clinic_id]
-        );
-
-        eventStreamService.broadcastToClinic(conversation.clinic_id, 'MESSAGING_CONTACT_UPDATED', {
-          contactId: contact.id,
-          name: contact.name,
-          phone: contact.phone,
-        });
-      }
-
-      const replyBody = sofiaRes.replyText;
+      let replyBody = '';
       let isTransfer = false;
 
-      if (sofiaRes.action === 'TRANSFER_TO_HUMAN') {
-        isTransfer = true;
+      // 1. Flujo interactivo de agendamiento en Instagram
+      let bookingHandled = false;
+      const currentConv = await messagingRepository.getConversationById(conversation.id, conversation.clinic_id);
+      const bookingFlow = currentConv?.context_state?.booking_flow;
 
-        try {
-          await internalChatService.sendMessage({
-            clinicId: conversation.clinic_id,
-            senderId: 1,
-            recipientId: null,
-            message: `🔔 [TRASPASO URGENTE A RECEPCIÓN] El contacto de Instagram ${contact.name || contact.phone} solicita atención humana.`,
-          });
-        } catch (chatErr) {
-          logger.error('Error al notificar traspaso de Instagram al chat interno:', chatErr.message);
+      if (bookingFlow && bookingFlow.step === 'AWAITING_SLOT_SELECTION') {
+        const bookingResult = await aiBookingService.handleConversationalBookingSelection({
+          clinicId: conversation.clinic_id,
+          contact,
+          incomingText: text,
+          bookingFlowState: bookingFlow,
+        });
+
+        if (bookingResult.handled) {
+          bookingHandled = true;
+          replyBody = bookingResult.replyText;
+
+          if (bookingResult.success) {
+            await messagingRepository.updateContextState(conversation.id, { booking_flow: null }, conversation.clinic_id);
+          } else if (bookingResult.newSlots?.length > 0) {
+            await messagingRepository.updateContextState(conversation.id, {
+              booking_flow: {
+                step: 'AWAITING_SLOT_SELECTION',
+                offered_slots: bookingResult.newSlots,
+                target_date: bookingResult.newSlots[0].date,
+                offered_at: new Date().toISOString(),
+              }
+            }, conversation.clinic_id);
+          }
+        }
+      }
+
+      if (!bookingHandled) {
+        const historyRes = await query(
+          `SELECT id, direction, body, created_at FROM messages WHERE conversation_id = $1 ORDER BY id DESC LIMIT 6`,
+          [conversation.id]
+        );
+        const conversationHistory = historyRes.rows.reverse();
+
+        const sofiaRes = await aiService.generateSofiaReply({
+          clinicId: conversation.clinic_id,
+          incomingText: text,
+          senderName: contact.name,
+          isNameConfirmed: Boolean(contact.is_name_confirmed),
+          confirmedName: contact.confirmed_name,
+          conversationHistory,
+        });
+
+        // Si se ofrecieron slots, guardar estado en la conversación
+        if (sofiaRes.action === 'SLOTS_OFFERED' && sofiaRes.slots?.length > 0) {
+          await messagingRepository.updateContextState(conversation.id, {
+            booking_flow: {
+              step: 'AWAITING_SLOT_SELECTION',
+              offered_slots: sofiaRes.slots,
+              target_date: sofiaRes.slots[0].date,
+              offered_at: new Date().toISOString(),
+            }
+          }, conversation.clinic_id);
         }
 
-        await messagingRepository.setAutomationEnabled(conversation.id, false, conversation.clinic_id);
-        await messagingRepository.setConversationStatus(conversation.id, 'OPEN', conversation.clinic_id);
+        // Si se detectó un nuevo nombre informado por el usuario, actualizar en BD, CRM y emitir SSE
+        if (sofiaRes.detectedName) {
+          await query(
+            `UPDATE messaging_contacts 
+             SET name = $1, confirmed_name = $1, is_name_confirmed = TRUE, updated_at = NOW() 
+             WHERE id = $2`,
+            [sofiaRes.detectedName, contact.id]
+          );
+          contact.name = sofiaRes.detectedName;
+          contact.confirmed_name = sofiaRes.detectedName;
+          contact.is_name_confirmed = true;
+
+          await query(
+            `UPDATE crm_leads SET updated_at = NOW() WHERE contact_id = $1 AND clinic_id = $2`,
+            [contact.id, conversation.clinic_id]
+          );
+
+          eventStreamService.broadcastToClinic(conversation.clinic_id, 'MESSAGING_CONTACT_UPDATED', {
+            contactId: contact.id,
+            name: contact.name,
+            phone: contact.phone,
+          });
+        }
+
+        replyBody = sofiaRes.replyText;
+
+        if (sofiaRes.action === 'TRANSFER_TO_HUMAN') {
+          isTransfer = true;
+
+          try {
+            await internalChatService.sendMessage({
+              clinicId: conversation.clinic_id,
+              senderId: 1,
+              recipientId: null,
+              message: `🔔 [TRASPASO URGENTE A RECEPCIÓN] El contacto de Instagram ${contact.name || contact.phone} solicita atención humana.`,
+            });
+          } catch (chatErr) {
+            logger.error('Error al notificar traspaso de Instagram al chat interno:', chatErr.message);
+          }
+
+          await messagingRepository.setAutomationEnabled(conversation.id, false, conversation.clinic_id);
+          await messagingRepository.setConversationStatus(conversation.id, 'OPEN', conversation.clinic_id);
+        }
       }
 
       if (replyBody) {

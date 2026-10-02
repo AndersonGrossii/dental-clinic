@@ -117,6 +117,23 @@ class AIService {
   async deleteKnowledge(id) {
     return api.delete(`/ai/knowledge/${id}`);
   }
+
+  // ============================================
+  // COLA DE TRABAJOS (JOBS) & LEADS INACTIVOS
+  // ============================================
+
+  async getJobs(params = {}) {
+    const query = new URLSearchParams(params).toString();
+    return api.get(`/ai/automations/jobs${query ? '?' + query : ''}`);
+  }
+
+  async processJobs(limit = 20) {
+    return api.post('/ai/automations/jobs/run', { limit });
+  }
+
+  async triggerLeadFollowups() {
+    return api.post('/ai/automations/run-lead-followups', {});
+  }
 }
 
 export default new AIService();

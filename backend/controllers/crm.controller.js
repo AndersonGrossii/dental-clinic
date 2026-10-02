@@ -328,3 +328,96 @@ export const convertToPatient = async (req, res, next) => {
     next(error);
   }
 };
+
+export const getCRMTasks = async (req, res, next) => {
+  try {
+    const {
+      status,
+      priority,
+      assigned_user_id,
+      assignedUserId,
+      lead_id,
+      leadId,
+      opportunity_id,
+      opportunityId,
+      page = 1,
+      limit = 50,
+    } = req.query;
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 50));
+    const offset = (pageNum - 1) * limitNum;
+
+    const result = await crmService.getCRMTasks(req.user.clinicId, {
+      status,
+      priority,
+      assignedUserId: (assigned_user_id || assignedUserId) ? parseInt(assigned_user_id || assignedUserId, 10) : null,
+      leadId: (lead_id || leadId) ? parseInt(lead_id || leadId, 10) : null,
+      opportunityId: (opportunity_id || opportunityId) ? parseInt(opportunity_id || opportunityId, 10) : null,
+      limit: limitNum,
+      offset,
+    });
+
+    ApiResponse.paginated(res, result.rows, {
+      page: pageNum,
+      limit: limitNum,
+      total: result.total,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const createCRMTask = async (req, res, next) => {
+  try {
+    const {
+      title,
+      description,
+      due_date,
+      dueDate,
+      due_time,
+      dueTime,
+      priority,
+      assigned_to_user_id,
+      assignedUserId,
+      contact_id,
+      contactId,
+      lead_id,
+      leadId,
+      opportunity_id,
+      opportunityId,
+    } = req.body;
+
+    const task = await crmService.createCRMTask({
+      clinicId: req.user.clinicId,
+      title,
+      description,
+      dueDate: due_date || dueDate,
+      dueTime: due_time || dueTime,
+      priority,
+      assignedUserId: (assigned_to_user_id || assignedUserId) ? parseInt(assigned_to_user_id || assignedUserId, 10) : null,
+      contactId: (contact_id || contactId) ? parseInt(contact_id || contactId, 10) : null,
+      leadId: (lead_id || leadId) ? parseInt(lead_id || leadId, 10) : null,
+      opportunityId: (opportunity_id || opportunityId) ? parseInt(opportunity_id || opportunityId, 10) : null,
+      userId: req.user.id,
+    });
+
+    ApiResponse.created(res, task, 'Tarea comercial creada');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateCRMTaskStatus = async (req, res, next) => {
+  try {
+    const taskId = parseInt(req.params.id, 10);
+    if (isNaN(taskId)) throw new ValidationError('ID de tarea inválido');
+
+    const { status } = req.body;
+    const updated = await crmService.updateCRMTaskStatus(taskId, status, req.user.clinicId, req.user.id);
+    ApiResponse.success(res, updated, 'Estado de la tarea comercial actualizado');
+  } catch (error) {
+    next(error);
+  }
+};
+

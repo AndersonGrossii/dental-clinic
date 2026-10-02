@@ -4,20 +4,32 @@ import userService from '../../services/user.service.js';
 import aiService from '../../services/ai.service.js';
 import toast from '../../components/toast/toast.js';
 import Modal from '../../components/modal/modal.js';
+import state from '../../scripts/state.js';
 import { formatCurrency, formatDate } from '../../utils/helpers.js';
 
 export class CrmPage {
   constructor(container) {
     this.container = container;
-    this.activeTab = 'leads'; // 'leads' | 'opportunities' | 'dashboard'
+    const hash = window.location.hash || '';
+    if (hash.startsWith('#/crm/tasks')) {
+      this.activeTab = 'tasks';
+    } else if (hash.startsWith('#/crm/opportunities')) {
+      this.activeTab = 'opportunities';
+    } else if (hash.startsWith('#/crm/dashboard')) {
+      this.activeTab = 'dashboard';
+    } else {
+      this.activeTab = 'leads';
+    }
     this.leadsViewMode = 'table'; // 'table' | 'kanban'
     this.oppsViewMode = 'kanban'; // 'kanban' | 'table'
     this.leadsData = { rows: [], total: 0 };
     this.opportunitiesData = { rows: [], total: 0 };
+    this.tasksData = { rows: [], total: 0 };
     this.dashboardKPIs = null;
     this.searchQuery = '';
     this.statusFilter = '';
     this.sourceFilter = '';
+    this.priorityFilter = '';
     this.currentPage = 1;
     this.pageSize = 15;
     this.isLoading = false;
@@ -97,6 +109,29 @@ export class CrmPage {
         } else {
           this.opportunitiesData = { rows: [], total: 0 };
         }
+      } else if (this.activeTab === 'tasks') {
+        const [kpiRes, res] = await Promise.all([
+          dashboardPromise,
+          crmService.getCRMTasks({
+            status: this.statusFilter || undefined,
+            priority: this.priorityFilter || undefined,
+            search: this.searchQuery || undefined,
+            page: this.currentPage,
+            limit: 100,
+          }),
+        ]);
+
+        if (kpiRes) this.dashboardKPIs = kpiRes;
+
+        if (res && Array.isArray(res.rows)) {
+          this.tasksData = res;
+        } else if (Array.isArray(res)) {
+          this.tasksData = { rows: res, total: res.length };
+        } else if (res && Array.isArray(res.data)) {
+          this.tasksData = { rows: res.data, total: res.pagination?.total ?? res.data.length };
+        } else {
+          this.tasksData = { rows: [], total: 0 };
+        }
       } else if (this.activeTab === 'dashboard') {
         this.dashboardKPIs = await dashboardPromise;
       }
@@ -111,6 +146,7 @@ export class CrmPage {
     const totalLeads = this.dashboardKPIs?.leads?.total_leads ?? this.leadsData.total ?? 0;
     const newLeads = this.dashboardKPIs?.leads?.new_leads ?? 0;
     const totalOpps = this.dashboardKPIs?.opportunities?.total_opportunities ?? this.opportunitiesData.total ?? 0;
+    const totalTasks = this.tasksData.total ?? (this.tasksData.rows ? this.tasksData.rows.length : 0);
     const pipelineValue = formatCurrency(this.dashboardKPIs?.opportunities?.open_pipeline_value || 0);
 
     this.container.innerHTML = `
@@ -143,6 +179,9 @@ export class CrmPage {
           <button id="btn-new-opp" class="btn btn-secondary crm-btn-secondary" title="Crear nueva oportunidad de tratamiento presupuestado">
             <span>💼</span> Nueva Oportunidad
           </button>
+          <button id="btn-new-task" class="btn btn-secondary crm-btn-secondary" title="Crear nueva tarea comercial de seguimiento">
+            <span>📋</span> Nueva Tarea
+          </button>
         </div>
       </div>
 
@@ -156,6 +195,10 @@ export class CrmPage {
           <button class="crm-tab-btn ${this.activeTab === 'opportunities' ? 'is-active' : ''} tab-switch" data-tab="opportunities">
             <span>📈 Oportunidades</span>
             <span class="crm-tab-badge">${totalOpps}</span>
+          </button>
+          <button class="crm-tab-btn ${this.activeTab === 'tasks' ? 'is-active' : ''} tab-switch" data-tab="tasks">
+            <span>📋 Tareas Comerciales</span>
+            <span class="crm-tab-badge">${totalTasks}</span>
           </button>
           <button class="crm-tab-btn ${this.activeTab === 'dashboard' ? 'is-active' : ''} tab-switch" data-tab="dashboard">
             <span>📊 Métricas & Embudo</span>
@@ -176,6 +219,8 @@ export class CrmPage {
       content.innerHTML = this.renderLeadsView();
     } else if (this.activeTab === 'opportunities') {
       content.innerHTML = this.renderOpportunitiesView();
+    } else if (this.activeTab === 'tasks') {
+      content.innerHTML = this.renderTasksView();
     } else if (this.activeTab === 'dashboard') {
       content.innerHTML = this.renderDashboardView();
     }
@@ -284,6 +329,7 @@ export class CrmPage {
       `;
     }
 
+    const features = state.get('features') || {};
     return `
       <div class="crm-table-container">
         <div class="table-responsive">
@@ -322,7 +368,7 @@ export class CrmPage {
                             </a>
                           </span>
                         ` : ''}
-                        ${lead.ai_score !== null && lead.ai_score !== undefined ? `
+                        ${features.aiAutomations && lead.ai_score !== null && lead.ai_score !== undefined ? `
                           <div style="margin-top: 4px; display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
                             <span class="badge" style="background: ${lead.ai_score >= 80 ? '#fef3c7; color:#b45309; border: 1px solid #fde68a;' : lead.ai_score >= 50 ? '#eff6ff; color:#1d4ed8; border: 1px solid #bfdbfe;' : '#f3f4f6; color:#6b7280;'}; font-weight: 700; font-size: 0.72rem; padding: 1px 6px;">
                               🔥 IA: ${lead.ai_score}/100
@@ -370,9 +416,11 @@ export class CrmPage {
                       <a href="#/crm/leads/${lead.id}" class="btn btn-sm btn-outline crm-action-btn" title="Ver ficha completa del lead">
                         👁️ Ficha
                       </a>
-                      <button class="btn btn-sm btn-outline crm-action-btn btn-qualify-lead" data-id="${lead.id}" title="Calificar o Re-analizar con IA (Sofía)">
-                        🤖
-                      </button>
+                      ${features.aiAutomations ? `
+                        <button class="btn btn-sm btn-outline crm-action-btn btn-qualify-lead" data-id="${lead.id}" title="Calificar o Re-analizar con IA (Sofía)">
+                          🤖
+                        </button>
+                      ` : ''}
                       ${!lead.patient_id ? `
                         <button class="btn btn-sm crm-action-btn btn-quick-convert" data-id="${lead.id}" style="background: #10b981; color: #ffffff; border: none; font-weight: 600;" title="Convertir a Paciente Clínico Oficial">
                           🦷 Convertir
@@ -402,6 +450,7 @@ export class CrmPage {
       { key: 'lost', label: 'Perdido', icon: '❌', cssClass: 'crm-kanban-col--lost' },
     ];
 
+    const features = state.get('features') || {};
     return `
       <div class="crm-kanban-board">
         ${columns.map(col => {
@@ -451,7 +500,7 @@ export class CrmPage {
                       ` : ''}
                     </div>
 
-                    ${lead.ai_score !== null && lead.ai_score !== undefined ? `
+                    ${features.aiAutomations && lead.ai_score !== null && lead.ai_score !== undefined ? `
                       <div style="margin: 4px 0; display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
                         <span class="badge" style="background: ${lead.ai_score >= 80 ? '#fef3c7; color:#b45309; border: 1px solid #fde68a;' : lead.ai_score >= 50 ? '#eff6ff; color:#1d4ed8; border: 1px solid #bfdbfe;' : '#f3f4f6; color:#6b7280;'}; font-weight: 700; font-size: 0.68rem; padding: 1px 6px;">
                           🔥 ${lead.ai_score}/100
@@ -486,9 +535,11 @@ export class CrmPage {
                         <a href="#/crm/leads/${lead.id}" class="btn btn-xs btn-outline" style="font-size: 0.75rem; padding: 2px 7px;">
                           👁️ Ver
                         </a>
-                        <button class="btn btn-xs btn-outline btn-qualify-lead" data-id="${lead.id}" title="Calificar con IA (Sofía)" style="font-size: 0.75rem; padding: 2px 6px;">
-                          🤖
-                        </button>
+                        ${features.aiAutomations ? `
+                          <button class="btn btn-xs btn-outline btn-qualify-lead" data-id="${lead.id}" title="Calificar con IA (Sofía)" style="font-size: 0.75rem; padding: 2px 6px;">
+                            🤖
+                          </button>
+                        ` : ''}
                         ${!lead.patient_id ? `
                           <button class="btn btn-xs btn-quick-convert" data-id="${lead.id}" style="background: #10b981; color: #ffffff; border: none; font-size: 0.75rem; padding: 2px 7px; font-weight: 600;">
                             🦷 Convertir
@@ -745,6 +796,230 @@ export class CrmPage {
     `;
   }
 
+  renderTasksView() {
+    const rows = this.tasksData.rows || [];
+    const pendingCount = rows.filter(t => t.status === 'PENDING').length;
+    const completedCount = rows.filter(t => t.status === 'COMPLETED').length;
+    const cancelledCount = rows.filter(t => t.status === 'CANCELLED').length;
+
+    const statusPills = [
+      { key: '', label: 'Todas', count: this.tasksData.total ?? rows.length, icon: '📋' },
+      { key: 'PENDING', label: 'Pendientes', count: pendingCount, icon: '⏳' },
+      { key: 'COMPLETED', label: 'Completadas', count: completedCount, icon: '✅' },
+      { key: 'CANCELLED', label: 'Canceladas', count: cancelledCount, icon: '🚫' },
+    ];
+
+    return `
+      <!-- Barra de Filtros Rápidos (Chips de Estado) -->
+      <div class="crm-quick-filters">
+        ${statusPills.map(p => `
+          <button 
+            type="button" 
+            class="crm-filter-pill crm-task-filter-pill ${this.statusFilter === p.key ? 'is-active' : ''}" 
+            data-status="${p.key}"
+          >
+            <span>${p.icon}</span>
+            <span>${p.label}</span>
+            <span class="crm-filter-pill__count">${p.count}</span>
+          </button>
+        `).join('')}
+      </div>
+
+      <!-- Toolbar de Búsqueda y Prioridades -->
+      <div class="crm-toolbar">
+        <div class="crm-toolbar__left">
+          <div class="crm-search-wrapper">
+            <span class="crm-search-icon">🔍</span>
+            <input 
+              type="text" 
+              id="task-search-input" 
+              class="form-control form-control-sm crm-search-input" 
+              placeholder="Buscar por título, contacto, teléfono, oportunidad..." 
+              value="${this.escapeHtml(this.searchQuery)}"
+            />
+          </div>
+
+          <select id="task-priority-filter" class="form-control form-control-sm" style="min-width: 170px;">
+            <option value="">🎯 Todas las Prioridades</option>
+            <option value="URGENT" ${this.priorityFilter === 'URGENT' ? 'selected' : ''}>🔥 Urgente</option>
+            <option value="HIGH" ${this.priorityFilter === 'HIGH' ? 'selected' : ''}>⚡ Alta</option>
+            <option value="MEDIUM" ${this.priorityFilter === 'MEDIUM' ? 'selected' : ''}>Normal (Media)</option>
+            <option value="LOW" ${this.priorityFilter === 'LOW' ? 'selected' : ''}>Baja</option>
+          </select>
+        </div>
+
+        <div class="crm-toolbar__right">
+          <button id="btn-create-task-inner" class="btn btn-sm btn-primary" title="Nueva Tarea Comercial">
+            <span>➕</span> Nueva Tarea
+          </button>
+        </div>
+      </div>
+
+      <!-- Tabla de Tareas Comerciales -->
+      ${this.renderTasksTable(rows)}
+    `;
+  }
+
+  renderTasksTable(rows) {
+    let filtered = rows;
+    if (this.searchQuery) {
+      const q = this.searchQuery.toLowerCase();
+      filtered = filtered.filter(t => 
+        (t.title && t.title.toLowerCase().includes(q)) ||
+        (t.description && t.description.toLowerCase().includes(q)) ||
+        (t.contact_name && t.contact_name.toLowerCase().includes(q)) ||
+        (t.contact_phone && t.contact_phone.includes(q)) ||
+        (t.opportunity_name && t.opportunity_name.toLowerCase().includes(q))
+      );
+    }
+
+    if (filtered.length === 0) {
+      return `
+        <div class="crm-table-container">
+          <div class="crm-empty-state">
+            <span class="crm-empty-state__icon">📋</span>
+            <h3 class="crm-empty-state__title">No hay tareas comerciales</h3>
+            <p class="crm-empty-state__desc">
+              ${this.statusFilter || this.priorityFilter || this.searchQuery 
+                ? 'No se encontraron tareas con los filtros aplicados.' 
+                : 'Crea tareas de seguimiento para mantener el contacto activo con tus prospectos comerciales.'}
+            </p>
+            <button class="btn btn-primary btn-sm" id="btn-empty-new-task">
+              ➕ Crear Primera Tarea
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    const priorityBadge = (p) => {
+      switch (p) {
+        case 'URGENT':
+          return `<span class="badge" style="background:#fee2e2; color:#b91c1c; font-weight:700;">🔥 Urgente</span>`;
+        case 'HIGH':
+          return `<span class="badge" style="background:#ffedd5; color:#c2410c; font-weight:600;">⚡ Alta</span>`;
+        case 'MEDIUM':
+          return `<span class="badge" style="background:#eff6ff; color:#1d4ed8;">Normal</span>`;
+        case 'LOW':
+          return `<span class="badge" style="background:#f3f4f6; color:#6b7280;">Baja</span>`;
+        default:
+          return `<span class="badge">${p || 'Normal'}</span>`;
+      }
+    };
+
+    const statusBadge = (s) => {
+      switch (s) {
+        case 'PENDING':
+          return `<span class="badge" style="background:#fef3c7; color:#92400e; font-weight:600;">⏳ Pendiente</span>`;
+        case 'COMPLETED':
+          return `<span class="badge" style="background:#d1fae5; color:#065f46; font-weight:600;">✅ Completada</span>`;
+        case 'CANCELLED':
+          return `<span class="badge" style="background:#f3f4f6; color:#9ca3af;">🚫 Cancelada</span>`;
+        default:
+          return `<span class="badge">${s}</span>`;
+      }
+    };
+
+    return `
+      <div class="crm-table-container">
+        <div class="table-responsive">
+          <table class="crm-table">
+            <thead>
+              <tr>
+                <th style="width: 40px;"></th>
+                <th>Tarea Comercial / Descripción</th>
+                <th>Contacto / Lead Vinculado</th>
+                <th>Prioridad</th>
+                <th>Responsable</th>
+                <th>Vencimiento</th>
+                <th>Estado</th>
+                <th style="text-align: right; min-width: 140px;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${filtered.map(t => {
+                const isCompleted = t.status === 'COMPLETED';
+                const isOverdue = t.status === 'PENDING' && t.due_date && new Date(t.due_date) < new Date(new Date().setHours(0,0,0,0));
+                return `
+                  <tr class="task-row ${isCompleted ? 'task-row--completed' : ''}" style="${isCompleted ? 'opacity: 0.68;' : ''}">
+                    <td>
+                      <input 
+                        type="checkbox" 
+                        class="task-status-checkbox" 
+                        data-id="${t.id}" 
+                        ${isCompleted ? 'checked' : ''} 
+                        title="${isCompleted ? 'Marcar como pendiente' : 'Marcar como completada'}"
+                        style="cursor: pointer; width: 18px; height: 18px; accent-color: var(--crm-primary);"
+                      />
+                    </td>
+                    <td>
+                      <div style="font-weight: 700; color: var(--text-primary); ${isCompleted ? 'text-decoration: line-through;' : ''}">
+                        ${this.escapeHtml(t.title)}
+                      </div>
+                      ${t.description ? `
+                        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">
+                          ${this.escapeHtml(t.description)}
+                        </div>
+                      ` : ''}
+                    </td>
+                    <td>
+                      ${t.lead_id ? `
+                        <a href="#/crm/leads/${t.lead_id}" class="badge badge--patient-linked" style="text-decoration: none;" title="Ver ficha del lead">
+                          👤 ${this.escapeHtml(t.contact_name || t.contact_phone || 'Lead #' + t.lead_id)}
+                        </a>
+                      ` : t.contact_name ? `
+                        <span style="font-size: 0.85rem; font-weight: 500;">
+                          👤 ${this.escapeHtml(t.contact_name)}
+                        </span>
+                      ` : '<span style="color: var(--text-secondary); font-size: 0.8rem;">—</span>'}
+                      ${t.opportunity_name ? `
+                        <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">
+                          💼 ${this.escapeHtml(t.opportunity_name)}
+                        </div>
+                      ` : ''}
+                    </td>
+                    <td>${priorityBadge(t.priority)}</td>
+                    <td>
+                      <span style="font-size: 0.82rem; color: var(--text-secondary);">
+                        ${t.assigned_first_name ? `👤 ${this.escapeHtml(t.assigned_first_name)} ${this.escapeHtml(t.assigned_last_name || '')}` : '<em>Sin asignar</em>'}
+                      </span>
+                    </td>
+                    <td>
+                      <div style="font-size: 0.82rem; ${isOverdue ? 'color: #dc2626; font-weight: 700;' : 'color: var(--text-primary);'}">
+                        📅 ${t.due_date ? formatDate(t.due_date) : 'Sin fecha'}
+                        ${t.due_time ? `<span style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 4px;">⏰ ${t.due_time.substring(0, 5)}</span>` : ''}
+                      </div>
+                      ${isOverdue ? '<span class="badge" style="background:#fee2e2; color:#b91c1c; font-size:0.68rem; padding: 1px 4px;">⚠️ Vencida</span>' : ''}
+                    </td>
+                    <td>${statusBadge(t.status)}</td>
+                    <td style="text-align: right;">
+                      <div class="crm-table-actions">
+                        ${!isCompleted ? `
+                          <button class="btn btn-sm btn-outline crm-action-btn btn-complete-task" data-id="${t.id}" title="Marcar completada">
+                            ✅
+                          </button>
+                        ` : `
+                          <button class="btn btn-sm btn-outline crm-action-btn btn-reopen-task" data-id="${t.id}" title="Reabrir tarea">
+                            ↩️
+                          </button>
+                        `}
+                        ${t.status !== 'CANCELLED' ? `
+                          <button class="btn btn-sm btn-outline crm-action-btn btn-cancel-task" data-id="${t.id}" title="Cancelar tarea">
+                            🚫
+                          </button>
+                        ` : ''}
+                      </div>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
   renderDashboardView() {
     const kpis = this.dashboardKPIs || { leads: {}, opportunities: {}, recentActivities: [] };
     const leads = kpis.leads || {};
@@ -893,17 +1168,24 @@ export class CrmPage {
   }
 
   bindEvents() {
-    // Cambio de pestañas
+    // Cambio de pestañas con sincronización de URL hash para sub-rutas
     this.container.querySelectorAll('.tab-switch').forEach(btn => {
       btn.addEventListener('click', async (e) => {
-        this.activeTab = e.currentTarget.dataset.tab;
-        this.statusFilter = '';
-        this.searchQuery = '';
-        this.currentPage = 1;
-        await this.loadInitialData();
-        this.renderLayout();
-        this.renderActiveTab();
-        this.bindEvents();
+        const nextTab = e.currentTarget.dataset.tab;
+        const targetHash = nextTab === 'leads' ? '#/crm/leads' : `#/crm/${nextTab}`;
+        if (window.location.hash !== targetHash) {
+          window.location.hash = targetHash;
+        } else {
+          this.activeTab = nextTab;
+          this.statusFilter = '';
+          this.searchQuery = '';
+          this.priorityFilter = '';
+          this.currentPage = 1;
+          await this.loadInitialData();
+          this.renderLayout();
+          this.renderActiveTab();
+          this.bindEvents();
+        }
       });
     });
 
@@ -917,6 +1199,12 @@ export class CrmPage {
     const btnNewOpp = this.container.querySelector('#btn-new-opp');
     if (btnNewOpp) {
       btnNewOpp.addEventListener('click', () => this.openNewOpportunityModal());
+    }
+
+    // Botón Nueva Tarea Comercial
+    const btnNewTask = this.container.querySelector('#btn-new-task');
+    if (btnNewTask) {
+      btnNewTask.addEventListener('click', () => this.openNewTaskModal());
     }
   }
 
@@ -1110,6 +1398,123 @@ export class CrmPage {
           }
         });
       });
+    }
+
+    // -------------------------------------------------------------
+    // Eventos de Tareas Comerciales
+    // -------------------------------------------------------------
+    if (this.activeTab === 'tasks') {
+      // Filtro de estado por pills
+      document.querySelectorAll('.crm-task-filter-pill').forEach(pill => {
+        pill.addEventListener('click', async (e) => {
+          this.statusFilter = e.currentTarget.dataset.status;
+          this.currentPage = 1;
+          await this.loadInitialData();
+          this.renderActiveTab();
+        });
+      });
+
+      // Búsqueda de tareas
+      const taskSearch = document.getElementById('task-search-input');
+      if (taskSearch) {
+        let timeout;
+        taskSearch.addEventListener('input', (e) => {
+          clearTimeout(timeout);
+          timeout = setTimeout(async () => {
+            this.searchQuery = e.target.value.trim();
+            this.currentPage = 1;
+            await this.loadInitialData();
+            this.renderActiveTab();
+          }, 320);
+        });
+      }
+
+      // Filtro de prioridad
+      const priorityFilter = document.getElementById('task-priority-filter');
+      if (priorityFilter) {
+        priorityFilter.addEventListener('change', async (e) => {
+          this.priorityFilter = e.target.value;
+          this.currentPage = 1;
+          await this.loadInitialData();
+          this.renderActiveTab();
+        });
+      }
+
+      // Checkbox rápido de estado
+      document.querySelectorAll('.task-status-checkbox').forEach(cb => {
+        cb.addEventListener('change', async (e) => {
+          const taskId = e.target.dataset.id;
+          const newStatus = e.target.checked ? 'COMPLETED' : 'PENDING';
+          try {
+            cb.disabled = true;
+            await crmService.updateCRMTaskStatus(taskId, newStatus);
+            toast.success(newStatus === 'COMPLETED' ? 'Tarea comercial completada' : 'Tarea comercial reabierta');
+            await this.loadInitialData();
+            this.renderActiveTab();
+          } catch (err) {
+            toast.error(err.message || 'Error al cambiar estado de tarea');
+            cb.disabled = false;
+            cb.checked = !cb.checked;
+          }
+        });
+      });
+
+      // Botón completar tarea
+      document.querySelectorAll('.btn-complete-task').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const taskId = e.currentTarget.dataset.id;
+          try {
+            btn.disabled = true;
+            await crmService.updateCRMTaskStatus(taskId, 'COMPLETED');
+            toast.success('Tarea comercial completada exitosamente');
+            await this.loadInitialData();
+            this.renderActiveTab();
+          } catch (err) {
+            toast.error(err.message || 'Error al completar tarea');
+            btn.disabled = false;
+          }
+        });
+      });
+
+      // Botón reabrir tarea
+      document.querySelectorAll('.btn-reopen-task').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const taskId = e.currentTarget.dataset.id;
+          try {
+            btn.disabled = true;
+            await crmService.updateCRMTaskStatus(taskId, 'PENDING');
+            toast.success('Tarea reabierta como pendiente');
+            await this.loadInitialData();
+            this.renderActiveTab();
+          } catch (err) {
+            toast.error(err.message || 'Error al reabrir tarea');
+            btn.disabled = false;
+          }
+        });
+      });
+
+      // Botón cancelar tarea
+      document.querySelectorAll('.btn-cancel-task').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const taskId = e.currentTarget.dataset.id;
+          try {
+            btn.disabled = true;
+            await crmService.updateCRMTaskStatus(taskId, 'CANCELLED');
+            toast.info('Tarea comercial cancelada');
+            await this.loadInitialData();
+            this.renderActiveTab();
+          } catch (err) {
+            toast.error(err.message || 'Error al cancelar tarea');
+            btn.disabled = false;
+          }
+        });
+      });
+
+      // Botón crear tarea desde inner o empty state
+      const btnInner = document.getElementById('btn-create-task-inner');
+      const btnEmpty = document.getElementById('btn-empty-new-task');
+      if (btnInner) btnInner.addEventListener('click', () => this.openNewTaskModal());
+      if (btnEmpty) btnEmpty.addEventListener('click', () => this.openNewTaskModal());
     }
   }
 
@@ -1519,6 +1924,133 @@ export class CrmPage {
           return true;
         } catch (err) {
           toast.error(err.message || 'Error al crear oportunidad');
+          return false;
+        }
+      },
+    });
+  }
+
+  async openNewTaskModal(prefilledLeadId = null) {
+    let staffUsers = [];
+    let leadsList = [];
+    try {
+      const [uRes, lRes] = await Promise.all([
+        userService.getAll(),
+        crmService.getLeads({ limit: 100 }).catch(() => ({ rows: [] }))
+      ]);
+      staffUsers = uRes?.data || (Array.isArray(uRes) ? uRes : (uRes?.rows || []));
+      leadsList = lRes?.rows || lRes?.data || (Array.isArray(lRes) ? lRes : []);
+    } catch {
+      // Continuar si falla
+    }
+
+    const userOptions = staffUsers.map(u => `
+      <option value="${u.id}">${u.first_name} ${u.last_name || ''} (${u.role_name})</option>
+    `).join('');
+
+    const leadOptions = leadsList.map(l => `
+      <option value="${l.id}" ${prefilledLeadId && String(prefilledLeadId) === String(l.id) ? 'selected' : ''}>
+        ${this.escapeHtml(l.contact_name || l.contact_phone)} ${l.interest ? `(${this.escapeHtml(l.interest)})` : ''}
+      </option>
+    `).join('');
+
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    const modalContent = `
+      <form id="new-crm-task-form">
+        <div class="form-group" style="margin-bottom: var(--space-3);">
+          <label class="form-label">Título de la Tarea Comercial *</label>
+          <input type="text" id="modal-task-title" class="form-control" placeholder="Ej: Llamar para confirmar presupuesto, enviar información de ortodoncia..." required />
+        </div>
+        <div class="form-group" style="margin-bottom: var(--space-3);">
+          <label class="form-label">Descripción / Instrucciones</label>
+          <textarea id="modal-task-desc" class="form-control" rows="2" placeholder="Detalles de la gestión comercial a realizar..."></textarea>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Fecha de Vencimiento *</label>
+            <input type="date" id="modal-task-due-date" class="form-control" value="${todayStr}" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Hora (opcional)</label>
+            <input type="time" id="modal-task-due-time" class="form-control" />
+          </div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Prioridad</label>
+            <select id="modal-task-priority" class="form-control">
+              <option value="LOW">Baja</option>
+              <option value="MEDIUM" selected>Normal (Media)</option>
+              <option value="HIGH">Alta</option>
+              <option value="URGENT">Urgente</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Asignado a</label>
+            <select id="modal-task-assigned" class="form-control">
+              <option value="">-- Sin asignar --</option>
+              ${userOptions}
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Vincular a Lead Comercial (opcional)</label>
+          <select id="modal-task-lead" class="form-control">
+            <option value="">-- Sin vincular a Lead --</option>
+            ${leadOptions}
+          </select>
+        </div>
+      </form>
+    `;
+
+    Modal.show({
+      title: '📋 Nueva Tarea Comercial',
+      content: modalContent,
+      confirmText: 'Guardar Tarea',
+      cancelText: 'Cancelar',
+      size: 'md',
+      onConfirm: async (modalBody) => {
+        const title = modalBody.querySelector('#modal-task-title')?.value.trim();
+        const description = modalBody.querySelector('#modal-task-desc')?.value.trim();
+        const dueDate = modalBody.querySelector('#modal-task-due-date')?.value;
+        const dueTime = modalBody.querySelector('#modal-task-due-time')?.value || null;
+        const priority = modalBody.querySelector('#modal-task-priority')?.value || 'MEDIUM';
+        const assignedUserId = modalBody.querySelector('#modal-task-assigned')?.value || null;
+        const leadId = modalBody.querySelector('#modal-task-lead')?.value || null;
+
+        if (!title) {
+          toast.error('El título de la tarea es obligatorio');
+          return false;
+        }
+        if (!dueDate) {
+          toast.error('La fecha de vencimiento es obligatoria');
+          return false;
+        }
+
+        try {
+          await crmService.createCRMTask({
+            title,
+            description: description || null,
+            dueDate,
+            dueTime: dueTime || null,
+            priority,
+            assignedUserId: assignedUserId ? parseInt(assignedUserId, 10) : null,
+            leadId: leadId ? parseInt(leadId, 10) : null,
+          });
+          toast.success('¡Tarea comercial creada exitosamente!');
+          this.activeTab = 'tasks';
+          this.searchQuery = '';
+          this.statusFilter = '';
+          this.priorityFilter = '';
+          this.currentPage = 1;
+          await this.loadInitialData();
+          this.renderLayout();
+          this.renderActiveTab();
+          this.bindEvents();
+          return true;
+        } catch (err) {
+          toast.error(err.message || 'Error al crear tarea comercial');
           return false;
         }
       },

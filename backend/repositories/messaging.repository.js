@@ -347,6 +347,23 @@ export class MessagingRepository extends BaseRepository {
 
     return res.rows[0] || { total_conversations: 0, open_conversations: 0, total_unread: 0 };
   }
+
+  /**
+   * Actualiza el estado de contexto de una conversación (flujo interactivo de IA / booking).
+   */
+  async updateContextState(id, contextState, clinicId = null) {
+    const targetClinicId = clinicId || this.getClinicId();
+    let sql = `UPDATE conversations SET context_state = $1, updated_at = NOW() WHERE id = $2`;
+    const params = [JSON.stringify(contextState || {}), id];
+    if (targetClinicId) {
+      sql += ` AND clinic_id = $3`;
+      params.push(targetClinicId);
+    }
+    sql += ` RETURNING *`;
+    const res = await query(sql, params);
+    return res.rows[0] || null;
+  }
 }
 
 export default new MessagingRepository();
+

@@ -20,6 +20,8 @@ export class Automations {
     this.approvals = [];
     this.approvalFilter = 'PENDING_APPROVAL'; // 'PENDING_APPROVAL' | 'APPROVED' | 'DISCARDED' | 'ALL'
     this.knowledgeArticles = [];
+    this.jobs = [];
+    this.jobStats = {};
 
     this.handleContainerClick = this._handleContainerClick.bind(this);
     this.handleContainerChange = this._handleContainerChange.bind(this);
@@ -50,12 +52,13 @@ export class Automations {
 
   async loadData() {
     try {
-      const [rulesRes, statsRes, patientsRes, approvalsRes, knowledgeRes] = await Promise.all([
+      const [rulesRes, statsRes, patientsRes, approvalsRes, knowledgeRes, jobsRes] = await Promise.all([
         aiService.getRules().catch(() => ({ data: [] })),
         aiService.getAutomationStats().catch(() => ({ data: {} })),
         patientService.getAll({ limit: 100 }).catch(() => ({ data: [] })),
         aiService.getApprovals('ALL').catch(() => ({ data: [] })),
         aiService.getKnowledge().catch(() => ({ data: [] })),
+        aiService.getJobs({ limit: 50 }).catch(() => ({ data: { jobs: [], stats: {} } })),
       ]);
 
       this.rules = rulesRes?.data || rulesRes || [];
@@ -63,6 +66,8 @@ export class Automations {
       this.patientsList = patientsRes?.data || (Array.isArray(patientsRes) ? patientsRes : []);
       this.approvals = approvalsRes?.data || (Array.isArray(approvalsRes) ? approvalsRes : []);
       this.knowledgeArticles = knowledgeRes?.data || (Array.isArray(knowledgeRes) ? knowledgeRes : []);
+      this.jobs = jobsRes?.data?.jobs || jobsRes?.jobs || [];
+      this.jobStats = jobsRes?.data?.stats || jobsRes?.stats || {};
     } catch (err) {
       toast.error('Error al cargar datos de automatizaciones');
     }
@@ -91,13 +96,19 @@ export class Automations {
           </div>
           <div class="auto-hero__actions">
             <button id="hero-run-confirmations-btn" class="auto-hero__btn auto-hero__btn--primary">
-              <span>📲</span> Disparar Confirmaciones 24h
+              <span>📲</span> Confirmaciones 24h
             </button>
             <button id="hero-run-recall-btn" class="auto-hero__btn">
-              <span>🔄</span> Ejecutar Recall Diario
+              <span>🔄</span> Recall Preventivo
+            </button>
+            <button id="hero-run-leads-btn" class="auto-hero__btn">
+              <span>📞</span> Seguir Leads
+            </button>
+            <button id="hero-run-jobs-btn" class="auto-hero__btn">
+              <span>⚡</span> Procesar Jobs
             </button>
             <button id="hero-view-briefing-btn" class="auto-hero__btn">
-              <span>☀️</span> Briefing del Día
+              <span>☀️</span> Briefing
             </button>
           </div>
         </div>
@@ -142,6 +153,9 @@ export class Automations {
           <button class="auto-tab-btn ${this.activeTab === 'supervision' ? 'auto-tab-btn--active' : ''}" data-tab="supervision">
             <span>🛡️</span> Supervisión Presupuestos ${this.approvals.filter(a => a.status === 'PENDING_APPROVAL').length > 0 ? `<span class="badge" style="background:#ef4444;color:#fff;margin-left:4px;padding:2px 7px;border-radius:10px;font-size:0.75rem;">${this.approvals.filter(a => a.status === 'PENDING_APPROVAL').length}</span>` : `(${this.approvals.length})`}
           </button>
+          <button class="auto-tab-btn ${this.activeTab === 'jobs' ? 'auto-tab-btn--active' : ''}" data-tab="jobs">
+            <span>⚡</span> Cola de Trabajos (Jobs) ${(this.jobs || []).length > 0 ? `(${this.jobs.length})` : ''}
+          </button>
           <button class="auto-tab-btn ${this.activeTab === 'knowledge' ? 'auto-tab-btn--active' : ''}" data-tab="knowledge">
             <span>🧠</span> Base de Conocimiento IA (${this.knowledgeArticles.length})
           </button>
@@ -167,6 +181,7 @@ export class Automations {
   renderTabContent() {
     if (this.activeTab === 'rules') return this.renderRulesTab();
     if (this.activeTab === 'supervision') return this.renderSupervisionTab();
+    if (this.activeTab === 'jobs') return this.renderJobsTab();
     if (this.activeTab === 'knowledge') return this.renderKnowledgeTab();
     if (this.activeTab === 'logs') return this.renderLogsTab();
     if (this.activeTab === 'briefing') return this.renderBriefingTab();
@@ -776,6 +791,23 @@ export class Automations {
       this.fetchAndRenderBriefing();
       return;
     }
+
+    if (e.target.id === 'hero-run-leads-btn' || e.target.closest('#hero-run-leads-btn')) {
+      await this.runLeadFollowups();
+      return;
+    }
+
+    if (e.target.id === 'hero-run-jobs-btn' || e.target.closest('#hero-run-jobs-btn') || e.target.id === 'process-jobs-btn') {
+      await this.runProcessJobs();
+      return;
+    }
+
+    if (e.target.id === 'refresh-jobs-btn') {
+      await this.loadData();
+      this.renderView();
+      toast.success('Cola de trabajos actualizada.');
+      return;
+    }
   }
 
   _handleContainerChange(e) {
@@ -822,6 +854,121 @@ export class Automations {
     } catch (err) {
       toast.error('Error al ejecutar recall');
     }
+  }
+
+  async runLeadFollowups() {
+    try {
+      toast.info('Escaneando leads inactivos (>48h sin contacto)...');
+      const res = await aiService.triggerLeadFollowups();
+      const count = res?.enqueued ?? res?.data?.enqueued ?? 0;
+      toast.success(`✅ Escaneo de leads completado: ${count} tarea(s) generadas.`);
+      await this.loadData();
+      this.renderView();
+    } catch (err) {
+      toast.error('Error al seguir leads: ' + (err.message || ''));
+    }
+  }
+
+  async runProcessJobs() {
+    try {
+      toast.info('Procesando trabajos pendientes en cola...');
+      const res = await aiService.processJobs(20);
+      const processed = res?.processed ?? res?.data?.processed ?? 0;
+      const succeeded = res?.succeeded ?? res?.data?.succeeded ?? 0;
+      toast.success(`✅ Cola procesada: ${succeeded}/${processed} trabajos ejecutados con éxito.`);
+      await this.loadData();
+      this.renderView();
+    } catch (err) {
+      toast.error('Error al procesar trabajos: ' + (err.message || ''));
+    }
+  }
+
+  renderJobsTab() {
+    const stats = this.jobStats || {};
+    const jobs = this.jobs || [];
+
+    return `
+      <div class="auto-card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+          <div>
+            <h3 style="margin: 0; font-size: 1.15rem; font-weight: 600;">⚡ Motor Asíncrono de Trabajos (Jobs)</h3>
+            <p style="margin: 4px 0 0 0; color: var(--color-text-secondary); font-size: 0.88rem;">
+              Control transaccional de tareas en segundo plano con idempotencia garantizada y reintentos automáticos.
+            </p>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button id="process-jobs-btn" class="btn btn-primary btn-sm">
+              <span>▶️</span> Procesar Pendientes Ahora
+            </button>
+            <button id="refresh-jobs-btn" class="btn btn-secondary btn-sm">
+              <span>🔄</span> Actualizar
+            </button>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 20px;">
+          <div style="background: var(--color-bg-secondary); padding: 12px; border-radius: 8px; text-align: center;">
+            <div style="font-size: 1.25rem; font-weight: 700; color: #2563eb;">${stats.PENDING || 0}</div>
+            <div style="font-size: 0.75rem; color: var(--color-text-secondary);">Pendientes</div>
+          </div>
+          <div style="background: var(--color-bg-secondary); padding: 12px; border-radius: 8px; text-align: center;">
+            <div style="font-size: 1.25rem; font-weight: 700; color: #f59e0b;">${stats.RUNNING || 0}</div>
+            <div style="font-size: 0.75rem; color: var(--color-text-secondary);">En Ejecución</div>
+          </div>
+          <div style="background: var(--color-bg-secondary); padding: 12px; border-radius: 8px; text-align: center;">
+            <div style="font-size: 1.25rem; font-weight: 700; color: #16a34a;">${stats.COMPLETED || 0}</div>
+            <div style="font-size: 0.75rem; color: var(--color-text-secondary);">Completados</div>
+          </div>
+          <div style="background: var(--color-bg-secondary); padding: 12px; border-radius: 8px; text-align: center;">
+            <div style="font-size: 1.25rem; font-weight: 700; color: #8b5cf6;">${stats.RETRY || 0}</div>
+            <div style="font-size: 0.75rem; color: var(--color-text-secondary);">Reintentos</div>
+          </div>
+          <div style="background: var(--color-bg-secondary); padding: 12px; border-radius: 8px; text-align: center;">
+            <div style="font-size: 1.25rem; font-weight: 700; color: #dc2626;">${stats.FAILED || 0}</div>
+            <div style="font-size: 0.75rem; color: var(--color-text-secondary);">Fallidos</div>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Tipo de Trabajo</th>
+                <th>Estado</th>
+                <th>Clave Idempotencia</th>
+                <th>Intentos</th>
+                <th>Programado</th>
+                <th>Completado</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${jobs.length === 0 ? `
+                <tr><td colspan="7" style="text-align: center; color: var(--color-text-secondary); padding: 30px;">No hay trabajos registrados en la cola.</td></tr>
+              ` : jobs.map(j => {
+                let badgeClass = 'badge--secondary';
+                if (j.status === 'COMPLETED') badgeClass = 'badge--success';
+                if (j.status === 'RUNNING') badgeClass = 'badge--warning';
+                if (j.status === 'FAILED') badgeClass = 'badge--danger';
+                if (j.status === 'RETRY') badgeClass = 'badge--info';
+
+                return `
+                  <tr>
+                    <td><strong>#${j.id}</strong></td>
+                    <td><code>${j.job_type}</code></td>
+                    <td><span class="badge ${badgeClass}">${j.status}</span></td>
+                    <td style="font-size: 0.78rem; font-family: monospace; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${j.idempotency_key}">${j.idempotency_key}</td>
+                    <td>${j.attempts} / ${j.max_attempts}</td>
+                    <td style="font-size: 0.82rem;">${j.scheduled_at ? new Date(j.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</td>
+                    <td style="font-size: 0.82rem;">${j.completed_at ? new Date(j.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
   }
 
   async toggleRule(ruleId, nextActiveState) {

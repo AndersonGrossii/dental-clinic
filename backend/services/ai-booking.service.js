@@ -8,6 +8,7 @@
 import { query } from '../database/pool.js';
 import appointmentService from './appointment.service.js';
 import holidayService from './holiday.service.js';
+import eventStreamService from './event-stream.service.js';
 import { logger } from '../utils/logger.js';
 import { AppError } from '../utils/errors.js';
 
@@ -216,30 +217,25 @@ class AIBookingService {
     const statusRes = await query(`SELECT id FROM appointment_status WHERE name = 'programada' LIMIT 1`);
     const statusId = statusRes.rows[0]?.id || 1;
 
-    // Buscar o asignar gabinete 1 por defecto para primeras visitas
-    const cabinetRes = await query(`SELECT id FROM cabinets WHERE clinic_id = $1 AND is_active = TRUE ORDER BY id ASC LIMIT 1`, [cid]);
-    const cabinetId = cabinetRes.rows[0]?.id || null;
-
     // Insertar cita en appointments
     const insertRes = await query(
       `INSERT INTO appointments (
-         clinic_id, patient_id, doctor_id, cabinet_id, appointment_date,
-         start_time, end_time, duration, status_id, reason, notes, guest_name, created_by
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, (SELECT user_id FROM doctors WHERE id = $3))
+         clinic_id, patient_id, doctor_id, appointment_date,
+         start_time, end_time, status_id, reason, notes, guest_name, guest_phone, is_first_visit, gabinete, created_by
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, TRUE, 'Gabinete 1', (SELECT user_id FROM doctors WHERE id = $3))
        RETURNING *`,
       [
         cid,
         patientId,
         docInfo.doctor.id,
-        cabinetId,
         appointmentDate,
         `${startTime}:00`,
         endTime,
-        duration,
         statusId,
         cid === 1 ? 'Primera Revisión Gratuita' : 'Primera Consulta de Valoración Estética',
         `Cita concertada automáticamente por el asistente de IA Sofía para ${docInfo.doctorTitle}. Contacto: ${phone || ''}`,
         guestName,
+        phone,
       ]
     );
 
@@ -252,6 +248,160 @@ class AIBookingService {
       date: appointmentDate,
       arrivalTime: startTime, // El paciente solo necesita saber esta hora
       messageForPatient: `✅ Su cita ha quedado reservada con éxito. Le esperamos el ${appointmentDate} a las ${startTime}h en nuestra clínica.`,
+    };
+  }
+
+  /**
+   * Intenta emparejar la respuesta del paciente con las franjas horarias ofrecidas.
+   */
+  matchSlotSelection(incomingText, offeredSlots = []) {
+    if (!incomingText || !Array.isArray(offeredSlots) || offeredSlots.length === 0) return null;
+    const clean = incomingText.trim().toLowerCase();
+
+    // 1. Coincidencia por ordinal u opción numérica
+    if (/^(1|1️⃣|primera|primero|la primera|el primero|opcion 1|opción 1)\b/i.test(clean) || clean === '1') {
+      return offeredSlots[0] || null;
+    }
+    if (/^(2|2️⃣|segunda|segundo|la segunda|el segundo|opcion 2|opción 2)\b/i.test(clean) || clean === '2') {
+      return offeredSlots[1] || null;
+    }
+
+    // 2. Coincidencia por hora exacta o aproximada
+    for (const slot of offeredSlots) {
+      const timeNoZero = slot.time.replace(/^0/, ''); // "9:00" si era "09:00"
+      const timeExact = slot.time; // "09:00"
+      const [h, m] = slot.time.split(':');
+      const hourOnly = parseInt(h, 10);
+
+      if (clean.includes(timeExact) || clean.includes(timeNoZero)) {
+        return slot;
+      }
+      if (m === '00' && (clean.includes(`a las ${hourOnly}`) || clean.includes(`las ${hourOnly}`))) {
+        return slot;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Procesa la selección conversacional de una cita, revalidando disponibilidad
+   * y ejecutando la reserva formal mediante el motor autoritativo.
+   */
+  async handleConversationalBookingSelection({
+    clinicId = 1,
+    contact,
+    incomingText,
+    bookingFlowState
+  }) {
+    if (!bookingFlowState || !bookingFlowState.offered_slots) {
+      return { handled: false };
+    }
+
+    const selectedSlot = this.matchSlotSelection(incomingText, bookingFlowState.offered_slots);
+    if (!selectedSlot) {
+      return { handled: false };
+    }
+
+    const cid = parseInt(clinicId, 10) || 1;
+    const patientName = contact.confirmed_name || contact.name || 'Paciente';
+    const firstName = patientName.split(' ')[0];
+
+    // 1. Revalidación determinista de disponibilidad (Prevención de colisiones / race conditions)
+    const freshSlotsData = await this.getAvailableSlots(cid, selectedSlot.date);
+    const isStillAvailable = (freshSlotsData.availableSlots || []).some(s => s.time === selectedSlot.time);
+
+    if (!isStillAvailable) {
+      // El hueco se ocupó justo antes: ofrecer alternativas reales actualizadas
+      const altSlots = (freshSlotsData.availableSlots || []).slice(0, 2);
+      let altMsg = '';
+      if (altSlots.length > 0) {
+        altMsg = ` Justo acaban de reservar ese hueco. Disponemos de alternativa el ${altSlots[0].date} ${altSlots[0].formattedArrival}${altSlots[1] ? ' o ' + altSlots[1].formattedArrival : ''}. ¿Le vendría bien?`;
+      } else {
+        altMsg = ` Justo se ha ocupado ese hueco. Le transferiré con nuestro equipo para buscar otro día adecuado.`;
+      }
+
+      return {
+        handled: true,
+        success: false,
+        reason: 'SLOT_NO_LONGER_AVAILABLE',
+        replyText: `Disculpe, ${firstName}.${altMsg}`,
+        newSlots: altSlots,
+      };
+    }
+
+    // 2. Reserva autoritativa en appointments
+    const bookResult = await this.bookFirstVisit({
+      clinicId: cid,
+      patientId: contact.patient_id || null,
+      guestName: patientName,
+      phone: contact.phone,
+      appointmentDate: selectedSlot.date,
+      startTime: selectedSlot.time,
+    });
+
+    // 3. Registrar log de automatización
+    await query(
+      `INSERT INTO automation_logs (clinic_id, rule_type, patient_id, appointment_id, channel, status, details)
+       VALUES ($1, 'BOOKING_AUTONOMOUS', $2, $3, 'WHATSAPP', 'BOOKED', $4)`,
+      [
+        cid,
+        contact.patient_id || null,
+        bookResult.appointmentId,
+        JSON.stringify({ booked_via: 'CONVERSATIONAL_AI', slot: selectedSlot, booked_at: new Date().toISOString() })
+      ]
+    );
+
+    // 4. Actualizar estado de Lead en CRM y crear actividad si existe
+    try {
+      const leadRes = await query(
+        `SELECT id FROM crm_leads WHERE contact_id = $1 AND clinic_id = $2 AND status NOT IN ('lost', 'converted') LIMIT 1`,
+        [contact.id, cid]
+      );
+      if (leadRes.rows.length > 0) {
+        const leadId = leadRes.rows[0].id;
+        await query(
+          `UPDATE crm_leads 
+           SET status = 'appointment_scheduled',
+               updated_at = NOW() 
+           WHERE id = $1`,
+          [leadId]
+        );
+
+        await query(
+          `INSERT INTO crm_activities (clinic_id, lead_id, contact_id, activity_type, title, description, actor_type)
+           VALUES ($1, $2, $3, 'APPOINTMENT_BOOKED', 'Primera visita agendada automáticamente por Sofía', $4, 'ai')`,
+          [
+            cid,
+            leadId,
+            contact.id,
+            `Cita agendada para el ${selectedSlot.date} a las ${selectedSlot.time}h con ${bookResult.doctorName}.`
+          ]
+        );
+      }
+    } catch (crmErr) {
+      logger.warn('Error actualizando lead de CRM tras reserva conversacional:', crmErr.message);
+    }
+
+    // 5. Emitir evento SSE en tiempo real a recepción
+    eventStreamService.broadcastToClinic(cid, 'APPOINTMENT_CREATED', {
+      appointmentId: bookResult.appointmentId,
+      patientName,
+      date: selectedSlot.date,
+      time: selectedSlot.time,
+      doctorName: bookResult.doctorName,
+      bookedVia: 'SOFIA_CONVERSATIONAL_AI',
+    });
+
+    const dateFormatted = new Date(selectedSlot.date).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+    const replyText = `✅ ¡Perfecto, ${firstName}! Su primera consulta de revisión y diagnóstico con ${bookResult.doctorName} ha quedado CONFIRMADA para el ${dateFormatted} a las ${selectedSlot.time}h en nuestra clínica.\n\nLe hemos reservado este hueco en nuestra agenda. Si antes de la cita tuviera cualquier duda o necesitara cambiar la hora, solo avísenos por este chat. ¡Le esperamos! 🦷✨`;
+
+    return {
+      handled: true,
+      success: true,
+      appointmentId: bookResult.appointmentId,
+      replyText,
+      selectedSlot,
     };
   }
 }
