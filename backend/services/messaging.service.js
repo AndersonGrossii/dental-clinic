@@ -8,6 +8,7 @@ import automationSchedulerService from './automation-scheduler.service.js';
 import aiService from './ai.service.js';
 import aiBookingService from './ai-booking.service.js';
 import internalChatService from './internal-chat.service.js';
+import aiCrmWorkflowService from './ai-crm-workflow.service.js';
 import eventStreamService from './event-stream.service.js';
 import { query } from '../database/pool.js';
 import { logger } from '../utils/logger.js';
@@ -94,30 +95,18 @@ class MessagingService {
           messageId: message.id,
         });
 
-        // Auto-crear o actualizar lead en CRM y calificar con IA Sofía
-        try {
-          let leadId = null;
-          const existingLead = await query(
-            `SELECT id FROM crm_leads WHERE contact_id = $1 AND clinic_id = $2 AND status NOT IN ('lost', 'converted') LIMIT 1`,
-            [contact.id, clinicId]
-          );
-          if (existingLead.rows.length > 0) {
-            leadId = existingLead.rows[0].id;
-          } else if (!contact.patient_id) {
-            const insLead = await query(
-              `INSERT INTO crm_leads (clinic_id, contact_id, source, status, interest)
-               VALUES ($1, $2, 'whatsapp', 'new', $3)
-               RETURNING id`,
-              [clinicId, contact.id, (evt.body || '').substring(0, 250)]
-            );
-            leadId = insLead.rows[0].id;
+        // Auto-crear o actualizar lead en CRM, oportunidades y calificar con IA Sofía (Fase 6)
+        if (config.features.aiAutomations) {
+          try {
+            await aiCrmWorkflowService.syncLeadOnInboundMessage({
+              clinicId,
+              contact,
+              incomingText: evt.body,
+              channel: 'WHATSAPP',
+            });
+          } catch (crmErr) {
+            logger.warn('Error al sincronizar lead desde webhook WhatsApp:', crmErr.message);
           }
-
-          if (leadId && config.features.aiAutomations) {
-            await aiService.qualifyLeadFromConversation(leadId, clinicId, [{ direction: 'INBOUND', body: evt.body }]);
-          }
-        } catch (crmErr) {
-          logger.warn('Error al auto-calificar lead desde webhook WhatsApp:', crmErr.message);
         }
 
         if (config.features.aiAutomations && conversation.automation_enabled) {
@@ -201,30 +190,18 @@ class MessagingService {
           messageId: message.id,
         });
 
-        // Auto-crear o actualizar lead en CRM y calificar con IA Sofía
-        try {
-          let leadId = null;
-          const existingLead = await query(
-            `SELECT id FROM crm_leads WHERE contact_id = $1 AND clinic_id = $2 AND status NOT IN ('lost', 'converted') LIMIT 1`,
-            [contact.id, clinicId]
-          );
-          if (existingLead.rows.length > 0) {
-            leadId = existingLead.rows[0].id;
-          } else if (!contact.patient_id) {
-            const insLead = await query(
-              `INSERT INTO crm_leads (clinic_id, contact_id, source, status, interest)
-               VALUES ($1, $2, 'instagram', 'new', $3)
-               RETURNING id`,
-              [clinicId, contact.id, (evt.text || '').substring(0, 250)]
-            );
-            leadId = insLead.rows[0].id;
+        // Auto-crear o actualizar lead en CRM, oportunidades y calificar con IA Sofía (Fase 6)
+        if (config.features.aiAutomations) {
+          try {
+            await aiCrmWorkflowService.syncLeadOnInboundMessage({
+              clinicId,
+              contact,
+              incomingText: evt.text,
+              channel: 'INSTAGRAM',
+            });
+          } catch (crmErr) {
+            logger.warn('Error al sincronizar lead desde webhook Instagram:', crmErr.message);
           }
-
-          if (leadId && config.features.aiAutomations) {
-            await aiService.qualifyLeadFromConversation(leadId, clinicId, [{ direction: 'INBOUND', body: evt.text }]);
-          }
-        } catch (crmErr) {
-          logger.warn('Error al auto-calificar lead desde webhook Instagram:', crmErr.message);
         }
 
         if (config.features.aiAutomations && conversation.automation_enabled) {
@@ -261,13 +238,13 @@ class MessagingService {
           replyBody = `🗓️ Hemos registrado la cancelación de su cita. Un asesor de nuestro equipo se pondrá en contacto para ayudarle a reprogramar. ¡Gracias por avisarnos!`;
         }
       } else {
-        // 1.5. Flujo interactivo de agendamiento (Selección de franja propuesta por Sofía)
+        // 1.5. Flujo interactivo de agendamiento y citas (Selección de franja / reagendamiento)
         let bookingHandled = false;
         const currentConv = await messagingRepository.getConversationById(conversation.id, conversation.clinic_id);
         const bookingFlow = currentConv?.context_state?.booking_flow;
 
-        if (bookingFlow && bookingFlow.step === 'AWAITING_SLOT_SELECTION') {
-          const bookingResult = await aiBookingService.handleConversationalBookingSelection({
+        if (bookingFlow && (bookingFlow.step === 'AWAITING_SLOT_SELECTION' || bookingFlow.step === 'AWAITING_RESCHEDULE_SLOT')) {
+          const bookingResult = await aiBookingService.handleConversationalAppointmentAction({
             clinicId: conversation.clinic_id,
             contact,
             incomingText: text,
@@ -283,7 +260,8 @@ class MessagingService {
             } else if (bookingResult.newSlots?.length > 0) {
               await messagingRepository.updateContextState(conversation.id, {
                 booking_flow: {
-                  step: 'AWAITING_SLOT_SELECTION',
+                  step: bookingFlow.step,
+                  appointment_id: bookingFlow.appointment_id || null,
                   offered_slots: bookingResult.newSlots,
                   target_date: bookingResult.newSlots[0].date,
                   offered_at: new Date().toISOString(),
@@ -306,6 +284,7 @@ class MessagingService {
             clinicId: conversation.clinic_id,
             incomingText,
             senderName: contact.name,
+            senderPhone: contact.phone,
             isNameConfirmed: Boolean(contact.is_name_confirmed),
             confirmedName: contact.confirmed_name,
             conversationHistory,
@@ -321,6 +300,18 @@ class MessagingService {
                 offered_at: new Date().toISOString(),
               }
             }, conversation.clinic_id);
+          } else if (sofiaRes.action === 'RESCHEDULE_PROPOSED' && sofiaRes.slots?.length > 0) {
+            await messagingRepository.updateContextState(conversation.id, {
+              booking_flow: {
+                step: 'AWAITING_RESCHEDULE_SLOT',
+                appointment_id: sofiaRes.appointmentId,
+                offered_slots: sofiaRes.slots,
+                target_date: sofiaRes.slots[0].date,
+                offered_at: new Date().toISOString(),
+              }
+            }, conversation.clinic_id);
+          } else if (sofiaRes.action === 'APPOINTMENT_CANCELLED') {
+            await messagingRepository.updateContextState(conversation.id, { booking_flow: null }, conversation.clinic_id);
           }
 
           // Si se detectó un nuevo nombre informado por el usuario, actualizar en BD, CRM y emitir SSE
@@ -353,27 +344,15 @@ class MessagingService {
           if (sofiaRes.action === 'TRANSFER_TO_HUMAN') {
             isTransfer = true;
 
-            // Disparar notificación de traspaso en el CHAT INTERNO de la clínica
-            try {
-              await internalChatService.sendMessage({
-                clinicId: conversation.clinic_id,
-                senderId: 1, // ID del sistema
-                recipientId: null, // Canal general de esa clínica
-                message: `🔔 [TRASPASO URGENTE A RECEPCIÓN] El paciente ${contact.name || 'Desconocido'} (${contact.phone}) solicita atención humana por WhatsApp. Conversación transferida al mostrador de recepción.`,
-              });
-            } catch (chatErr) {
-              logger.error('Error al notificar traspaso al chat interno:', chatErr.message);
-            }
-
-            // Pausar automatización para que el humano asuma la conversación
-            await messagingRepository.setAutomationEnabled(conversation.id, false, conversation.clinic_id);
-            await messagingRepository.setConversationStatus(conversation.id, 'OPEN', conversation.clinic_id);
-
-            eventStreamService.broadcastToClinic(conversation.clinic_id, 'HUMAN_TAKEOVER_REQUIRED', {
+            // Gestión integral de traspaso humano (Tarea recepción, CRM activity, Chat interno, pausa y SSE)
+            await aiCrmWorkflowService.handleHumanHandoff({
+              clinicId: conversation.clinic_id,
+              contact,
               conversationId: conversation.id,
-              contactName: contact.name,
-              phone: contact.phone,
               channel: 'WHATSAPP',
+              reason: sofiaRes.intent || 'Solicitud de recepcionista',
+              incomingText: text,
+              isUrgent: Boolean(sofiaRes.isUrgent),
             });
           }
         }
@@ -500,19 +479,16 @@ class MessagingService {
         if (sofiaRes.action === 'TRANSFER_TO_HUMAN') {
           isTransfer = true;
 
-          try {
-            await internalChatService.sendMessage({
-              clinicId: conversation.clinic_id,
-              senderId: 1,
-              recipientId: null,
-              message: `🔔 [TRASPASO URGENTE A RECEPCIÓN] El contacto de Instagram ${contact.name || contact.phone} solicita atención humana.`,
-            });
-          } catch (chatErr) {
-            logger.error('Error al notificar traspaso de Instagram al chat interno:', chatErr.message);
-          }
-
-          await messagingRepository.setAutomationEnabled(conversation.id, false, conversation.clinic_id);
-          await messagingRepository.setConversationStatus(conversation.id, 'OPEN', conversation.clinic_id);
+          // Gestión integral de traspaso humano (Tarea recepción, CRM activity, Chat interno, pausa y SSE)
+          await aiCrmWorkflowService.handleHumanHandoff({
+            clinicId: conversation.clinic_id,
+            contact,
+            conversationId: conversation.id,
+            channel: 'INSTAGRAM',
+            reason: sofiaRes.intent || 'Solicitud de recepcionista en Instagram',
+            incomingText: text,
+            isUrgent: Boolean(sofiaRes.isUrgent),
+          });
         }
       }
 

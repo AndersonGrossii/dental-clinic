@@ -23,6 +23,11 @@ const suites = [
   { name: 'IA en Mensajería, Leads CRM y Supervisión Humana (10 pruebas)', file: 'test_ai_leads_messaging.js' },
   { name: 'Instagram Messaging API & Multi-Tenant Routing (5 pruebas)', file: 'test_instagram_integration.js' },
   { name: 'Motor de Automatización, Idempotencia & Agendamiento Conversacional (21 pruebas)', file: 'test_ai_automation_engine.js' },
+  { name: 'RAG Retrieval, Intent Matching & Sofia Grounding (30 pruebas)', file: 'test_ai_rag_retrieval.js' },
+  { name: 'RAG Grounding, Prompt Synthesis & Response Policies (26 pruebas)', file: 'test_ai_rag_grounding.js' },
+  { name: 'AI Tool Grounding Hub & Dynamic Services Integration (43 pruebas)', file: 'test_ai_tool_grounding.js' },
+  { name: 'AI Appointment Workflow & Lifecycle (32 pruebas)', file: 'test_ai_appointment_workflow.js' },
+  { name: 'CRM Lead Workflow, Returning Patient Habitual Doctor & Handoff (53 pruebas)', file: 'test_ai_crm_lead_workflow.js' },
 ];
 
 console.log('\n╔══════════════════════════════════════════════════════════════════╗');

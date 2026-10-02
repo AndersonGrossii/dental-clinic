@@ -7,8 +7,21 @@ import { parsePagination, buildPaginationMeta } from '../utils/pagination.js';
 
 export const getAll = async (req, res, next) => {
   try {
-    const { page, limit, offset, sortBy, sortOrder } = parsePagination(req.query);
+    const isAll = req.query.all === 'true' || req.query.limit === 'all' || (!req.query.page && !req.query.limit);
     const { category_id, is_active } = req.query;
+
+    if (isAll) {
+      const { data: treatments, total } = await treatmentService.getAll({
+        limit: 10000,
+        offset: 0,
+        sortBy: req.query.sortBy || 't.name',
+        sortOrder: req.query.sortOrder || 'ASC',
+        filters: { category_id, is_active },
+      });
+      return ApiResponse.success(res, treatments, 'Tratamientos obtenidos exitosamente');
+    }
+
+    const { page, limit, offset, sortBy, sortOrder } = parsePagination(req.query);
 
     const { data: treatments, total } = await treatmentService.getAll({
       limit,

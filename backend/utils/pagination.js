@@ -10,7 +10,7 @@
  */
 export const parsePagination = (query, defaultLimit = 20) => {
   const page = Math.max(1, parseInt(query.page, 10) || 1);
-  const limit = Math.min(100, Math.max(1, parseInt(query.limit, 10) || defaultLimit));
+  const limit = Math.min(1000, Math.max(1, parseInt(query.limit, 10) || defaultLimit));
   const offset = (page - 1) * limit;
   const sortBy = query.sortBy || 'created_at';
   const sortOrder = query.sortOrder?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';

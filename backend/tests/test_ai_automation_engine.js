@@ -159,6 +159,11 @@ async function runTests() {
       // Verificar actividad de CRM registrada
       const actCheck = await query(`SELECT * FROM crm_activities WHERE lead_id = $1 AND activity_type = 'APPOINTMENT_BOOKED'`, [leadId]);
       report('Actividad de CRM "APPOINTMENT_BOOKED" registrada automáticamente', actCheck.rows.length > 0);
+
+      // Limpieza de cita creada en prueba para evitar colisiones de agenda en ejecuciones continuas
+      if (bookingExec.appointmentId) {
+        await query(`DELETE FROM appointments WHERE id = $1`, [bookingExec.appointmentId]);
+      }
     } else {
       console.log('  ⚠️ Omitido agendamiento real: No hay franjas libres en la fecha evaluada.');
     }

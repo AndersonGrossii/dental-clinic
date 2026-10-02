@@ -40,6 +40,7 @@ router.post('/leads/:id/qualify', staffOnly, aiController.qualifyLead);
 
 // 7. Base de Conocimiento RAG de la Clínica
 router.get('/knowledge', allRoles, aiController.getKnowledgeBase);
+router.post('/knowledge/search', allRoles, aiController.searchKnowledge);
 router.post('/knowledge', staffOnly, aiController.createKnowledgeArticle);
 router.put('/knowledge/:id', staffOnly, aiController.updateKnowledgeArticle);
 router.delete('/knowledge/:id', staffOnly, aiController.deleteKnowledgeArticle);
@@ -52,5 +53,11 @@ router.post('/booking/first-visit', allRoles, aiController.bookFirstVisit);
 router.get('/automations/jobs', allRoles, aiController.getAutomationJobs);
 router.post('/automations/jobs/run', staffOnly, aiController.processAutomationJobs);
 router.post('/automations/run-lead-followups', staffOnly, aiController.triggerInactiveLeadFollowupScan);
+
+// 10. Previsualización y Auditoría de Grounding RAG (Fase 3)
+router.post('/grounding/preview', allRoles, aiController.previewGrounding);
+
+// 11. Ejecución Directa de Herramientas de Grounding (Fase 4)
+router.post('/tools/execute', allRoles, aiController.executeAITool);
 
 export default router;

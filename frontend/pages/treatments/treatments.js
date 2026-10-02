@@ -17,6 +17,7 @@ export class Treatments {
     this.searchQuery = '';
     this.currentPage = 1;
     this.pageSize = 15;
+    this.totalPages = 1;
   }
 
   async render() {
@@ -28,11 +29,11 @@ export class Treatments {
   async loadData() {
     try {
       const [treatmentsRes, categoriesRes, packsRes] = await Promise.all([
-        treatmentService.getAll(),
+        treatmentService.getAll({ all: 'true' }),
         treatmentService.getCategories(),
         promotionalPackService.getAll({ include_inactive: true }).catch(() => []),
       ]);
-      this.treatmentsList = treatmentsRes || [];
+      this.treatmentsList = Array.isArray(treatmentsRes) ? treatmentsRes : (treatmentsRes?.data || []);
       this.categoriesList = categoriesRes || [];
       this.packsList = packsRes || [];
     } catch (err) {
@@ -159,6 +160,7 @@ export class Treatments {
 
     const totalPages = Math.max(1, Math.ceil(filtered.length / this.pageSize));
     if (this.currentPage > totalPages) this.currentPage = totalPages;
+    this.totalPages = totalPages;
 
     const startIndex = (this.currentPage - 1) * this.pageSize;
     const paged = filtered.slice(startIndex, startIndex + this.pageSize);
@@ -203,6 +205,7 @@ export class Treatments {
 
     const totalPages = Math.max(1, Math.ceil(filtered.length / this.pageSize));
     if (this.currentPage > totalPages) this.currentPage = totalPages;
+    this.totalPages = totalPages;
 
     const startIndex = (this.currentPage - 1) * this.pageSize;
     const paged = filtered.slice(startIndex, startIndex + this.pageSize);
@@ -288,13 +291,38 @@ export class Treatments {
     const startItem = totalCount === 0 ? 0 : startIndex + 1;
     const endItem = Math.min(startIndex + this.pageSize, totalCount);
 
+    let pageButtonsHtml = '';
+    if (totalPages > 1) {
+      for (let i = 1; i <= totalPages; i++) {
+        if (
+          i === 1 ||
+          i === totalPages ||
+          (i >= this.currentPage - 1 && i <= this.currentPage + 1)
+        ) {
+          const isActive = i === this.currentPage;
+          pageButtonsHtml += `
+            <button class="btn btn-sm ${isActive ? 'btn-primary' : 'btn-outline'} treatment-page-btn" 
+                    data-page="${i}" 
+                    style="min-width: 36px; padding: 4px 8px; font-weight: ${isActive ? '700' : '500'};"
+                    ${isActive ? 'aria-current="page"' : ''}>
+              ${i}
+            </button>
+          `;
+        } else if (i === this.currentPage - 2 || i === this.currentPage + 2) {
+          pageButtonsHtml += `<span style="color: var(--text-secondary); padding: 0 4px; align-self: center;">...</span>`;
+        }
+      }
+    }
+
     paginationContainer.innerHTML = `
       <span style="color: var(--text-secondary); font-size: 0.875rem;">
         Mostrando ${startItem}–${endItem} de ${totalCount} ${label}
       </span>
-      <div style="display: flex; gap: var(--space-2); align-items: center;">
+      <div style="display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap;">
         <button id="prev-page-btn" class="btn btn-sm btn-secondary" ${this.currentPage <= 1 ? 'disabled' : ''}>← Anterior</button>
-        <span style="font-size: 0.875rem; min-width: 80px; text-align: center;">Página ${this.currentPage} de ${totalPages}</span>
+        <div style="display: flex; gap: 4px; align-items: center;">
+          ${pageButtonsHtml || `<span style="font-size: 0.875rem; padding: 0 8px; font-weight: 600;">1</span>`}
+        </div>
         <button id="next-page-btn" class="btn btn-sm btn-secondary" ${this.currentPage >= totalPages ? 'disabled' : ''}>Siguiente →</button>
       </div>
     `;
@@ -325,13 +353,28 @@ export class Treatments {
         return;
       }
 
-      // Pagination
-      if (e.target.id === 'prev-page-btn' && this.currentPage > 1) {
+      // Pagination page numbers
+      const pageBtn = e.target.closest('.treatment-page-btn');
+      if (pageBtn && !pageBtn.disabled) {
+        const page = parseInt(pageBtn.getAttribute('data-page'), 10);
+        if (page && page !== this.currentPage) {
+          this.currentPage = page;
+          this.renderView();
+        }
+        return;
+      }
+
+      // Pagination prev button
+      const prevBtn = e.target.closest('#prev-page-btn');
+      if (prevBtn && !prevBtn.disabled && this.currentPage > 1) {
         this.currentPage--;
         this.renderView();
         return;
       }
-      if (e.target.id === 'next-page-btn') {
+
+      // Pagination next button
+      const nextBtn = e.target.closest('#next-page-btn');
+      if (nextBtn && !nextBtn.disabled && this.currentPage < (this.totalPages || 1)) {
         this.currentPage++;
         this.renderView();
         return;

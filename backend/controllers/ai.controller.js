@@ -8,6 +8,7 @@ import automationJobRepository from '../repositories/automation-job.repository.j
 import aiSupervisionService from '../services/ai-supervision.service.js';
 import aiKnowledgeRepository from '../repositories/ai-knowledge.repository.js';
 import aiBookingService from '../services/ai-booking.service.js';
+import aiToolsService from '../services/ai-tools.service.js';
 import messagingRepository from '../repositories/messaging.repository.js';
 import { query } from '../database/pool.js';
 import { ApiResponse } from '../utils/response.js';
@@ -374,7 +375,35 @@ export const getKnowledgeBase = async (req, res, next) => {
   try {
     const clinicId = req.user?.clinic_id || 1;
     const articles = await aiKnowledgeRepository.findByClinic(clinicId);
-    return ApiResponse.success(res, articles);
+    // Alias topic y answer para compatibilidad transparente con frontend y legado
+    const formatted = articles.map(art => ({
+      ...art,
+      topic: art.title,
+      answer: art.content,
+    }));
+    return ApiResponse.success(res, formatted);
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const searchKnowledge = async (req, res, next) => {
+  try {
+    const clinicId = req.user?.clinic_id || 1;
+    const { query: queryText, intent, category, topK, minScore } = req.body;
+    const results = await aiKnowledgeRepository.searchRelevant(clinicId, queryText, {
+      intent,
+      category,
+      topK,
+      minScore,
+    });
+    return ApiResponse.success(res, {
+      articles: results.articles || results,
+      topMatch: results.topMatch || results[0] || null,
+      confidence: results.confidence || 'NONE',
+      intent: results.intent || intent || null,
+      totalFound: results.totalFound || results.length || 0,
+    });
   } catch (err) {
     next(err);
   }
@@ -383,9 +412,38 @@ export const getKnowledgeBase = async (req, res, next) => {
 export const createKnowledgeArticle = async (req, res, next) => {
   try {
     const clinicId = req.user?.clinic_id || 1;
-    const { category, title, content, keywords } = req.body;
-    const created = await aiKnowledgeRepository.create({ clinicId, category, title, content, keywords });
-    return ApiResponse.success(res, created, 'Artículo de conocimiento creado.', 201);
+    const {
+      category,
+      title,
+      topic,
+      content,
+      answer,
+      keywords,
+      synonyms,
+      intent,
+      priority,
+      required_tool,
+      do_not_say,
+      next_action,
+    } = req.body;
+
+    const finalTitle = title || topic;
+    const finalContent = content || answer;
+
+    const created = await aiKnowledgeRepository.create({
+      clinicId,
+      category: category || 'general',
+      title: finalTitle,
+      content: finalContent,
+      keywords: Array.isArray(keywords) ? keywords : [],
+      synonyms: Array.isArray(synonyms) ? synonyms : [],
+      intent: intent || null,
+      priority: parseInt(priority, 10) || 1,
+      required_tool: required_tool || null,
+      do_not_say: do_not_say || null,
+      next_action: next_action || null,
+    });
+    return ApiResponse.success(res, { ...created, topic: created.title, answer: created.content }, 'Artículo de conocimiento creado.', 201);
   } catch (err) {
     next(err);
   }
@@ -395,8 +453,12 @@ export const updateKnowledgeArticle = async (req, res, next) => {
   try {
     const clinicId = req.user?.clinic_id || 1;
     const id = parseInt(req.params.id, 10);
-    const updated = await aiKnowledgeRepository.update(id, clinicId, req.body);
-    return ApiResponse.success(res, updated, 'Artículo de conocimiento actualizado.');
+    const payload = { ...req.body };
+    if (payload.topic && !payload.title) payload.title = payload.topic;
+    if (payload.answer && !payload.content) payload.content = payload.answer;
+
+    const updated = await aiKnowledgeRepository.update(id, clinicId, payload);
+    return ApiResponse.success(res, updated ? { ...updated, topic: updated.title, answer: updated.content } : null, 'Artículo de conocimiento actualizado.');
   } catch (err) {
     next(err);
   }
@@ -491,3 +553,58 @@ export const triggerInactiveLeadFollowupScan = async (req, res, next) => {
   }
 };
 
+// ============================================
+// GROUNDING & SÍNTESIS DE RESPUESTAS RAG (FASE 3)
+// ============================================
+
+export const previewGrounding = async (req, res, next) => {
+  try {
+    const clinicId = req.body?.clinicId || req.user?.clinic_id || 1;
+    const message = req.body?.message || '';
+
+    if (!message.trim()) {
+      return ApiResponse.badRequest(res, 'El parámetro message es obligatorio.');
+    }
+
+    const sofiaRes = await aiService.generateSofiaReply({
+      clinicId,
+      incomingText: message,
+      senderName: req.body?.senderName || 'Paciente Preview',
+      isNameConfirmed: Boolean(req.body?.senderName),
+      confirmedName: req.body?.senderName || null,
+    });
+
+    const systemPrompt = aiService.buildSystemPrompt(sofiaRes.structuredContext);
+
+    return ApiResponse.success(res, {
+      ...sofiaRes,
+      systemPrompt,
+    }, 'Previsualización de grounding RAG generada');
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ============================================
+// TOOL GROUNDING DETERMINISTA (FASE 4)
+// ============================================
+
+export const executeAITool = async (req, res, next) => {
+  try {
+    const clinicId = req.body?.clinicId || req.user?.clinic_id || 1;
+    const { tool, params = {} } = req.body;
+
+    if (!tool) {
+      return ApiResponse.badRequest(res, 'El parámetro tool es obligatorio.');
+    }
+
+    const toolResult = await aiToolsService.executeTool(tool, {
+      clinicId,
+      ...params,
+    });
+
+    return ApiResponse.success(res, toolResult, `Herramienta ${tool} ejecutada con éxito`);
+  } catch (err) {
+    next(err);
+  }
+};

@@ -106,6 +106,10 @@ class AIService {
     return api.get('/ai/knowledge');
   }
 
+  async searchKnowledge(query, options = {}) {
+    return api.post('/ai/knowledge/search', { query, ...options });
+  }
+
   async createKnowledge(data) {
     return api.post('/ai/knowledge', data);
   }
@@ -133,6 +137,22 @@ class AIService {
 
   async triggerLeadFollowups() {
     return api.post('/ai/automations/run-lead-followups', {});
+  }
+
+  // ============================================
+  // GROUNDING RAG & PREVISUALIZACIÓN (FASE 3)
+  // ============================================
+
+  async previewGrounding(message, clinicId = null) {
+    return api.post('/ai/grounding/preview', { message, clinicId });
+  }
+
+  // ============================================
+  // TOOL GROUNDING DETERMINISTA (FASE 4)
+  // ============================================
+
+  async executeTool(tool, params = {}, clinicId = null) {
+    return api.post('/ai/tools/execute', { tool, params, clinicId });
   }
 }
 
