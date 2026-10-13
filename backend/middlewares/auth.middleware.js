@@ -32,12 +32,12 @@ export const authMiddleware = async (req, res, next) => {
       SELECT u.id, u.email, u.role_id, r.name AS role_name, u.clinic_id, u.current_session_id
       FROM users u
       INNER JOIN roles r ON u.role_id = r.id
-      WHERE u.id = $1 AND u.deleted_at IS NULL
+      WHERE u.id = $1 AND u.deleted_at IS NULL AND u.is_active = TRUE
     `, [decoded.id]);
     
     const user = userRes.rows[0];
     if (!user) {
-      return ApiResponse.error(res, 'Usuario no encontrado.', 401);
+      return ApiResponse.error(res, 'Usuario no encontrado o inactivo.', 401);
     }
     
     // Verificar sesión (excepto para higienistas)
@@ -54,7 +54,17 @@ export const authMiddleware = async (req, res, next) => {
     if (isOwner) {
       const headerClinicId = req.headers['x-clinic-id'] || req.query?.clinic_id || req.query?.clinicId;
       if (headerClinicId) {
-        clinicId = parseInt(headerClinicId, 10);
+        const parsedClinicId = parseInt(headerClinicId, 10);
+        if (!isNaN(parsedClinicId)) {
+          const clinicCheck = await query(
+            'SELECT id FROM clinics WHERE id = $1 AND is_active = TRUE',
+            [parsedClinicId]
+          );
+          if (clinicCheck.rows.length === 0) {
+            return ApiResponse.error(res, 'La clínica solicitada no existe o está desactivada.', 403);
+          }
+          clinicId = parsedClinicId;
+        }
       }
     }
     

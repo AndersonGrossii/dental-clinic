@@ -29,6 +29,7 @@ import holidayRoutes from './holiday.routes.js';
 import pdfRoutes from './pdf.routes.js';
 import promotionalPackRoutes from './promotional-pack.routes.js';
 import crmRoutes from './crm.routes.js';
+import cabinetRoutes from './cabinet.routes.js';
 
 const router = Router();
 
@@ -48,6 +49,7 @@ router.use('/notifications', notificationRoutes);
 router.use('/settings', settingsRoutes);
 router.use('/search', searchRoutes);
 router.use('/clinics', clinicRoutes);
+router.use('/cabinets', cabinetRoutes);
 router.use('/prescriptions', prescriptionRoutes);
 router.use('/messaging', messagingRoutes);
 router.use('/webhooks', webhookRoutes);

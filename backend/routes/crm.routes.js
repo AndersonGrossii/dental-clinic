@@ -5,14 +5,15 @@ import { Router } from 'express';
 import { authMiddleware } from '../middlewares/auth.middleware.js';
 import { staffOnly } from '../middlewares/role.middleware.js';
 import { auditMiddleware } from '../middlewares/audit.middleware.js';
+import { requireFeature } from '../middlewares/feature.middleware.js';
 import * as crmController from '../controllers/crm.controller.js';
 
 const router = Router();
 
-// Todas las rutas de CRM requieren autenticación y rol de staff (propietario, direccion o recepcionista).
-// Doctores e higienistas quedan explícitamente bloqueados (HTTP 403 Forbidden).
+// Todas las rutas de CRM requieren autenticación, rol de staff y feature 'crm' activa.
 router.use(authMiddleware);
 router.use(staffOnly);
+router.use(requireFeature('crm'));
 
 // Dashboard
 router.get('/dashboard', crmController.getDashboard);

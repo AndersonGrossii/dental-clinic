@@ -27,6 +27,8 @@ import { Automations } from '../pages/automations/automations.js';
 import { CrmPage } from '../pages/crm/crm.js?v=27';
 import { LeadDetailPage } from '../pages/crm/lead-detail.js?v=27';
 import settingsService from '../services/settings.service.js';
+import clinicService from '../services/clinic.service.js';
+import { applyClinicTheme } from '../utils/theme.js';
 import eventsService from '../services/events.service.js';
 import internalChatWidget from '../components/chat/internal-chat.js';
 
@@ -37,7 +39,13 @@ const guardRoute = (featureKey, PageClass) => {
       this.container = container;
       this.params = params;
       const features = state.get('features') || {};
-      if (!features[featureKey]) {
+      const isEnabled = Boolean(
+        features[featureKey] ??
+        (featureKey === 'omnichannelMessaging' ? features.omnichannel_messaging : undefined) ??
+        (featureKey === 'aiAutomations' ? features.ai_automations : undefined) ??
+        false
+      );
+      if (!isEnabled) {
         window.location.hash = '#/';
         this.page = null;
       } else {
@@ -67,14 +75,14 @@ router.addRoute('#/crm/opportunities', guardRoute('crm', CrmPage));
 router.addRoute('#/crm/tasks', guardRoute('crm', CrmPage));
 router.addRoute('#/appointments', Appointments);
 router.addRoute('#/personal-calendar', PersonalCalendarPage);
-router.addRoute('#/cabinets', Cabinets);
+router.addRoute('#/cabinets', guardRoute('cabinets', Cabinets));
 router.addRoute('#/doctors', Doctors);
 router.addRoute('#/treatments', Treatments);
 router.addRoute('#/quotations', Quotations);
 router.addRoute('#/invoices', Invoices);
 router.addRoute('#/receipts', Receipts);
 router.addRoute('#/payments', Payments);
-router.addRoute('#/reports', Reports);
+router.addRoute('#/reports', guardRoute('reports', Reports));
 router.addRoute('#/settings', Settings);
 
 router.addRoute('#/messages', guardRoute('omnichannelMessaging', Messages));
@@ -139,27 +147,47 @@ async function initApp() {
     }
   }
 
-  // Cargar información de la clínica (público / sin sesión) para login
-  if (!token) {
-    try {
-      const clinicInfo = await settingsService.getClinicInfo();
-      state.set('clinicInfo', clinicInfo);
-    } catch {
-      // Si falla, se usará un valor por defecto donde sea necesario
+  // Función para cargar y aplicar configuración de la clínica activa
+  const refreshClinicConfig = async () => {
+    const currentToken = state.get('token');
+    if (currentToken) {
+      try {
+        const config = await clinicService.getActiveConfig();
+        if (config) {
+          if (config.identity) state.set('clinicInfo', config.identity);
+          if (config.features) state.set('features', config.features);
+          if (config.cabinets) state.set('cabinets', config.cabinets);
+          if (config.identity?.primary_color) {
+            applyClinicTheme(config.identity.primary_color);
+          }
+          return;
+        }
+      } catch (err) {
+        // Fallback si la sesión aún se está inicializando
+      }
     }
-  }
 
-  // Suscribirse a cambios de clínica activa para refrescar clinicInfo
-  // (cubre login, clinic-switcher, y cualquier otro cambio de activeClinicId)
-  state.subscribe('activeClinicId', async (newClinicId) => {
-    // Ignorar valores nulos durante logout o si ya está cargando
-    if (!newClinicId) return;
+    // Fallback sin sesión o si la llamada falló
     try {
       const clinicInfo = await settingsService.getClinicInfo();
-      state.set('clinicInfo', clinicInfo);
+      if (clinicInfo) {
+        state.set('clinicInfo', clinicInfo);
+        if (clinicInfo.primary_color) {
+          applyClinicTheme(clinicInfo.primary_color);
+        }
+      }
     } catch {
-      // mantener el valor anterior si falla
+      // Usar defaults si falla
     }
+  };
+
+  // Carga inicial de configuración
+  await refreshClinicConfig();
+
+  // Suscribirse a cambios de clínica activa para refrescar clinicInfo y features
+  state.subscribe('activeClinicId', async (newClinicId) => {
+    if (!newClinicId) return;
+    await refreshClinicConfig();
   });
 
   // Ocultar cargador e iniciar router

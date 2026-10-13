@@ -41,7 +41,12 @@ class PDFService {
   async getClinicInfo(clinicId) {
     try {
       const info = await settingsRepository.getClinicInfo(clinicId);
-      if (info) return info;
+      if (info) {
+        return {
+          ...info,
+          primary_color: info.primary_color || '#0f86ec',
+        };
+      }
 
       if (clinicId) {
         const cRes = await query('SELECT * FROM clinics WHERE id = $1', [clinicId]);
@@ -55,6 +60,7 @@ class PDFService {
             email: c.email,
             currency: 'EUR',
             tax_rate: 0,
+            primary_color: '#0f86ec',
           };
         }
       }
@@ -75,6 +81,7 @@ class PDFService {
       website: 'www.videsdental.com',
       currency: 'EUR',
       tax_rate: 0,
+      primary_color: '#0f86ec',
     };
   }
 
@@ -146,11 +153,10 @@ class PDFService {
 
     // 1. Si la clínica tiene logo personalizado configurado en la base de datos
     if (clinic.logo_url) {
-      const clean = String(clinic.logo_url).replace(/^\/?uploads\//, '');
+      const clean = path.basename(String(clinic.logo_url));
       candidates.push(
-        path.resolve(__dirname, '../uploads', clean),
         path.resolve(__dirname, '../../uploads', clean),
-        path.resolve(clinic.logo_url)
+        path.resolve(__dirname, '../uploads', clean)
       );
     }
 
@@ -174,12 +180,14 @@ class PDFService {
   /**
    * Dibuja la barra de acento superior y el encabezado de la clínica con logo.
    */
-  drawHeader(doc, clinic, docTitle, docNumber, badgeText = null, badgeColor = COLORS.primary) {
+  drawHeader(doc, clinic, docTitle, docNumber, badgeText = null, badgeColor = null) {
     const pageWidth = doc.page.width;
     const margin = 40;
+    const primaryColor = clinic?.primary_color || COLORS.primary;
+    const effectiveBadgeColor = badgeColor || primaryColor;
 
     // Barra superior decorativa con color corporativo
-    doc.rect(0, 0, pageWidth, 6).fill(COLORS.primary);
+    doc.rect(0, 0, pageWidth, 6).fill(primaryColor);
 
     // Intentar ubicar y dibujar el logo de la clínica
     const logoPath = this.resolveClinicLogoPath(clinic);
@@ -200,7 +208,7 @@ class PDFService {
 
     // Datos de la clínica
     doc
-      .fillColor(COLORS.primary)
+      .fillColor(primaryColor)
       .font('Helvetica-Bold')
       .fontSize(13)
       .text(this.stripEmojis(clinic.name) || 'Clínica Dental', clinicX, 20, { width: clinicWidth });
@@ -253,12 +261,14 @@ class PDFService {
   /**
    * Dibuja el encabezado exclusivo para reportes y balances (evita solapamientos tipográficos).
    */
-  drawReportHeader(doc, clinic, { title, docNumber = 'INFORME OFICIAL', periodText = null, badgeColor = COLORS.primary }) {
+  drawReportHeader(doc, clinic, { title, docNumber = 'INFORME OFICIAL', periodText = null, badgeColor = null }) {
     const pageWidth = doc.page.width;
     const margin = 40;
+    const primaryColor = clinic?.primary_color || COLORS.primary;
+    const effectiveBadgeColor = badgeColor || primaryColor;
 
     // Barra superior decorativa corporativa
-    doc.rect(0, 0, pageWidth, 6).fill(COLORS.primary);
+    doc.rect(0, 0, pageWidth, 6).fill(primaryColor);
 
     // Intentar ubicar y dibujar el logo de la clínica
     const logoPath = this.resolveClinicLogoPath(clinic);

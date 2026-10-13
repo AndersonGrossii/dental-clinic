@@ -6,20 +6,26 @@ import toast from '../../components/toast/toast.js';
 import state from '../../scripts/state.js';
 import { formatDate } from '../../utils/helpers.js';
 
-const CABINET_LIST = [
-  'Gabinete 1',
-  'Gabinete 2',
-  'Primeras Visitas 1',
-  'Primeras Visitas 2'
-];
-
 export class Cabinets {
   constructor(container) {
     this.container = container;
     this.currentDate = new Date();
     this.viewMode = 'week'; // 'week' o 'day'
-    this.selectedCabinet = 'Gabinete 1';
+    this.selectedCabinet = this.getCabinetList()[0] || 'Gabinete 1';
     this.appointmentsList = [];
+  }
+
+  getCabinetList() {
+    const cabinets = state.get('cabinets');
+    if (Array.isArray(cabinets) && cabinets.length > 0) {
+      return cabinets.filter(c => c.is_active !== false).map(c => c.name);
+    }
+    return [
+      'Gabinete 1',
+      'Gabinete 2',
+      'Primeras Visitas 1',
+      'Primeras Visitas 2'
+    ];
   }
 
   async render() {
@@ -64,7 +70,8 @@ export class Cabinets {
       ? this.renderWeekView()
       : this.renderDayView();
 
-    const cabinetOptions = CABINET_LIST.map(cab => `
+    const cabinetList = this.getCabinetList();
+    const cabinetOptions = cabinetList.map(cab => `
       <option value="${cab}" ${this.selectedCabinet === cab ? 'selected' : ''}>${cab}</option>
     `).join('');
 
@@ -199,10 +206,11 @@ export class Cabinets {
     }
 
     let cells = '';
+    const cabinetList = this.getCabinetList();
 
     // Encabezado de la cuadrícula
     cells += `<div class="db-wg-time-header">Hora</div>`;
-    CABINET_LIST.forEach(cab => {
+    cabinetList.forEach(cab => {
       cells += `<div class="db-wg-day-header today" style="text-align: center; font-weight: 700;">${cab}</div>`;
     });
 
@@ -231,7 +239,7 @@ export class Cabinets {
       const slotEndMin = parseInt(slot.split(':')[0]) * 60 + parseInt(slot.split(':')[1]) + 30;
       const slotEndStr = `${String(Math.floor(slotEndMin / 60)).padStart(2, '0')}:${String(slotEndMin % 60).padStart(2, '0')}`;
 
-      CABINET_LIST.forEach(cab => {
+      cabinetList.forEach(cab => {
         const appts = this.appointmentsList.filter(a => {
           if (a.appointment_date.substring(0, 10) !== dateStr) return false;
           if (a.gabinete !== cab) return false;

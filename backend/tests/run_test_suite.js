@@ -28,6 +28,7 @@ const suites = [
   { name: 'AI Tool Grounding Hub & Dynamic Services Integration (43 pruebas)', file: 'test_ai_tool_grounding.js' },
   { name: 'AI Appointment Workflow & Lifecycle (32 pruebas)', file: 'test_ai_appointment_workflow.js' },
   { name: 'CRM Lead Workflow, Returning Patient Habitual Doctor & Handoff (53 pruebas)', file: 'test_ai_crm_lead_workflow.js' },
+  { name: 'Configuración Multi-Clínica, Features y Gabinetes (35 pruebas)', file: 'test_multi_clinic_configuration.js' },
 ];
 
 console.log('\n╔══════════════════════════════════════════════════════════════════╗');

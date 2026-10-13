@@ -9,6 +9,7 @@ import { toAppointmentDTO, toCalendarEventDTO } from '../dtos/appointment.dto.js
 import { formatDateSQL } from '../utils/date.js';
 import { logger } from '../utils/logger.js';
 import holidayService from './holiday.service.js';
+import cabinetRepository from '../repositories/cabinet.repository.js';
 
 /**
  * Servicio que encapsula la lógica de negocio para la gestión de citas.
@@ -101,16 +102,39 @@ class AppointmentService {
       throw new AppError('Solo el propietario o dirección pueden agendar citas en fin de semana.', 403);
     }
 
+    const currentClinicId = als.getStore()?.clinicId || 1;
+    const cabinetName = (data.gabinete || 'Gabinete 1').trim();
+
+    // Validar que el gabinete exista y esté activo en esta clínica
+    const cabinetRecord = await cabinetRepository.findByName(cabinetName, currentClinicId);
+    if (!cabinetRecord || !cabinetRecord.is_active) {
+      throw new AppError(`El gabinete '${cabinetName}' no existe o no está activo en esta clínica.`, 400);
+    }
+
+    // Verificar conflicto de doctor
+    const doctorConflict = await appointmentRepository.checkConflict(
+      data.doctor_id,
+      data.appointment_date,
+      data.start_time,
+      data.end_time
+    );
+    if (doctorConflict) {
+      throw new AppError(
+        `Conflicto de horario: el doctor ya tiene una cita programada con ${doctorConflict.patient_name} de ${doctorConflict.start_time} a ${doctorConflict.end_time}.`,
+        409
+      );
+    }
+
     // Verificar conflicto de gabinete (un gabinete no puede tener dos citas a la vez)
     const cabinetConflict = await appointmentRepository.checkCabinetConflict(
-      data.gabinete || 'Gabinete 1',
+      cabinetName,
       data.appointment_date,
       data.start_time,
       data.end_time
     );
     if (cabinetConflict) {
       throw new AppError(
-        `Conflicto de gabinete: ya hay una cita programada en el ${data.gabinete || 'Gabinete 1'} con ${cabinetConflict.patient_name} de ${cabinetConflict.start_time} a ${cabinetConflict.end_time}.`,
+        `Conflicto de gabinete: ya hay una cita programada en el ${cabinetName} con ${cabinetConflict.patient_name} de ${cabinetConflict.start_time} a ${cabinetConflict.end_time}.`,
         409
       );
     }
@@ -221,6 +245,30 @@ class AppointmentService {
       const isWeekend = dow === 0 || dow === 6;
       if (isWeekend && !isOwnerOrDirector) {
         throw new AppError('Solo el propietario o dirección pueden reagendar citas en fin de semana.', 403);
+      }
+    }
+
+    if (data.gabinete) {
+      const currentClinicId = als.getStore()?.clinicId || existing.clinic_id || 1;
+      const cabinetRecord = await cabinetRepository.findByName(data.gabinete.trim(), currentClinicId);
+      if (!cabinetRecord || !cabinetRecord.is_active) {
+        throw new AppError(`El gabinete '${data.gabinete.trim()}' no existe o no está activo en esta clínica.`, 400);
+      }
+    }
+
+    if (timeChanged || data.doctor_id) {
+      const doctorConflict = await appointmentRepository.checkConflict(
+        doctorId,
+        appointmentDate,
+        startTime,
+        endTime,
+        id
+      );
+      if (doctorConflict) {
+        throw new AppError(
+          `Conflicto de horario: el doctor ya tiene una cita programada con ${doctorConflict.patient_name} de ${doctorConflict.start_time} a ${doctorConflict.end_time}.`,
+          409
+        );
       }
     }
 

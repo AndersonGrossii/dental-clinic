@@ -5,12 +5,14 @@ import { Router } from 'express';
 import { authMiddleware } from '../middlewares/auth.middleware.js';
 import { allRoles, staffOnly } from '../middlewares/role.middleware.js';
 import { auditMiddleware } from '../middlewares/audit.middleware.js';
+import { requireFeature } from '../middlewares/feature.middleware.js';
 import * as messagingController from '../controllers/messaging.controller.js';
 
 const router = Router();
 
-// Todas las rutas requieren autenticación
+// Todas las rutas requieren autenticación y feature 'omnichannel_messaging' activa
 router.use(authMiddleware);
+router.use(requireFeature('omnichannel_messaging'));
 
 // 1. Estadísticas y plantillas
 router.get('/stats', allRoles, messagingController.getStats);

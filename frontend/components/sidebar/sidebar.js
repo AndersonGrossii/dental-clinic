@@ -47,13 +47,20 @@ export class Sidebar {
     const clinicName = clinicInfo?.name || 'Vides Dental';
     const features = state.get('features') || {};
 
+    const hasFeature = (key, fallback = true) => {
+      if (features[key] !== undefined) return Boolean(features[key]);
+      if (key === 'omnichannel_messaging' && features.omnichannelMessaging !== undefined) return Boolean(features.omnichannelMessaging);
+      if (key === 'ai_automations' && features.aiAutomations !== undefined) return Boolean(features.aiAutomations);
+      return fallback;
+    };
+
     const menuItems = [
       { path: '#/', label: 'Dashboard', icon: icons.dashboard, roles: ['propietario', 'direccion', 'recepcionista', 'doctor', 'higienista'] },
       { path: '#/patients', label: 'Pacientes', icon: icons.patients, roles: ['propietario', 'direccion', 'recepcionista', 'doctor', 'higienista'] },
-      ...(features.crm ? [{ path: '#/crm', label: 'CRM Leads', icon: icons.crm, roles: ['propietario', 'direccion', 'recepcionista'] }] : []),
+      ...(hasFeature('crm', true) ? [{ path: '#/crm', label: 'CRM Leads', icon: icons.crm, roles: ['propietario', 'direccion', 'recepcionista'] }] : []),
       { path: '#/appointments', label: 'Citas', icon: icons.appointments, roles: ['propietario', 'direccion', 'recepcionista', 'doctor', 'higienista'] },
       { path: '#/personal-calendar', label: 'Agenda Personal', icon: icons.personalCalendar, roles: ['propietario', 'direccion', 'recepcionista', 'doctor', 'higienista'] },
-      { path: '#/cabinets', label: 'Gabinetes', icon: icons.cabinets, roles: ['propietario', 'direccion', 'recepcionista', 'doctor', 'higienista'] },
+      ...(hasFeature('cabinets', true) ? [{ path: '#/cabinets', label: 'Gabinetes', icon: icons.cabinets, roles: ['propietario', 'direccion', 'recepcionista', 'doctor', 'higienista'] }] : []),
       { path: '#/doctors', label: 'Doctores', icon: icons.doctors, roles: ['propietario', 'direccion', 'recepcionista'] },
       { path: '#/treatments', label: 'Tratamientos', icon: icons.treatments, roles: ['propietario', 'direccion', 'recepcionista', 'doctor'] },
       { path: '#/quotations', label: 'Presupuestos', icon: icons.quotations, roles: ['propietario', 'direccion', 'recepcionista'] },
@@ -68,9 +75,9 @@ export class Sidebar {
         ]
       },
       { path: '#/payments', label: 'Pagos', icon: icons.payments, roles: ['propietario', 'direccion', 'recepcionista'] },
-      ...(features.omnichannelMessaging ? [{ path: '#/messages', label: 'Mensajes', icon: icons.messages, roles: ['propietario', 'direccion', 'recepcionista', 'doctor'] }] : []),
-      ...(features.aiAutomations ? [{ path: '#/automations', label: 'Automatizaciones & IA', icon: icons.automations, roles: ['propietario', 'direccion', 'recepcionista', 'doctor'] }] : []),
-      { path: '#/reports', label: 'Reportes', icon: icons.reports, roles: ['propietario', 'direccion'] },
+      ...(hasFeature('omnichannel_messaging', false) ? [{ path: '#/messages', label: 'Mensajes', icon: icons.messages, roles: ['propietario', 'direccion', 'recepcionista', 'doctor'] }] : []),
+      ...(hasFeature('ai_automations', false) ? [{ path: '#/automations', label: 'Automatizaciones & IA', icon: icons.automations, roles: ['propietario', 'direccion', 'recepcionista', 'doctor'] }] : []),
+      ...(hasFeature('reports', true) ? [{ path: '#/reports', label: 'Reportes', icon: icons.reports, roles: ['propietario', 'direccion'] }] : []),
       { path: '#/settings', label: 'Configuración', icon: icons.settings, roles: ['propietario', 'direccion', 'doctor'] },
     ];
 
@@ -164,13 +171,17 @@ export class Sidebar {
 
     const initials = (user?.first_name?.[0] || 'U').toUpperCase() + (user?.last_name?.[0] || '').toUpperCase();
 
+    const logoSrc = clinicInfo?.logo_url
+      ? (clinicInfo.logo_url.startsWith('/') ? clinicInfo.logo_url : `/${clinicInfo.logo_url}`)
+      : '/assets/videsDentalLogo.jpg';
+
     this.container.innerHTML = `
       <!-- TOP NAVBAR -->
       <header class="top-navbar">
         <div class="top-nav__left">
           <!-- Logo & Brand -->
           <a href="#/" class="top-nav__brand">
-            <img src="/assets/videsDentalLogo.jpg" alt="Vides Dental" class="top-nav__logo" onerror="this.style.display='none';" />
+            <img src="${logoSrc}" alt="${clinicName}" class="top-nav__logo" onerror="this.src='/assets/videsDentalLogo.jpg';" />
             <span class="top-nav__brand-title">${clinicName}</span>
           </a>
 

@@ -46,7 +46,7 @@ class Store {
       this.subscribers[key] = [];
     }
     this.subscribers[key].push(callback);
-    
+
     // Ejecutar inmediatamente con el valor actual
     callback(this.state[key]);
 

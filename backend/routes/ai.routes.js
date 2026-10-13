@@ -4,11 +4,13 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/auth.middleware.js';
 import { allRoles, staffOnly } from '../middlewares/role.middleware.js';
+import { requireFeature } from '../middlewares/feature.middleware.js';
 import * as aiController from '../controllers/ai.controller.js';
 
 const router = Router();
 
 router.use(authMiddleware);
+router.use(requireFeature('ai_automations'));
 
 // 1. Briefing matinal operativo
 router.get('/briefing', allRoles, aiController.getReceptionBriefing);

@@ -1,6 +1,7 @@
-﻿{
+{
   "name": "dental-clinic",
   "version": "1.0.0",
+  "type": "module",
   "description": "Sistema de Gestión de Clínica Dental (Vides Dental) - Monorepo",
   "scripts": {
     "test": "node backend/tests/run_test_suite.js",
