@@ -702,7 +702,7 @@ export class PatientProfile {
 
       tabContent = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4);">
-          <h3>Notas de Evolución Clínica</h3>
+          <h3>Historial de Ortodoncia</h3>
           ${canWriteNotes ? `<button id="profile-add-note-btn" class="btn btn-sm btn-primary">+ Nueva Nota</button>` : ''}
         </div>
         <div style="max-height: 500px; overflow-y: auto; padding-right: 8px;">
@@ -1055,7 +1055,7 @@ export class PatientProfile {
         ${isClinicalStaff ? '' : tabLink('invoices', 'Facturas')}
         ${isClinicalStaff ? '' : tabLink('receipts', 'Recibos')}
         ${isClinicalStaff ? '' : tabLink('quotations', 'Presupuestos')}
-        ${tabLink('notes', 'Notas de Evolución')}
+        ${tabLink('notes', 'Historial de Ortodoncia')}
         ${hasPrescriptions ? tabLink('prescriptions', 'Prescripciones') : ''}
       </div>
 
