@@ -11,6 +11,11 @@ export class Reports {
     this.container = container;
     this.activeReport = 'ingresos';
     this.reportData = null;
+    this.revenueMethodChart = null;
+    this.revenueDoctorChart = null;
+    this.appointmentStatusChart = null;
+    this.appointmentDoctorChart = null;
+    this.treatmentPopularityChart = null;
   }
 
   async render() {
@@ -21,17 +26,26 @@ export class Reports {
       return;
     }
 
-    try {
-      await this.loadChartJs();
-      this.renderLayout();
-    } catch (err) {
-      toast.error('Error al iniciar el módulo de reportes');
-    }
+    // Renderizar la interfaz inmediatamente para que el usuario pueda interactuar
+    this.renderLayout();
+    this.mount();
+
+    // Cargar Chart.js de forma asíncrona sin bloquear la interfaz ni los botones
+    this.loadChartJs().catch((err) => {
+      console.warn('Chart.js no pudo cargarse desde CDN; los gráficos visuales se omitirán:', err.message);
+    });
   }
 
   async loadChartJs() {
     if (window.Chart) return Promise.resolve();
     return new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[src*="chart.js"]');
+      if (existing) {
+        if (window.Chart) return resolve();
+        existing.addEventListener('load', () => resolve());
+        existing.addEventListener('error', () => reject(new Error('No se pudo cargar Chart.js')));
+        return;
+      }
       const script = document.createElement('script');
       script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
       script.onload = () => resolve();
@@ -70,9 +84,9 @@ export class Reports {
               <option value="facturas_recibos">Resumen de Facturas y Recibos</option>
             </select>
           </div>
-          <button id="generate-report-btn" class="btn btn-primary">Generar Reporte</button>
-          <button id="export-pdf-btn" class="btn btn-primary" style="display: none; background-color: #0369a1; border-color: #0284c7;">📄 Descargar PDF</button>
-          <button id="print-report-btn" class="btn btn-outline" style="display: none;">🖨️ Imprimir</button>
+          <button id="generate-report-btn" class="btn btn-primary" type="button">Generar Reporte</button>
+          <button id="export-pdf-btn" class="btn btn-primary" style="display: none; background-color: #0369a1; border-color: #0284c7;" type="button">📄 Descargar PDF</button>
+          <button id="print-report-btn" class="btn btn-outline" style="display: none;" type="button">🖨️ Imprimir</button>
         </div>
       </div>
 
@@ -89,30 +103,49 @@ export class Reports {
   mount() {
     const generateBtn = this.container.querySelector('#generate-report-btn');
     const exportPdfBtn = this.container.querySelector('#export-pdf-btn');
+    const printBtn = this.container.querySelector('#print-report-btn');
 
     if (generateBtn) {
-      generateBtn.addEventListener('click', () => this.generateReport());
+      generateBtn.onclick = (e) => {
+        if (e) e.preventDefault();
+        this.generateReport();
+      };
     }
 
     if (exportPdfBtn) {
-      exportPdfBtn.addEventListener('click', () => this.exportPdf());
+      exportPdfBtn.onclick = (e) => {
+        if (e) e.preventDefault();
+        this.exportPdf();
+      };
     }
 
-    const printBtn = this.container.querySelector('#print-report-btn');
     if (printBtn) {
-      printBtn.addEventListener('click', () => this.printReport());
+      printBtn.onclick = (e) => {
+        if (e) e.preventDefault();
+        this.printReport();
+      };
     }
   }
 
   async generateReport() {
-    const from = this.container.querySelector('#report-date-from').value;
-    const to = this.container.querySelector('#report-date-to').value;
-    const type = this.container.querySelector('#report-type').value;
+    const todayStr = new Date().toISOString().split('T')[0];
+    const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+
+    const from = this.container.querySelector('#report-date-from')?.value || startOfMonth;
+    const to = this.container.querySelector('#report-date-to')?.value || todayStr;
+    const type = this.container.querySelector('#report-type')?.value || 'ingresos';
 
     this.activeReport = type;
 
     const resultsContainer = this.container.querySelector('#report-results-container');
+    if (!resultsContainer) return;
     resultsContainer.innerHTML = '<div class="loading-spinner"></div>';
+
+    // Ocultar botones de exportar mientras se procesa la consulta
+    const exportPdfBtn = this.container.querySelector('#export-pdf-btn');
+    const printBtn = this.container.querySelector('#print-report-btn');
+    if (exportPdfBtn) exportPdfBtn.style.display = 'none';
+    if (printBtn) printBtn.style.display = 'none';
 
     try {
       if (type === 'ingresos') {
@@ -288,14 +321,19 @@ export class Reports {
   }
 
   initRevenueCharts(data) {
+    if (!window.Chart) return;
     const methodCtx = document.getElementById('revenue-method-chart')?.getContext('2d');
     if (methodCtx) {
-      new Chart(methodCtx, {
+      if (this.revenueMethodChart) {
+        this.revenueMethodChart.destroy();
+        this.revenueMethodChart = null;
+      }
+      this.revenueMethodChart = new window.Chart(methodCtx, {
         type: 'doughnut',
         data: {
-          labels: data.byMethod.map(m => m.method),
+          labels: (data.byMethod || []).map(m => m.method),
           datasets: [{
-            data: data.byMethod.map(m => Number(m.total)),
+            data: (data.byMethod || []).map(m => Number(m.total)),
             backgroundColor: ['#0ea5e9', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#64748b']
           }]
         },
@@ -310,13 +348,17 @@ export class Reports {
 
     const docCtx = document.getElementById('revenue-doctor-chart')?.getContext('2d');
     if (docCtx) {
-      new Chart(docCtx, {
+      if (this.revenueDoctorChart) {
+        this.revenueDoctorChart.destroy();
+        this.revenueDoctorChart = null;
+      }
+      this.revenueDoctorChart = new window.Chart(docCtx, {
         type: 'bar',
         data: {
-          labels: data.byDoctor.map(d => d.doctor),
+          labels: (data.byDoctor || []).map(d => d.doctor),
           datasets: [{
             label: 'Ingresos ($)',
-            data: data.byDoctor.map(d => Number(d.total)),
+            data: (data.byDoctor || []).map(d => Number(d.total)),
             backgroundColor: '#0f766e'
           }]
         },
@@ -334,15 +376,20 @@ export class Reports {
   }
 
   initAppointmentCharts(data) {
+    if (!window.Chart) return;
     const statusCtx = document.getElementById('appointments-status-chart')?.getContext('2d');
     if (statusCtx) {
-      new Chart(statusCtx, {
+      if (this.appointmentStatusChart) {
+        this.appointmentStatusChart.destroy();
+        this.appointmentStatusChart = null;
+      }
+      this.appointmentStatusChart = new window.Chart(statusCtx, {
         type: 'doughnut',
         data: {
-          labels: data.byStatus.map(s => s.status),
+          labels: (data.byStatus || []).map(s => s.status),
           datasets: [{
-            data: data.byStatus.map(s => Number(s.count)),
-            backgroundColor: data.byStatus.map(s => s.color || '#64748b')
+            data: (data.byStatus || []).map(s => Number(s.count)),
+            backgroundColor: (data.byStatus || []).map(s => s.color || '#64748b')
           }]
         },
         options: {
@@ -356,13 +403,17 @@ export class Reports {
 
     const docCtx = document.getElementById('appointments-doctor-chart')?.getContext('2d');
     if (docCtx) {
-      new Chart(docCtx, {
+      if (this.appointmentDoctorChart) {
+        this.appointmentDoctorChart.destroy();
+        this.appointmentDoctorChart = null;
+      }
+      this.appointmentDoctorChart = new window.Chart(docCtx, {
         type: 'bar',
         data: {
-          labels: data.byDoctor.map(d => d.doctor),
+          labels: (data.byDoctor || []).map(d => d.doctor),
           datasets: [{
             label: 'Citas',
-            data: data.byDoctor.map(d => Number(d.count)),
+            data: (data.byDoctor || []).map(d => Number(d.count)),
             backgroundColor: '#4f46e5'
           }]
         },
@@ -380,16 +431,21 @@ export class Reports {
   }
 
   initTreatmentCharts(data) {
+    if (!window.Chart) return;
     const treatCtx = document.getElementById('treatments-popularity-chart')?.getContext('2d');
     if (treatCtx) {
-      new Chart(treatCtx, {
+      if (this.treatmentPopularityChart) {
+        this.treatmentPopularityChart.destroy();
+        this.treatmentPopularityChart = null;
+      }
+      this.treatmentPopularityChart = new window.Chart(treatCtx, {
         type: 'bar',
         data: {
-          labels: data.popular.map(t => t.treatment),
+          labels: (data.popular || []).map(t => t.treatment),
           datasets: [
             {
               label: 'Frecuencia (veces)',
-              data: data.popular.map(t => Number(t.count)),
+              data: (data.popular || []).map(t => Number(t.count)),
               backgroundColor: '#3b82f6'
             }
           ]
@@ -588,12 +644,16 @@ export class Reports {
       tratamientos: 'Reporte Clínico (Tratamientos)',
       facturas_recibos: 'Resumen de Facturas y Recibos',
     };
-    const from = this.container.querySelector('#report-date-from').value;
-    const to = this.container.querySelector('#report-date-to').value;
+    const todayStr = new Date().toISOString().split('T')[0];
+    const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+    const from = this.container.querySelector('#report-date-from')?.value || startOfMonth;
+    const to = this.container.querySelector('#report-date-to')?.value || todayStr;
     const typeLabel = typeLabels[this.activeReport] || 'Reporte';
     const title = `${typeLabel} — ${from} al ${to}`;
+    const clinicName = state.get('activeClinic')?.name || 'Clínica Dental';
 
     const contentEl = this.container.querySelector('#report-results-container');
+    if (!contentEl) return;
     const cloneEl = contentEl.cloneNode(true);
     
     // Ensure both sections are visible in printable document
@@ -605,6 +665,10 @@ export class Reports {
     const printContent = cloneEl.innerHTML.replace(/<canvas[^>]*>.*?<\/canvas>/g, '');
 
     const w = window.open('', '_blank');
+    if (!w) {
+      toast.error('La ventana de impresión fue bloqueada por el navegador.');
+      return;
+    }
     w.document.write(`
       <html><head><title>${title}</title>
       <style>
@@ -619,7 +683,7 @@ export class Reports {
         .empty-state { text-align: center; padding: 40px; color: #999; }
         .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
       </style></head><body>
-        <h1>Clinica Vides Dental</h1>
+        <h1>${clinicName}</h1>
         <div class="subtitle">${title}</div>
         ${printContent}
         <p style="text-align:center;color:#999;margin-top:40px;font-size:12px;">Generado el ${new Date().toLocaleString()}</p>
@@ -630,12 +694,37 @@ export class Reports {
   }
 
   exportPdf() {
-    const from = this.container.querySelector('#report-date-from').value;
-    const to = this.container.querySelector('#report-date-to').value;
+    const todayStr = new Date().toISOString().split('T')[0];
+    const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+    const from = this.container.querySelector('#report-date-from')?.value || startOfMonth;
+    const to = this.container.querySelector('#report-date-to')?.value || todayStr;
     reportService.exportPdf(this.activeReport, from, to);
   }
 
   exportCsv() {
     this.exportPdf();
+  }
+
+  destroy() {
+    if (this.revenueMethodChart) {
+      this.revenueMethodChart.destroy();
+      this.revenueMethodChart = null;
+    }
+    if (this.revenueDoctorChart) {
+      this.revenueDoctorChart.destroy();
+      this.revenueDoctorChart = null;
+    }
+    if (this.appointmentStatusChart) {
+      this.appointmentStatusChart.destroy();
+      this.appointmentStatusChart = null;
+    }
+    if (this.appointmentDoctorChart) {
+      this.appointmentDoctorChart.destroy();
+      this.appointmentDoctorChart = null;
+    }
+    if (this.treatmentPopularityChart) {
+      this.treatmentPopularityChart.destroy();
+      this.treatmentPopularityChart = null;
+    }
   }
 }

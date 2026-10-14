@@ -8,7 +8,8 @@ import { ApiResponse } from '../utils/response.js';
 
 export const getRevenueReport = async (req, res, next) => {
   try {
-    const { start_date, end_date } = req.query;
+    const start_date = req.query.start_date || req.query.startDate;
+    const end_date = req.query.end_date || req.query.endDate;
     const report = await reportService.getRevenueReport(start_date, end_date);
     return ApiResponse.success(res, report, 'Reporte de ingresos obtenido');
   } catch (error) {
@@ -18,7 +19,8 @@ export const getRevenueReport = async (req, res, next) => {
 
 export const getAppointmentReport = async (req, res, next) => {
   try {
-    const { start_date, end_date } = req.query;
+    const start_date = req.query.start_date || req.query.startDate;
+    const end_date = req.query.end_date || req.query.endDate;
     const report = await reportService.getAppointmentReport(start_date, end_date);
     return ApiResponse.success(res, report, 'Reporte de citas obtenido');
   } catch (error) {
@@ -28,7 +30,8 @@ export const getAppointmentReport = async (req, res, next) => {
 
 export const getPatientReport = async (req, res, next) => {
   try {
-    const { start_date, end_date } = req.query;
+    const start_date = req.query.start_date || req.query.startDate;
+    const end_date = req.query.end_date || req.query.endDate;
     const report = await reportService.getPatientReport(start_date, end_date);
     return ApiResponse.success(res, report, 'Reporte de pacientes obtenido');
   } catch (error) {
@@ -38,7 +41,8 @@ export const getPatientReport = async (req, res, next) => {
 
 export const getTreatmentReport = async (req, res, next) => {
   try {
-    const { start_date, end_date } = req.query;
+    const start_date = req.query.start_date || req.query.startDate;
+    const end_date = req.query.end_date || req.query.endDate;
     const report = await reportService.getTreatmentReport(start_date, end_date);
     return ApiResponse.success(res, report, 'Reporte de tratamientos obtenido');
   } catch (error) {
@@ -58,7 +62,8 @@ export const getDashboardStats = async (req, res, next) => {
 
 export const getInvoiceReceiptSummaryReport = async (req, res, next) => {
   try {
-    const { start_date, end_date } = req.query;
+    const start_date = req.query.start_date || req.query.startDate;
+    const end_date = req.query.end_date || req.query.endDate;
     const report = await reportService.getInvoiceReceiptSummaryReport(start_date, end_date);
     return ApiResponse.success(res, report, 'Resumen de facturas y recibos obtenido exitosamente');
   } catch (error) {
@@ -72,7 +77,8 @@ export const getInvoiceReceiptSummaryReport = async (req, res, next) => {
 export const exportPdf = async (req, res, next) => {
   try {
     const { type } = req.params;
-    const { start_date, end_date } = req.query;
+    const start_date = req.query.start_date || req.query.startDate;
+    const end_date = req.query.end_date || req.query.endDate;
 
     const result = await pdfService.generateReportPDF(type, start_date, end_date);
     const isAttachment = req.query.inline !== 'true';
@@ -90,7 +96,9 @@ export const exportPdf = async (req, res, next) => {
 export const exportCsv = async (req, res, next) => {
   try {
     const { type } = req.params;
-    const { start_date, end_date, format } = req.query;
+    const start_date = req.query.start_date || req.query.startDate;
+    const end_date = req.query.end_date || req.query.endDate;
+    const format = req.query.format;
 
     // Si el usuario prefiere PDF o no se especifica explícitamente format=csv para facturas y recibos
     if (format === 'pdf' || (!format && type === 'facturas_recibos')) {

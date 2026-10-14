@@ -55,6 +55,11 @@ const guardRoute = (featureKey, PageClass) => {
     async render(params) {
       if (this.page) return this.page.render(params || this.params);
     }
+    mount(params) {
+      if (this.page && typeof this.page.mount === 'function') {
+        return this.page.mount(params || this.params);
+      }
+    }
     destroy() {
       if (this.page && typeof this.page.destroy === 'function') {
         this.page.destroy();

@@ -98,6 +98,44 @@ async function runReportPdfTests() {
     assert(authUser && authUser.id === 1, 'Usuario extraído correctamente del token');
     assert(authUser && authUser.clinicId === 1, 'clinicId resuelto correctamente');
 
+    // 4. Probar resiliencia de ReportService con fechas vacías o undefined (defaults automáticos)
+    console.log('\n🔹 4. Probando resiliencia de ReportService ante parámetros de fecha vacíos...');
+    const reportService = (await import('../services/report.service.js')).default;
+    await als.run({ clinicId: 1, isOwner: true, roleName: 'propietario' }, async () => {
+      const rev = await reportService.getRevenueReport();
+      assert(typeof rev.total === 'number', 'RevenueReport sin fechas calcula total numérico por defecto');
+      assert(Array.isArray(rev.byMethod), 'RevenueReport byMethod es array');
+
+      const apt = await reportService.getAppointmentReport();
+      assert(typeof apt.total === 'number', 'AppointmentReport sin fechas calcula total numérico por defecto');
+      assert(Array.isArray(apt.byStatus), 'AppointmentReport byStatus es array');
+
+      const pat = await reportService.getPatientReport();
+      assert(typeof pat.newPatients === 'number', 'PatientReport sin fechas calcula newPatients');
+
+      const trt = await reportService.getTreatmentReport();
+      assert(Array.isArray(trt.popular), 'TreatmentReport sin fechas retorna lista de popular');
+
+      const invRec = await reportService.getInvoiceReceiptSummaryReport();
+      assert(Array.isArray(invRec.invoices), 'InvoiceReceiptSummary sin fechas retorna invoices array');
+      assert(Array.isArray(invRec.receipts), 'InvoiceReceiptSummary sin fechas retorna receipts array');
+    });
+
+    // 5. Probar compatibilidad de parámetros camelCase en ReportController
+    console.log('\n🔹 5. Probando compatibilidad camelCase/snake_case en ReportController...');
+    const reportController = await import('../controllers/report.controller.js');
+    await als.run({ clinicId: 1, isOwner: true, roleName: 'propietario' }, async () => {
+      let controllerData = null;
+      const mockReq = { query: { startDate: '2026-01-01', endDate: '2026-12-31' } };
+      const mockRes = {
+        status: () => mockRes,
+        json: (payload) => { controllerData = payload; return mockRes; }
+      };
+      await reportController.getRevenueReport(mockReq, mockRes, (err) => { if (err) throw err; });
+      assert(controllerData && controllerData.success, 'Controller procesa startDate/endDate camelCase exitosamente');
+      assert(typeof controllerData.data?.total === 'number', 'Controller retorna total numérico');
+    });
+
   } catch (error) {
     console.error('❌ Excepción durante las pruebas:', error);
     failed++;

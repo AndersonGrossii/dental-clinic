@@ -20,13 +20,21 @@ class ReportService {
    * Reporte de ingresos financieros.
    */
   async getRevenueReport(startDate, endDate) {
+    const today = new Date().toISOString().split('T')[0];
+    const sDate = (startDate && typeof startDate === 'string' && startDate.trim())
+      ? startDate.trim()
+      : new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+    const eDate = (endDate && typeof endDate === 'string' && endDate.trim())
+      ? endDate.trim()
+      : today;
+
     const pCond = this.getClinicCondition('p');
     
     // 1. Ingresos totales
     const totalResult = await query(
       `SELECT COALESCE(SUM(amount), 0) AS total FROM payments p
        WHERE payment_date >= $1 AND payment_date <= $2 AND deleted_at IS NULL ${pCond}`,
-      [startDate, endDate]
+      [sDate, eDate]
     );
 
     // 2. Ingresos por método de pago
@@ -36,7 +44,7 @@ class ReportService {
        INNER JOIN payment_methods pm ON p.payment_method_id = pm.id
        WHERE p.payment_date >= $1 AND p.payment_date <= $2 AND p.deleted_at IS NULL ${pCond}
        GROUP BY pm.label`,
-      [startDate, endDate]
+      [sDate, eDate]
     );
 
     // 3. Ingresos por doctor
@@ -48,7 +56,7 @@ class ReportService {
        INNER JOIN users u ON d.user_id = u.id
        WHERE p.payment_date >= $1 AND p.payment_date <= $2 AND p.deleted_at IS NULL AND i.deleted_at IS NULL ${pCond}
        GROUP BY u.first_name, u.last_name`,
-      [startDate, endDate]
+      [sDate, eDate]
     );
 
     // 4. Desglose diario
@@ -58,7 +66,7 @@ class ReportService {
        WHERE payment_date >= $1 AND payment_date <= $2 AND deleted_at IS NULL ${pCond}
        GROUP BY DATE(payment_date)
        ORDER BY DATE(payment_date) ASC`,
-      [startDate, endDate]
+      [sDate, eDate]
     );
 
     return {
@@ -73,13 +81,21 @@ class ReportService {
    * Reporte de citas médicas.
    */
   async getAppointmentReport(startDate, endDate) {
+    const today = new Date().toISOString().split('T')[0];
+    const sDate = (startDate && typeof startDate === 'string' && startDate.trim())
+      ? startDate.trim()
+      : new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+    const eDate = (endDate && typeof endDate === 'string' && endDate.trim())
+      ? endDate.trim()
+      : today;
+
     const aCond = this.getClinicCondition('a');
     
     // 1. Total de citas
     const totalResult = await query(
       `SELECT COUNT(*) AS total FROM appointments a
        WHERE appointment_date >= $1 AND appointment_date <= $2 AND deleted_at IS NULL ${aCond}`,
-      [startDate, endDate]
+      [sDate, eDate]
     );
 
     // 2. Citas por estado
@@ -90,7 +106,7 @@ class ReportService {
        WHERE a.appointment_date >= $1 AND a.appointment_date <= $2 AND a.deleted_at IS NULL ${aCond}
        GROUP BY s.label, s.color, s.sort_order
        ORDER BY s.sort_order`,
-      [startDate, endDate]
+      [sDate, eDate]
     );
 
     // 3. Citas por doctor
@@ -101,7 +117,7 @@ class ReportService {
        INNER JOIN users u ON d.user_id = u.id
        WHERE a.appointment_date >= $1 AND a.appointment_date <= $2 AND a.deleted_at IS NULL ${aCond}
        GROUP BY u.first_name, u.last_name`,
-      [startDate, endDate]
+      [sDate, eDate]
     );
 
     return {
@@ -115,13 +131,21 @@ class ReportService {
    * Reporte demográfico de pacientes.
    */
   async getPatientReport(startDate, endDate) {
+    const today = new Date().toISOString().split('T')[0];
+    const sDate = (startDate && typeof startDate === 'string' && startDate.trim())
+      ? startDate.trim()
+      : new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+    const eDate = (endDate && typeof endDate === 'string' && endDate.trim())
+      ? endDate.trim()
+      : today;
+
     const pCond = this.getClinicCondition('p');
 
     // Nuevos pacientes en el rango
     const newPatients = await query(
       `SELECT COUNT(*) AS count FROM patients p
        WHERE created_at >= $1 AND created_at <= $2 AND deleted_at IS NULL ${pCond}`,
-      [startDate, endDate]
+      [sDate, eDate]
     );
 
     // Total de pacientes activos
@@ -148,6 +172,14 @@ class ReportService {
    * Reporte de tratamientos realizados y populares.
    */
   async getTreatmentReport(startDate, endDate) {
+    const today = new Date().toISOString().split('T')[0];
+    const sDate = (startDate && typeof startDate === 'string' && startDate.trim())
+      ? startDate.trim()
+      : new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+    const eDate = (endDate && typeof endDate === 'string' && endDate.trim())
+      ? endDate.trim()
+      : today;
+
     const ptCond = this.getClinicCondition('pt');
     
     const popularResult = await query(
@@ -160,7 +192,7 @@ class ReportService {
        GROUP BY t.name
        ORDER BY count DESC, total DESC
        LIMIT 10`,
-      [startDate, endDate]
+      [sDate, eDate]
     );
 
     return {
