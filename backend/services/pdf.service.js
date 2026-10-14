@@ -795,7 +795,7 @@ class PDFService {
     const bufferPromise = this.streamToBuffer(doc);
 
     // 1. Encabezado
-    this.drawHeader(doc, clinic, 'Presupuesto Odontológico', `# ${quote.quote_number}`, badgeText, badgeColor);
+    this.drawHeader(doc, clinic, 'Presupuesto', `# ${quote.quote_number}`, badgeText, badgeColor);
 
     // 2. Paciente y Odontólogo
     this.drawPartyBoxes(doc, {
@@ -808,7 +808,7 @@ class PDFService {
       },
       doctor: {
         name: quote.doctor_name,
-        specialty: quote.doctor_specialty || 'Odontología Integral',
+        specialty: quote.doctor_specialty || '',
         license: quote.doctor_license,
       },
       docDate: quote.quotation_date || quote.created_at,
@@ -989,12 +989,7 @@ class PDFService {
       .moveTo(signRightX, signBoxY)
       .lineTo(signRightX + signBoxWidth, signBoxY)
       .stroke();
-    doc
-      .fillColor(COLORS.textSecondary)
-      .font('Helvetica')
-      .fontSize(7.5)
-      .text('Odontólogo Responsable', signRightX, signBoxY + 4, { width: signBoxWidth, align: 'center' });
-
+      
     // 6. Pie de página
     this.drawFooterAndPages(doc, clinic, `${clinic.name || 'Clínica Dental'} · Presupuesto clínico informativo sin valor de factura oficial.`);
 
