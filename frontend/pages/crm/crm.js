@@ -65,13 +65,14 @@ export class CrmPage {
 
       if (this.activeTab === 'leads') {
         const limit = this.leadsViewMode === 'kanban' ? 100 : this.pageSize;
+        const page = this.leadsViewMode === 'kanban' ? 1 : this.currentPage;
         const [kpiRes, res] = await Promise.all([
           dashboardPromise,
           crmService.getLeads({
             status: this.statusFilter || undefined,
             source: this.sourceFilter || undefined,
             search: this.searchQuery || undefined,
-            page: this.currentPage,
+            page,
             limit,
           }),
         ]);
@@ -81,11 +82,25 @@ export class CrmPage {
         if (res && Array.isArray(res.rows)) {
           this.leadsData = res;
         } else if (Array.isArray(res)) {
-          this.leadsData = { rows: res, total: res.length };
+          this.leadsData = { rows: res, total: res.length, page: 1, limit: res.length, totalPages: 1 };
         } else if (res && Array.isArray(res.data)) {
-          this.leadsData = { rows: res.data, total: res.pagination?.total ?? res.data.length };
+          const total = res.pagination?.total ?? res.data.length;
+          const lim = res.pagination?.limit ?? limit;
+          this.leadsData = {
+            rows: res.data,
+            total,
+            page: res.pagination?.page || page,
+            limit: lim,
+            totalPages: res.pagination?.totalPages || Math.ceil(total / lim) || 1,
+          };
         } else {
-          this.leadsData = { rows: [], total: 0 };
+          this.leadsData = { rows: [], total: 0, page: 1, limit, totalPages: 1 };
+        }
+
+        // Si la página solicitada quedó fuera de rango tras filtros, reajustar a página 1
+        if (this.leadsData.total > 0 && (!this.leadsData.rows || this.leadsData.rows.length === 0) && this.currentPage > 1) {
+          this.currentPage = 1;
+          return this.loadInitialData();
         }
       } else if (this.activeTab === 'opportunities') {
         const [kpiRes, res] = await Promise.all([
@@ -228,9 +243,54 @@ export class CrmPage {
     this.bindTabSpecificEvents();
   }
 
+  renderPaginationButtons(totalPages, currentPage, prefix = 'lead') {
+    if (totalPages <= 1) {
+      return `
+        <button 
+          type="button" 
+          class="btn btn-sm btn-primary ${prefix}-page-btn" 
+          data-page="1" 
+          style="min-width: 36px; padding: 4px 8px; font-weight: 700; cursor: pointer;"
+          aria-current="page"
+        >
+          1
+        </button>
+      `;
+    }
+
+    let buttons = '';
+    for (let i = 1; i <= totalPages; i++) {
+      if (
+        i === 1 ||
+        i === totalPages ||
+        (i >= currentPage - 1 && i <= currentPage + 1)
+      ) {
+        const isActive = i === currentPage;
+        buttons += `
+          <button 
+            type="button" 
+            class="btn btn-sm ${isActive ? 'btn-primary' : 'btn-outline'} ${prefix}-page-btn" 
+            data-page="${i}" 
+            style="min-width: 36px; padding: 4px 8px; font-weight: ${isActive ? '700' : '500'}; cursor: pointer;"
+            ${isActive ? 'aria-current="page"' : ''}
+          >
+            ${i}
+          </button>
+        `;
+      } else if (i === currentPage - 2 || i === currentPage + 2) {
+        buttons += `<span style="color: var(--text-secondary); padding: 0 4px; align-self: center; user-select: none;">...</span>`;
+      }
+    }
+    return buttons;
+  }
+
   renderLeadsView() {
     const rows = this.leadsData.rows || [];
     const kpis = this.dashboardKPIs?.leads || {};
+    const total = this.leadsData.total || 0;
+    const startIndex = total === 0 ? 0 : (this.currentPage - 1) * this.pageSize;
+    const startItem = total === 0 ? 0 : startIndex + 1;
+    const endItem = Math.min(startIndex + rows.length, total);
 
     const statusPills = [
       { key: '', label: 'Todos', count: kpis.total_leads ?? this.leadsData.total ?? 0, icon: '📋' },
@@ -241,6 +301,10 @@ export class CrmPage {
       { key: 'converted', label: 'Convertidos', count: kpis.converted_leads ?? 0, icon: '🦷' },
       { key: 'lost', label: 'Perdidos', count: kpis.lost_leads ?? 0, icon: '❌' },
     ];
+
+    const rangeText = this.leadsViewMode === 'kanban' 
+      ? `Mostrando <strong>${rows.length}</strong> de <strong>${total}</strong> prospectos`
+      : `Mostrando <strong>${startItem}–${endItem}</strong> de <strong>${total}</strong> prospectos`;
 
     return `
       <!-- Barra de Filtros Rápidos (Chips de Estado) -->
@@ -304,7 +368,7 @@ export class CrmPage {
           </div>
 
           <div style="font-size: 0.85rem; color: var(--text-secondary);">
-            Mostrando <strong>${rows.length}</strong> de <strong>${this.leadsData.total || 0}</strong>
+            ${rangeText}
           </div>
         </div>
       </div>
@@ -330,6 +394,11 @@ export class CrmPage {
     }
 
     const features = state.get('features') || {};
+    const total = this.leadsData.total || rows.length;
+    const totalPages = Math.ceil(total / this.pageSize) || 1;
+    const startIndex = (this.currentPage - 1) * this.pageSize;
+    const startItem = total === 0 ? 0 : startIndex + 1;
+    const endItem = Math.min(startIndex + rows.length, total);
     return `
       <div class="crm-table-container">
         <div class="table-responsive">
@@ -435,6 +504,36 @@ export class CrmPage {
               `).join('')}
             </tbody>
           </table>
+        </div>
+
+        <!-- Barra de Controles de Paginación -->
+        <div class="card-footer crm-pagination-bar" style="display: flex; justify-content: space-between; align-items: center; padding: var(--space-4); border-top: 1px solid var(--border-color); background: var(--bg-surface); flex-wrap: wrap; gap: var(--space-3);">
+          <div style="color: var(--text-secondary); font-size: 0.875rem;">
+            Mostrando <strong>${startItem}–${endItem}</strong> de <strong>${total}</strong> prospectos (Página <strong>${this.currentPage}</strong> de <strong>${totalPages}</strong>)
+          </div>
+          <div style="display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap;">
+            <button 
+              type="button" 
+              id="lead-prev-page-btn" 
+              class="btn btn-sm btn-outline" 
+              ${this.currentPage <= 1 ? 'disabled' : ''}
+              style="cursor: ${this.currentPage <= 1 ? 'not-allowed' : 'pointer'};"
+            >
+              ← Anterior
+            </button>
+            <div style="display: flex; gap: 4px; align-items: center;">
+              ${this.renderPaginationButtons(totalPages, this.currentPage, 'lead')}
+            </div>
+            <button 
+              type="button" 
+              id="lead-next-page-btn" 
+              class="btn btn-sm btn-outline" 
+              ${this.currentPage >= totalPages ? 'disabled' : ''}
+              style="cursor: ${this.currentPage >= totalPages ? 'not-allowed' : 'pointer'};"
+            >
+              Siguiente →
+            </button>
+          </div>
         </div>
       </div>
     `;
@@ -1219,6 +1318,45 @@ export class CrmPage {
           const mode = e.currentTarget.dataset.mode;
           if (this.leadsViewMode !== mode) {
             this.leadsViewMode = mode;
+            this.currentPage = 1;
+            await this.loadInitialData();
+            this.renderActiveTab();
+          }
+        });
+      });
+
+      // Paginación de Leads: Anterior
+      const prevLeadBtn = document.getElementById('lead-prev-page-btn');
+      if (prevLeadBtn) {
+        prevLeadBtn.addEventListener('click', async () => {
+          if (this.currentPage > 1) {
+            this.currentPage--;
+            await this.loadInitialData();
+            this.renderActiveTab();
+          }
+        });
+      }
+
+      // Paginación de Leads: Siguiente
+      const nextLeadBtn = document.getElementById('lead-next-page-btn');
+      if (nextLeadBtn) {
+        nextLeadBtn.addEventListener('click', async () => {
+          const total = this.leadsData.total || 0;
+          const totalPages = Math.ceil(total / this.pageSize) || 1;
+          if (this.currentPage < totalPages) {
+            this.currentPage++;
+            await this.loadInitialData();
+            this.renderActiveTab();
+          }
+        });
+      }
+
+      // Paginación de Leads: Botones numéricos de página
+      document.querySelectorAll('.lead-page-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const page = parseInt(e.currentTarget.dataset.page, 10);
+          if (page && page !== this.currentPage) {
+            this.currentPage = page;
             await this.loadInitialData();
             this.renderActiveTab();
           }

@@ -23,15 +23,24 @@ class CrmService {
         total: res.pagination.total ?? (res.data ? res.data.length : 0),
         page: res.pagination.page || 1,
         limit: res.pagination.limit || 20,
+        totalPages: res.pagination.totalPages || Math.ceil((res.pagination.total || 0) / (res.pagination.limit || 20)) || 1,
       };
     }
     if (Array.isArray(res)) {
-      return { rows: res, total: res.length };
+      return { rows: res, total: res.length, page: 1, limit: res.length, totalPages: 1 };
     }
     if (res && Array.isArray(res.data)) {
-      return { rows: res.data, total: res.pagination?.total ?? res.data.length };
+      const total = res.pagination?.total ?? res.data.length;
+      const limit = res.pagination?.limit || 20;
+      return {
+        rows: res.data,
+        total,
+        page: res.pagination?.page || 1,
+        limit,
+        totalPages: res.pagination?.totalPages || Math.ceil(total / limit) || 1,
+      };
     }
-    return res || { rows: [], total: 0 };
+    return res || { rows: [], total: 0, page: 1, limit: 20, totalPages: 1 };
   }
 
   /**
@@ -91,15 +100,24 @@ class CrmService {
         total: res.pagination.total ?? (res.data ? res.data.length : 0),
         page: res.pagination.page || 1,
         limit: res.pagination.limit || 20,
+        totalPages: res.pagination.totalPages || Math.ceil((res.pagination.total || 0) / (res.pagination.limit || 20)) || 1,
       };
     }
     if (Array.isArray(res)) {
-      return { rows: res, total: res.length };
+      return { rows: res, total: res.length, page: 1, limit: res.length, totalPages: 1 };
     }
     if (res && Array.isArray(res.data)) {
-      return { rows: res.data, total: res.pagination?.total ?? res.data.length };
+      const total = res.pagination?.total ?? res.data.length;
+      const limit = res.pagination?.limit || 20;
+      return {
+        rows: res.data,
+        total,
+        page: res.pagination?.page || 1,
+        limit,
+        totalPages: res.pagination?.totalPages || Math.ceil(total / limit) || 1,
+      };
     }
-    return res || { rows: [], total: 0 };
+    return res || { rows: [], total: 0, page: 1, limit: 20, totalPages: 1 };
   }
 
   /**
@@ -140,15 +158,24 @@ class CrmService {
         total: res.pagination.total ?? (res.data ? res.data.length : 0),
         page: res.pagination.page || 1,
         limit: res.pagination.limit || 50,
+        totalPages: res.pagination.totalPages || Math.ceil((res.pagination.total || 0) / (res.pagination.limit || 50)) || 1,
       };
     }
     if (Array.isArray(res)) {
-      return { rows: res, total: res.length };
+      return { rows: res, total: res.length, page: 1, limit: res.length, totalPages: 1 };
     }
     if (res && Array.isArray(res.data)) {
-      return { rows: res.data, total: res.pagination?.total ?? res.data.length };
+      const total = res.pagination?.total ?? res.data.length;
+      const limit = res.pagination?.limit || 50;
+      return {
+        rows: res.data,
+        total,
+        page: res.pagination?.page || 1,
+        limit,
+        totalPages: res.pagination?.totalPages || Math.ceil(total / limit) || 1,
+      };
     }
-    return res || { rows: [], total: 0 };
+    return res || { rows: [], total: 0, page: 1, limit: 50, totalPages: 1 };
   }
 
   /**
