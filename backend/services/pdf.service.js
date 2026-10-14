@@ -34,6 +34,58 @@ const COLORS = {
   white: '#ffffff',
 };
 
+/**
+ * Parsea un color hexadecimal (#RGB o #RRGGBB) a componentes RGB.
+ */
+function hexToRgb(hex) {
+  if (!hex || typeof hex !== 'string') return { r: 15, g: 134, b: 236 }; // #0f86ec fallback
+  let clean = hex.replace('#', '').trim();
+  if (clean.length === 3) {
+    clean = clean.split('').map(c => c + c).join('');
+  }
+  const num = parseInt(clean, 16);
+  if (isNaN(num)) return { r: 15, g: 134, b: 236 };
+  return {
+    r: (num >> 16) & 255,
+    g: (num >> 8) & 255,
+    b: num & 255,
+  };
+}
+
+function rgbToHex(r, g, b) {
+  const clamp = (v) => Math.max(0, Math.min(255, Math.round(v)));
+  return '#' + [r, g, b].map(v => clamp(v).toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Oscurece un color en un factor (0 a 1). Ej: 0.22 -> ~22% más oscuro.
+ */
+function darkenHex(hex, factor = 0.22) {
+  const { r, g, b } = hexToRgb(hex);
+  return rgbToHex(r * (1 - factor), g * (1 - factor), b * (1 - factor));
+}
+
+/**
+ * Aclara un color mezclándolo hacia blanco. Ej: 0.92 -> fondo muy suave.
+ */
+function lightenHex(hex, factor = 0.2) {
+  const { r, g, b } = hexToRgb(hex);
+  return rgbToHex(r + (255 - r) * factor, g + (255 - b) * factor, b + (255 - b) * factor);
+}
+
+/**
+ * Retorna la paleta temática completa y sus tonos para una clínica dada.
+ */
+function getClinicTheme(clinic = {}) {
+  const primary = clinic?.primary_color || COLORS.primary;
+  return {
+    primary,
+    primaryDark: darkenHex(primary, 0.22),
+    primaryLight: lightenHex(primary, 0.92),
+    primaryMedium: lightenHex(primary, 0.35),
+  };
+}
+
 class PDFService {
   /**
    * Obtiene la información de la clínica para encabezados de documentos.
@@ -45,10 +97,21 @@ class PDFService {
         return {
           ...info,
           primary_color: info.primary_color || '#0f86ec',
+          logo_url: info.logo_url || null,
         };
       }
 
       if (clinicId) {
+        const ciRes = await query('SELECT * FROM clinic_information WHERE clinic_id = $1 LIMIT 1', [clinicId]);
+        if (ciRes.rows.length > 0) {
+          const ci = ciRes.rows[0];
+          return {
+            ...ci,
+            primary_color: ci.primary_color || '#0f86ec',
+            logo_url: ci.logo_url || null,
+          };
+        }
+
         const cRes = await query('SELECT * FROM clinics WHERE id = $1', [clinicId]);
         if (cRes.rows.length > 0) {
           const c = cRes.rows[0];
@@ -61,6 +124,7 @@ class PDFService {
             currency: 'EUR',
             tax_rate: 0,
             primary_color: '#0f86ec',
+            logo_url: null,
           };
         }
       }
@@ -82,6 +146,7 @@ class PDFService {
       currency: 'EUR',
       tax_rate: 0,
       primary_color: '#0f86ec',
+      logo_url: null,
     };
   }
 
@@ -153,10 +218,28 @@ class PDFService {
 
     // 1. Si la clínica tiene logo personalizado configurado en la base de datos
     if (clinic.logo_url) {
-      const clean = path.basename(String(clinic.logo_url));
+      const rawUrl = String(clinic.logo_url).trim();
+      const clean = path.basename(rawUrl);
+      const cleanWithoutCPrefix = clean.replace(/^c(?=parati)/i, ''); // Resuelve cparatilogo -> paratilogo
+      const relativePath = rawUrl.replace(/^\/+/, '');
+
+      if (path.isAbsolute(rawUrl)) {
+        candidates.push(rawUrl);
+      }
+
+      // Buscar en frontend/assets y frontend/ (donde vive paratilogo.jpeg)
       candidates.push(
+        path.resolve(__dirname, '../../frontend', relativePath),
+        path.resolve(__dirname, '../../frontend/assets', clean),
+        path.resolve(__dirname, '../../frontend/assets', cleanWithoutCPrefix),
+        path.resolve(__dirname, '../../backend/assets', clean),
+        path.resolve(process.cwd(), 'frontend', relativePath),
+        path.resolve(process.cwd(), 'frontend/assets', clean),
+        path.resolve(process.cwd(), 'frontend/assets', cleanWithoutCPrefix),
         path.resolve(__dirname, '../../uploads', clean),
-        path.resolve(__dirname, '../uploads', clean)
+        path.resolve(__dirname, '../uploads', clean),
+        path.resolve(process.cwd(), 'uploads', clean),
+        path.resolve(process.cwd(), 'uploads/logos', clean)
       );
     }
 
@@ -183,11 +266,11 @@ class PDFService {
   drawHeader(doc, clinic, docTitle, docNumber, badgeText = null, badgeColor = null) {
     const pageWidth = doc.page.width;
     const margin = 40;
-    const primaryColor = clinic?.primary_color || COLORS.primary;
-    const effectiveBadgeColor = badgeColor || primaryColor;
+    const theme = getClinicTheme(clinic);
+    const effectiveBadgeColor = badgeColor || theme.primary;
 
     // Barra superior decorativa con color corporativo
-    doc.rect(0, 0, pageWidth, 6).fill(primaryColor);
+    doc.rect(0, 0, pageWidth, 6).fill(theme.primary);
 
     // Intentar ubicar y dibujar el logo de la clínica
     const logoPath = this.resolveClinicLogoPath(clinic);
@@ -208,7 +291,7 @@ class PDFService {
 
     // Datos de la clínica
     doc
-      .fillColor(primaryColor)
+      .fillColor(theme.primary)
       .font('Helvetica-Bold')
       .fontSize(13)
       .text(this.stripEmojis(clinic.name) || 'Clínica Dental', clinicX, 20, { width: clinicWidth });
@@ -228,7 +311,7 @@ class PDFService {
       .text(this.stripEmojis(docTitle).toUpperCase(), rightColX, 20, { width: 200, align: 'right' });
 
     doc
-      .fillColor(COLORS.primaryDark)
+      .fillColor(theme.primaryDark)
       .font('Helvetica-Bold')
       .fontSize(12)
       .text(this.stripEmojis(docNumber), rightColX, 37, { width: 200, align: 'right' });
@@ -239,7 +322,7 @@ class PDFService {
       const badgeY = 54;
       doc
         .roundedRect(badgeX, badgeY, badgeWidth, 16, 3)
-        .fill(badgeColor);
+        .fill(effectiveBadgeColor);
       doc
         .fillColor(COLORS.white)
         .font('Helvetica-Bold')
@@ -264,11 +347,11 @@ class PDFService {
   drawReportHeader(doc, clinic, { title, docNumber = 'INFORME OFICIAL', periodText = null, badgeColor = null }) {
     const pageWidth = doc.page.width;
     const margin = 40;
-    const primaryColor = clinic?.primary_color || COLORS.primary;
-    const effectiveBadgeColor = badgeColor || primaryColor;
+    const theme = getClinicTheme(clinic);
+    const effectiveBadgeColor = badgeColor || theme.primary;
 
     // Barra superior decorativa corporativa
-    doc.rect(0, 0, pageWidth, 6).fill(primaryColor);
+    doc.rect(0, 0, pageWidth, 6).fill(theme.primary);
 
     // Intentar ubicar y dibujar el logo de la clínica
     const logoPath = this.resolveClinicLogoPath(clinic);
@@ -287,7 +370,7 @@ class PDFService {
     const clinicWidth = rightColX - clinicX - 15;
 
     doc
-      .fillColor(COLORS.primary)
+      .fillColor(theme.primary)
       .font('Helvetica-Bold')
       .fontSize(11)
       .text(this.stripEmojis(clinic.name) || 'Clínica Dental', clinicX, 14, { width: clinicWidth });
@@ -328,7 +411,7 @@ class PDFService {
       const badgeY = 41;
       doc
         .roundedRect(badgeX, badgeY, badgeWidth, badgeHeight, 3)
-        .fill(badgeColor);
+        .fill(effectiveBadgeColor);
       doc
         .fillColor(COLORS.white)
         .font('Helvetica-Bold')
@@ -352,11 +435,12 @@ class PDFService {
   /**
    * Dibuja los recuadros de datos de Paciente y Profesional/Documento.
    */
-  drawPartyBoxes(doc, { patient, doctor, docDate, dueDate = null, extraLabels = [] }) {
+  drawPartyBoxes(doc, { patient, doctor, docDate, dueDate = null, extraLabels = [] }, clinic = null) {
     const margin = 40;
     const boxWidth = (doc.page.width - margin * 2 - 15) / 2;
     const boxHeight = 72;
     const yPos = doc.y;
+    const theme = getClinicTheme(clinic);
 
     // Caja Paciente (Izquierda)
     doc
@@ -364,7 +448,7 @@ class PDFService {
       .fillAndStroke(COLORS.bgLight, COLORS.border);
 
     doc
-      .fillColor(COLORS.primary)
+      .fillColor(theme.primary)
       .font('Helvetica-Bold')
       .fontSize(8.5)
       .text('DATOS DEL PACIENTE', margin + 10, yPos + 8, { width: boxWidth - 20 });
@@ -390,7 +474,7 @@ class PDFService {
       .fillAndStroke(COLORS.bgLight, COLORS.border);
 
     doc
-      .fillColor(COLORS.primary)
+      .fillColor(theme.primary)
       .font('Helvetica-Bold')
       .fontSize(8.5)
       .text('DATOS DE ATENCIÓN Y EMISIÓN', rightX + 10, yPos + 8, { width: boxWidth - 20 });
@@ -474,6 +558,7 @@ class PDFService {
     }
 
     const clinic = await this.getClinicInfo(invoice.clinic_id);
+    const theme = getClinicTheme(clinic);
     const isFactura = invoice.document_type === 'factura' || (!invoice.document_type && invoice.invoice_number?.startsWith('FAC'));
     const docTitle = isFactura ? 'Factura Oficial' : 'Recibo de Pago';
 
@@ -486,7 +571,7 @@ class PDFService {
       badgeColor = COLORS.success;
     } else if (status === 'parcial') {
       badgeText = 'Abono Parcial';
-      badgeColor = COLORS.primary;
+      badgeColor = theme.primary;
     } else if (status === 'cancelada') {
       badgeText = 'Cancelada';
       badgeColor = COLORS.danger;
@@ -515,7 +600,7 @@ class PDFService {
       docDate: invoice.created_at,
       dueDate: invoice.due_date,
       extraLabels: invoice.receipt_number ? [`Recibo Vinculado: #${invoice.receipt_number}`] : [],
-    });
+    }, clinic);
 
     // 3. Tabla de Conceptos / Tratamientos
     const items = invoice.items || [];
@@ -552,7 +637,7 @@ class PDFService {
         doc.font('Helvetica').fontSize(8.5).fillColor(COLORS.text);
       },
       padding: [5, 4],
-      headerBackgroundColor: COLORS.primary,
+      headerBackgroundColor: theme.primary,
     });
 
     // 4. Resumen de Totales y Liquidación
@@ -601,7 +686,7 @@ class PDFService {
     rowY += 2;
     doc.strokeColor(COLORS.border).lineWidth(0.5).moveTo(summaryX + 10, rowY).lineTo(summaryX + summaryWidth - 10, rowY).stroke();
     rowY += 4;
-    printLine('TOTAL FACTURA:', this.formatCurrency(total, clinic.currency), true, COLORS.primaryDark, 10);
+    printLine('TOTAL FACTURA:', this.formatCurrency(total, clinic.currency), true, theme.primaryDark, 10);
     printLine('Importe Abonado:', this.formatCurrency(amountPaid, clinic.currency), false, COLORS.success);
     printLine('Saldo Pendiente:', this.formatCurrency(balance, clinic.currency), true, balance > 0 ? COLORS.danger : COLORS.textSecondary);
 
@@ -612,7 +697,7 @@ class PDFService {
       if (doc.y > 680) doc.addPage();
 
       doc
-        .fillColor(COLORS.primary)
+        .fillColor(theme.primary)
         .font('Helvetica-Bold')
         .fontSize(9)
         .text('DESGLOSE DE PAGOS Y COBROS REGISTRADOS', margin, doc.y);
@@ -689,6 +774,7 @@ class PDFService {
     }
 
     const clinic = await this.getClinicInfo(quote.clinic_id);
+    const theme = getClinicTheme(clinic);
 
     // Estado del presupuesto
     const status = (quote.status || 'pendiente').toLowerCase();
@@ -699,7 +785,7 @@ class PDFService {
       badgeColor = COLORS.success;
     } else if (status === 'parcial') {
       badgeText = 'Aceptación Parcial';
-      badgeColor = COLORS.primary;
+      badgeColor = theme.primary;
     } else if (status === 'rechazada' || status === 'rechazado') {
       badgeText = 'Rechazado';
       badgeColor = COLORS.danger;
@@ -727,7 +813,7 @@ class PDFService {
       },
       docDate: quote.quotation_date || quote.created_at,
       extraLabels: ['Validez de la oferta: 30 días'],
-    });
+    }, clinic);
 
     // 3. Tabla de Tratamientos Presupuestados
     const items = quote.items || [];
@@ -806,7 +892,7 @@ class PDFService {
         }
       },
       padding: [5, 4],
-      headerBackgroundColor: COLORS.primary,
+      headerBackgroundColor: theme.primary,
     });
 
     // 4. Totales y resumen
@@ -849,7 +935,7 @@ class PDFService {
     rowY += 2;
     doc.strokeColor(COLORS.border).lineWidth(0.5).moveTo(summaryX + 10, rowY).lineTo(summaryX + summaryWidth - 10, rowY).stroke();
     rowY += 4;
-    printLine('TOTAL PROPUESTA:', this.formatCurrency(total, clinic.currency), true, COLORS.primaryDark, 10);
+    printLine('TOTAL PROPUESTA:', this.formatCurrency(total, clinic.currency), true, theme.primaryDark, 10);
     if (amountPaid > 0) {
       printLine('Importe Abonado:', this.formatCurrency(amountPaid, clinic.currency), false, COLORS.success);
       printLine('Saldo Restante:', this.formatCurrency(remaining, clinic.currency), true, COLORS.danger);
@@ -937,6 +1023,7 @@ class PDFService {
     }
 
     const clinic = await this.getClinicInfo(presc.clinic_id);
+    const theme = getClinicTheme(clinic);
 
     const doc = new PDFDocument({ margin: 40, size: 'A4', bufferPages: true });
     const bufferPromise = this.streamToBuffer(doc);
@@ -948,7 +1035,7 @@ class PDFService {
       'Receta Médica Oficial',
       `# ${presc.prescription_number}`,
       'Prescripción',
-      COLORS.primary
+      theme.primary
     );
 
     // 2. Cajas de Médico y Paciente con Alerta de Alergias
@@ -964,7 +1051,7 @@ class PDFService {
       .fillAndStroke(COLORS.bgLight, COLORS.border);
 
     doc
-      .fillColor(COLORS.primary)
+      .fillColor(theme.primary)
       .font('Helvetica-Bold')
       .fontSize(8.5)
       .text('FACULTATIVO PRESCRIPTOR', margin + 10, yPos + 8, { width: boxWidth - 20 });
@@ -990,7 +1077,7 @@ class PDFService {
       .fillAndStroke(COLORS.bgLight, COLORS.border);
 
     doc
-      .fillColor(COLORS.primary)
+      .fillColor(theme.primary)
       .font('Helvetica-Bold')
       .fontSize(8.5)
       .text('DATOS DEL PACIENTE', rightX + 10, yPos + 8, { width: boxWidth - 20 });
@@ -1062,7 +1149,7 @@ class PDFService {
       prepareHeader: () => doc.font('Helvetica-Bold').fontSize(8).fillColor(COLORS.white),
       prepareRow: () => doc.font('Helvetica').fontSize(8).fillColor(COLORS.text),
       padding: [5, 4],
-      headerBackgroundColor: COLORS.primary,
+      headerBackgroundColor: theme.primary,
     });
 
     // 4. Indicaciones Generales / Recomendaciones Clínicas
@@ -1146,6 +1233,7 @@ class PDFService {
     const clinic = await this.getClinicInfo(clinicId);
 
     const data = await reportService.getInvoiceReceiptSummaryReport(startDate, endDate);
+    const theme = getClinicTheme(clinic);
     const invoices = data.invoices || [];
     const receipts = data.receipts || [];
     const totals = data.totals || {
@@ -1168,7 +1256,7 @@ class PDFService {
       title: 'Resumen Facturas y Recibos',
       docNumber: 'CONTROL DE FACTURACIÓN Y COBROS',
       periodText: periodLabel,
-      badgeColor: COLORS.primary,
+      badgeColor: theme.primary,
     });
 
     // 2. Tarjetas KPI ejecutivas de resumen
@@ -1386,6 +1474,7 @@ class PDFService {
     const store = als.getStore();
     const clinicId = store?.clinicId || 1;
     const clinic = await this.getClinicInfo(clinicId);
+    const theme = getClinicTheme(clinic);
 
     const data = await reportService.getRevenueReport(startDate, endDate);
 
@@ -1398,7 +1487,7 @@ class PDFService {
       title: 'Reporte de Ingresos',
       docNumber: 'INFORME FINANCIERO',
       periodText: `Período: ${fromLabel} — ${toLabel}`,
-      badgeColor: COLORS.primary,
+      badgeColor: theme.primary,
     });
 
     const margin = 40;
@@ -1428,7 +1517,7 @@ class PDFService {
       methodTableData.datas.push({ method: 'Sin cobros registrados', total: '0,00 €' });
     }
 
-    doc.fillColor(COLORS.primaryDark).font('Helvetica-Bold').fontSize(9.5).text('1. INGRESOS POR MÉTODO DE PAGO', margin, doc.y);
+    doc.fillColor(theme.primaryDark).font('Helvetica-Bold').fontSize(9.5).text('1. INGRESOS POR MÉTODO DE PAGO', margin, doc.y);
     doc.x = margin;
     doc.y += 4;
     await doc.table(methodTableData, {
@@ -1443,7 +1532,7 @@ class PDFService {
         doc.font('Helvetica').fontSize(8).fillColor('#1e293b');
       },
       padding: [4, 4],
-      headerBackgroundColor: '#0284c7',
+      headerBackgroundColor: theme.primary,
     });
 
     // Tabla Ingresos por Médico
@@ -1470,7 +1559,7 @@ class PDFService {
       doctorTableData.datas.push({ doctor: 'Sin actividad médica registrada', total: '0,00 €' });
     }
 
-    doc.fillColor(COLORS.primaryDark).font('Helvetica-Bold').fontSize(9.5).text('2. INGRESOS POR MÉDICO / ODONTÓLOGO', margin, doc.y);
+    doc.fillColor(theme.primaryDark).font('Helvetica-Bold').fontSize(9.5).text('2. INGRESOS POR MÉDICO / ODONTÓLOGO', margin, doc.y);
     doc.x = margin;
     doc.y += 4;
     await doc.table(doctorTableData, {
@@ -1485,7 +1574,7 @@ class PDFService {
         doc.font('Helvetica').fontSize(8).fillColor('#1e293b');
       },
       padding: [4, 4],
-      headerBackgroundColor: '#0f766e',
+      headerBackgroundColor: theme.primary,
     });
 
     doc.x = margin;
@@ -1893,9 +1982,10 @@ class PDFService {
     const margin = 40;
     const pageWidth = doc.page.width;
     const contentWidth = pageWidth - margin * 2;
+    const theme = getClinicTheme(clinic);
 
     if (doctorsToShow.length === 0) {
-      this.drawHeader(doc, clinic, 'Agenda del Día', dateLabel, 'AGENDA', COLORS.primary);
+      this.drawHeader(doc, clinic, 'Agenda del Día', dateLabel, 'AGENDA', theme.primary);
       doc.y += 30;
       doc.fillColor(COLORS.textSecondary).font('Helvetica').fontSize(11).text('No hay citas ni doctores activos programados para esta fecha.', margin, doc.y, { align: 'center', width: contentWidth });
     }
@@ -1905,14 +1995,14 @@ class PDFService {
         doc.addPage();
       }
 
-      this.drawHeader(doc, clinic, 'Agenda del Día', dateLabel, 'AGENDA', COLORS.primary);
+      this.drawHeader(doc, clinic, 'Agenda del Día', dateLabel, 'AGENDA', theme.primary);
 
       // Tarjeta de información del Doctor y Resumen de la Jornada
       const cardY = doc.y + 4;
       const cardHeight = 44;
       doc.roundedRect(margin, cardY, contentWidth, cardHeight, 4).fillAndStroke(COLORS.bgLight, COLORS.border);
 
-      doc.fillColor(COLORS.primaryDark).font('Helvetica-Bold').fontSize(11)
+      doc.fillColor(theme.primaryDark).font('Helvetica-Bold').fontSize(11)
         .text(`Dr/a. ${this.stripEmojis(doctor.name)}`, margin + 12, cardY + 8);
 
       doc.fillColor(COLORS.textSecondary).font('Helvetica').fontSize(8.5)
@@ -1924,10 +2014,10 @@ class PDFService {
       doc.y = cardY + cardHeight + 12;
 
       // Encabezado visual de la lista
-      doc.fillColor(COLORS.primaryDark).font('Helvetica-Bold').fontSize(8.5)
+      doc.fillColor(theme.primaryDark).font('Helvetica-Bold').fontSize(8.5)
         .text('PROGRAMACIÓN HORARIA DETALLADA', margin, doc.y);
       doc.y += 4;
-      doc.strokeColor(COLORS.primary).lineWidth(1).moveTo(margin, doc.y).lineTo(pageWidth - margin, doc.y).stroke();
+      doc.strokeColor(theme.primary).lineWidth(1).moveTo(margin, doc.y).lineTo(pageWidth - margin, doc.y).stroke();
       doc.y += 8;
 
       // Renderizar cada fila horaria
@@ -2245,9 +2335,10 @@ class PDFService {
     }
 
     const weekTitle = `Semana: ${startDateStr} al ${endDateStr}`;
+    const theme = getClinicTheme(clinic);
 
     if (sections.length === 0) {
-      this.drawHeader(doc, clinic, 'Agenda Semanal', weekTitle, 'SEMANAL', COLORS.primary);
+      this.drawHeader(doc, clinic, 'Agenda Semanal', weekTitle, 'SEMANAL', theme.primary);
       doc.y += 30;
       doc.fillColor(COLORS.textSecondary).font('Helvetica').fontSize(11)
         .text('No hay citas ni doctores activos programados para esta semana.', margin, doc.y, { align: 'center', width: contentWidth });
@@ -2262,7 +2353,7 @@ class PDFService {
       const isGeneral = sec.type === 'general';
       const pageTitle = isGeneral ? 'Agenda Semanal General' : 'Agenda Semanal';
       const badgeText = isGeneral ? 'GENERAL' : 'DOCTOR';
-      this.drawHeader(doc, clinic, pageTitle, weekTitle, badgeText, COLORS.primary);
+      this.drawHeader(doc, clinic, pageTitle, weekTitle, badgeText, theme.primary);
 
       // Tarjeta de información (General de la Clínica o Específica del Doctor)
       const bannerY = doc.y + 3;
@@ -2270,7 +2361,7 @@ class PDFService {
       doc.roundedRect(margin, bannerY, contentWidth, bannerH, 4).fillAndStroke(COLORS.bgLight, COLORS.border);
 
       if (isGeneral) {
-        doc.fillColor(COLORS.primaryDark).font('Helvetica-Bold').fontSize(10.5)
+        doc.fillColor(theme.primaryDark).font('Helvetica-Bold').fontSize(10.5)
           .text(`${this.stripEmojis(clinic.name || 'Clínica Dental')} — Agenda Semanal Consolidada`, margin + 10, bannerY + 6);
 
         doc.fillColor(COLORS.textSecondary).font('Helvetica').fontSize(8)
@@ -2279,7 +2370,7 @@ class PDFService {
         doc.fillColor(COLORS.text).font('Helvetica-Bold').fontSize(8.5)
           .text(`Total Citas en Clínica: ${sec.appts.length}`, margin, bannerY + 12, { width: contentWidth - 14, align: 'right' });
       } else {
-        doc.fillColor(COLORS.primaryDark).font('Helvetica-Bold').fontSize(10.5)
+        doc.fillColor(theme.primaryDark).font('Helvetica-Bold').fontSize(10.5)
           .text(`Dr/a. ${this.stripEmojis(sec.doctor.name)}`, margin + 10, bannerY + 6);
 
         doc.fillColor(COLORS.textSecondary).font('Helvetica').fontSize(8)
@@ -2302,7 +2393,7 @@ class PDFService {
       const drawTableHeader = () => {
         const theadY = doc.y;
         const theadH = 20;
-        doc.roundedRect(margin, theadY, contentWidth, theadH, 3).fill(COLORS.primary);
+        doc.roundedRect(margin, theadY, contentWidth, theadH, 3).fill(theme.primary);
 
         doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(8)
           .text('HORA', margin + 2, theadY + 5.5, { width: timeColWidth - 4, align: 'center' });

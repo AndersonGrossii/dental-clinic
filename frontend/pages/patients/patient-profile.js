@@ -2509,6 +2509,7 @@ export class PatientProfile {
 
     const clinic = state.get('clinicInfo') || {};
     const logoUrl = clinic.logo_url || '/assets/videsDentalLogo.jpg';
+    const primaryColor = clinic.primary_color || '#0f86ec';
 
     const itemsHtml = prescription.items.map((item, i) => `
       <tr>
@@ -2529,18 +2530,18 @@ export class PatientProfile {
         <style>
           @page { margin: 20mm 15mm; }
           body { font-family: 'Segoe UI', Arial, sans-serif; padding: 0; margin: 0; color: #333; font-size: 13px; }
-          .header { display: flex; align-items: center; gap: 20px; border-bottom: 2px solid #0f86ec; padding-bottom: 16px; margin-bottom: 20px; }
+          .header { display: flex; align-items: center; gap: 20px; border-bottom: 2px solid ${primaryColor}; padding-bottom: 16px; margin-bottom: 20px; }
           .header-info { flex: 1; }
-          .header-info h2 { margin: 0 0 4px 0; font-size: 18px; color: #0f86ec; }
+          .header-info h2 { margin: 0 0 4px 0; font-size: 18px; color: ${primaryColor}; }
           .header-info p { margin: 2px 0; color: #555; font-size: 12px; }
           .title-section { text-align: center; margin: 20px 0; }
           .title-section h1 { font-size: 22px; color: #111; margin: 0; letter-spacing: 2px; text-transform: uppercase; }
-          .title-section p { color: #0f86ec; font-size: 12px; margin: 4px 0 0 0; font-weight: 600; }
+          .title-section p { color: ${primaryColor}; font-size: 12px; margin: 4px 0 0 0; font-weight: 600; }
           .details { display: flex; justify-content: space-between; margin: 16px 0; padding: 12px 14px; background: #f8f9fa; border-radius: 6px; }
           .details div { font-size: 13px; }
           .details strong { color: #111; }
           table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-          th { background-color: #0f86ec; color: white; padding: 10px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+          th { background-color: ${primaryColor}; color: white; padding: 10px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
           td { padding: 10px; border: 1px solid #ddd; font-size: 13px; }
           .notes-section { margin-top: 20px; padding: 14px; background: #fffbe6; border-left: 3px solid #f59e0b; border-radius: 4px; }
           .notes-section h4 { margin: 0 0 6px 0; font-size: 13px; color: #92400e; }
@@ -2548,8 +2549,8 @@ export class PatientProfile {
           .footer { margin-top: 40px; display: flex; justify-content: space-between; align-items: end; }
           .signature-line { border-top: 1px solid #333; width: 250px; padding-top: 6px; text-align: center; font-size: 12px; color: #555; }
           .footer-info { font-size: 11px; color: #999; text-align: right; }
-          .print-btn { display: block; margin: 20px auto; padding: 10px 30px; background: #0f86ec; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
-          .print-btn:hover { background: #0b6cc4; }
+          .print-btn { display: block; margin: 20px auto; padding: 10px 30px; background: ${primaryColor}; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
+          .print-btn:hover { filter: brightness(0.88); }
           @media print {
             .print-btn { display: none !important; }
             body { padding: 0; }

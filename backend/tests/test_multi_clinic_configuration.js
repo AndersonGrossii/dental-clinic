@@ -312,7 +312,7 @@ export async function runMultiClinicTests() {
     assert(invalidFeatureUpdateBlocked === true, 'Servicio rechaza actualización con clave de feature desconocida');
 
     // -------------------------------------------------------------
-    // Escenario 10: Validación de identidad en PDF Engine
+    // Escenario 10: Validación de identidad en PDF Engine (Logo dinámico y Paleta de colores)
     // -------------------------------------------------------------
     console.log('\n🔹 [Escenario 10] Generador de PDFs adopta color e identidad de la clínica propietaria');
     const pdfInfoC1 = await pdfService.getClinicInfo(1);
@@ -320,6 +320,16 @@ export async function runMultiClinicTests() {
 
     assert(pdfInfoC1.primary_color === '#0f86ec', 'PDF Engine resuelve color primario #0f86ec para Clínica 1');
     assert(pdfInfoC2.primary_color === '#10b981', 'PDF Engine resuelve color primario #10b981 para Clínica 2');
+
+    const defaultLogo = pdfService.resolveClinicLogoPath({ name: 'Clínica 1' });
+    assert(defaultLogo && defaultLogo.includes('videsDentalLogo.jpg'), 'PDF Engine resuelve logotipo por defecto cuando no hay logo_url');
+
+    const customLogoExact = pdfService.resolveClinicLogoPath({ logo_url: '/assets/paratilogo.jpeg' });
+    assert(customLogoExact && customLogoExact.includes('paratilogo.jpeg'), 'PDF Engine resuelve logotipo personalizado desde frontend/assets (/assets/paratilogo.jpeg)');
+
+    const customLogoAlias = pdfService.resolveClinicLogoPath({ logo_url: '/assets/cparatilogo.jpeg' });
+    assert(customLogoAlias && customLogoAlias.includes('paratilogo.jpeg'), 'PDF Engine resuelve logotipo con prefijo alternativo (/assets/cparatilogo.jpeg)');
+
 
     // -------------------------------------------------------------
     // Escenario 11: Operaciones CLI con validación y --dry-run
