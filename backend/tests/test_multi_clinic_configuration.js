@@ -11,7 +11,7 @@ import cabinetRepository from '../repositories/cabinet.repository.js';
 import appointmentService from '../services/appointment.service.js';
 import pdfService from '../services/pdf.service.js';
 import { requireFeature } from '../middlewares/feature.middleware.js';
-import { VALID_FEATURES, isValidFeatureKey } from '../config/features.js';
+import { VALID_FEATURES, isValidFeatureKey, resolvePresetFeatures, CLINIC_PRESETS } from '../config/features.js';
 import { isValidHexColor } from '../../frontend/utils/theme.js';
 
 let passed = 0;
@@ -292,8 +292,16 @@ export async function runMultiClinicTests() {
     console.log('\n🔹 [Escenario 9] Rechazo estricto de claves de features no reconocidas');
     assert(isValidFeatureKey('crm') === true, 'Clave oficial "crm" es válida');
     assert(isValidFeatureKey('omnichannel_messaging') === true, 'Clave oficial "omnichannel_messaging" es válida');
+    assert(isValidFeatureKey('odontogram') === true, 'Clave oficial "odontogram" es válida');
+    assert(isValidFeatureKey('dental_history') === true, 'Clave oficial "dental_history" es válida');
     assert(isValidFeatureKey('crypto_billing') === false, 'Clave no aprobada "crypto_billing" es rechazada');
     assert(isValidFeatureKey('superadmin') === false, 'Clave no aprobada "superadmin" es rechazada');
+
+    const nonDentalPreset = resolvePresetFeatures('non-dental');
+    assert(nonDentalPreset && nonDentalPreset.odontogram === false && nonDentalPreset.dental_history === false, 'Preset non-dental resuelve desactivación de odontograma e historial');
+
+    const dentalPreset = resolvePresetFeatures('dental');
+    assert(dentalPreset && dentalPreset.odontogram === true && dentalPreset.dental_history === true, 'Preset dental resuelve activación de herramientas odontológicas');
 
     let invalidFeatureUpdateBlocked = false;
     try {
@@ -353,6 +361,40 @@ export async function runMultiClinicTests() {
       crossClinicCabinetDeactivationBlocked = true;
     }
     assert(crossClinicCabinetDeactivationBlocked === true, 'Operación sobre recurso de otra clínica es rechazada');
+
+    // -------------------------------------------------------------
+    // Escenario 13: Preset no-dental desactiva herramientas clínicas (Odontograma e Historial) en 1 solo comando
+    // -------------------------------------------------------------
+    console.log('\n🔹 [Escenario 13] Preset no-dental y aislamiento de charts clínicos (Odontograma e Historial)');
+    // Aplicar preset non-dental a Clínica 2
+    await clinicConfigService.updateFeatures(2, resolvePresetFeatures('non-dental'));
+
+    // Asegurar que Clínica 1 permanece dental
+    await clinicConfigService.updateFeatures(1, resolvePresetFeatures('dental'));
+
+    const isOdontoC1 = await clinicConfigService.isFeatureEnabled(1, VALID_FEATURES.ODONTOGRAM);
+    const isOdontoC2 = await clinicConfigService.isFeatureEnabled(2, VALID_FEATURES.ODONTOGRAM);
+    const isHistoryC1 = await clinicConfigService.isFeatureEnabled(1, VALID_FEATURES.DENTAL_HISTORY);
+    const isHistoryC2 = await clinicConfigService.isFeatureEnabled(2, VALID_FEATURES.DENTAL_HISTORY);
+
+    assert(isOdontoC1 === true, 'Clínica 1 mantiene Odontograma activo');
+    assert(isOdontoC2 === false, 'Clínica 2 tiene Odontograma desactivado con preset no-dental');
+    assert(isHistoryC1 === true, 'Clínica 1 mantiene Historial Odontológico activo');
+    assert(isHistoryC2 === false, 'Clínica 2 tiene Historial Odontológico desactivado con preset no-dental');
+
+    // Verificar middleware para historial odontológico y odontograma
+    const dentalHistoryMiddleware = requireFeature(VALID_FEATURES.DENTAL_HISTORY);
+    let dhResC2 = mockRes();
+    await als.run({ clinicId: 2, userId: 1 }, async () => {
+      await dentalHistoryMiddleware({ user: { clinicId: 2 } }, dhResC2, mockNext);
+    });
+    assert(dhResC2.statusCode === 403, 'Middleware bloquea acceso a historial odontológico con 403 en Clínica no-dental');
+    assert(dhResC2.body?.code === 'FEATURE_DISABLED', 'Código de error retornado es FEATURE_DISABLED');
+
+    // Reactivar con preset dental en Clínica 2
+    await clinicConfigService.updateFeatures(2, resolvePresetFeatures('dental'));
+    const isOdontoC2Restored = await clinicConfigService.isFeatureEnabled(2, VALID_FEATURES.ODONTOGRAM);
+    assert(isOdontoC2Restored === true, 'Preset dental reactiva exitosamente todas las herramientas odontológicas');
 
     // -------------------------------------------------------------
     // Limpieza posterior

@@ -26,7 +26,9 @@
     "promotional_packs": true,
     "calendar_productivity": true,
     "reports": true,
-    "prescriptions": true
+    "prescriptions": true,
+    "odontogram": true,
+    "dental_history": true
   },
   "cabinets": [
     { "name": "Gabinete 1", "code": "GAB1", "is_active": true },

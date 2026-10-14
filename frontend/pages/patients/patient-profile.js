@@ -78,8 +78,12 @@ export class PatientProfile {
       const notesRaw = await patientService.getNotes(this.patientId) || [];
       this.clinicalNotes = (Array.isArray(notesRaw) ? notesRaw : []).filter(item => !item.patient_id || Number(item.patient_id) === pId);
 
-      const prescRes = await prescriptionService.getByPatient(this.patientId, { limit: 999 });
-      const prescRaw = Array.isArray(prescRes) ? prescRes : (prescRes?.rows || prescRes?.data || []);
+      const features = state.get('features') || {};
+      let prescRaw = [];
+      if (features.prescriptions !== false) {
+        const prescRes = await prescriptionService.getByPatient(this.patientId, { limit: 999 }).catch(() => []);
+        prescRaw = Array.isArray(prescRes) ? prescRes : (prescRes?.rows || prescRes?.data || []);
+      }
       this.prescriptions = prescRaw.filter(item => !item.patient_id || Number(item.patient_id) === pId);
 
       const acceptedRes = await quotationService.getAcceptedItemsByPatient(this.patientId);
@@ -113,6 +117,21 @@ export class PatientProfile {
     const pat = this.patient;
     const userRole = (state.get('user')?.role_name || '').toLowerCase();
     const isClinicalStaff = ['doctor', 'higienista'].includes(userRole);
+    const features = state.get('features') || {};
+    const hasOdontogram = features.odontogram !== false;
+    const hasDentalHistory = features.dental_history !== false;
+    const hasPrescriptions = features.prescriptions !== false;
+
+    // Redirigir a 'info' si la pestaña activa está deshabilitada para esta clínica
+    if (this.activeTab === 'odontogram' && !hasOdontogram) {
+      this.activeTab = 'info';
+    }
+    if (this.activeTab === 'treatments' && !hasDentalHistory) {
+      this.activeTab = 'info';
+    }
+    if (this.activeTab === 'prescriptions' && !hasPrescriptions) {
+      this.activeTab = 'info';
+    }
 
     const allowedClinicalTabs = ['info', 'odontogram', 'treatments', 'appointments', 'documents', 'notes', 'prescriptions'];
     if (isClinicalStaff && !allowedClinicalTabs.includes(this.activeTab)) {
@@ -1028,16 +1047,16 @@ export class PatientProfile {
 
       <div class="tabs" style="display: flex; gap: var(--space-2); margin-bottom: var(--space-4); border-bottom: 1px solid var(--border-color); padding-bottom: var(--space-2); flex-wrap: wrap;">
         ${tabLink('info', 'Ficha Técnica')}
-        ${tabLink('odontogram', '🦷 Odontograma')}
+        ${hasOdontogram ? tabLink('odontogram', '🦷 Odontograma') : ''}
         ${isClinicalStaff ? '' : tabLink('payments', 'Pagos y Saldo')}
-        ${tabLink('treatments', 'Historial Odontológico')}
+        ${hasDentalHistory ? tabLink('treatments', 'Historial Odontológico') : ''}
         ${tabLink('appointments', 'Historial de Citas')}
         ${tabLink('documents', '📁 Documentos & Radiografías')}
         ${isClinicalStaff ? '' : tabLink('invoices', 'Facturas')}
         ${isClinicalStaff ? '' : tabLink('receipts', 'Recibos')}
         ${isClinicalStaff ? '' : tabLink('quotations', 'Presupuestos')}
         ${tabLink('notes', 'Notas de Evolución')}
-        ${tabLink('prescriptions', 'Prescripciones')}
+        ${hasPrescriptions ? tabLink('prescriptions', 'Prescripciones') : ''}
       </div>
 
       <div class="card" style="padding: var(--space-6);">
@@ -3164,7 +3183,7 @@ export class PatientProfile {
       </form>`;
 
     Modal.show({
-      title: '🦷 Cobrar Tratamiento',
+      title: 'Cobrar Tratamiento',
       content: content,
       confirmText: 'Cobrar y Registrar',
       onConfirm: async (modalBody) => {

@@ -15,7 +15,41 @@ export const VALID_FEATURES = Object.freeze({
   CALENDAR_PRODUCTIVITY: 'calendar_productivity',
   REPORTS: 'reports',
   PRESCRIPTIONS: 'prescriptions',
+  ODONTOGRAM: 'odontogram',
+  DENTAL_HISTORY: 'dental_history',
 });
+
+/**
+ * Presets preconfigurados para especialidades clínicas.
+ * Permite activar o desactivar conjuntos de herramientas con un único comando.
+ */
+export const CLINIC_PRESETS = Object.freeze({
+  DENTAL: Object.freeze({
+    [VALID_FEATURES.ODONTOGRAM]: true,
+    [VALID_FEATURES.DENTAL_HISTORY]: true,
+    [VALID_FEATURES.PRESCRIPTIONS]: true,
+  }),
+  NON_DENTAL: Object.freeze({
+    [VALID_FEATURES.ODONTOGRAM]: false,
+    [VALID_FEATURES.DENTAL_HISTORY]: false,
+  }),
+  AESTHETIC: Object.freeze({
+    [VALID_FEATURES.ODONTOGRAM]: false,
+    [VALID_FEATURES.DENTAL_HISTORY]: false,
+    [VALID_FEATURES.PRESCRIPTIONS]: true,
+  }),
+});
+
+/**
+ * Resuelve las features correspondientes a un preset por nombre.
+ * @param {string} presetName - 'dental' | 'non-dental' | 'aesthetic'
+ * @returns {Record<string, boolean> | null}
+ */
+export function resolvePresetFeatures(presetName) {
+  if (!presetName || typeof presetName !== 'string') return null;
+  const normalized = presetName.trim().toUpperCase().replace(/[-_]/g, '_');
+  return CLINIC_PRESETS[normalized] || null;
+}
 
 /**
  * Lista de claves de features permitidas.
@@ -44,5 +78,7 @@ export function getDefaultFeatures() {
     [VALID_FEATURES.CALENDAR_PRODUCTIVITY]: true,
     [VALID_FEATURES.REPORTS]: true,
     [VALID_FEATURES.PRESCRIPTIONS]: true,
+    [VALID_FEATURES.ODONTOGRAM]: true,
+    [VALID_FEATURES.DENTAL_HISTORY]: true,
   };
 }

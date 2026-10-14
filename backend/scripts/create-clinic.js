@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { pool } from '../database/pool.js';
-import { VALID_FEATURES, isValidFeatureKey } from '../config/features.js';
+import { VALID_FEATURES, isValidFeatureKey, resolvePresetFeatures } from '../config/features.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,10 +15,11 @@ function printHelp() {
   console.log(`
 🦷 Vides Dental — Aprovisionamiento de Nueva Clínica
 Uso:
-  node backend/scripts/create-clinic.js --config <ruta-json> [--dry-run]
+  node backend/scripts/create-clinic.js --config <ruta-json> [--preset <dental|non-dental|aesthetic>] [--dry-run]
 
 Opciones:
   --config <path>    Ruta al archivo JSON de configuración de la clínica.
+  --preset <nombre>  Aplica un preset de especialidad ('dental', 'non-dental', 'aesthetic').
   --dry-run          Simula la creación y valida datos sin modificar la base de datos.
   --help             Muestra esta ayuda.
 `);
@@ -27,11 +28,15 @@ Opciones:
 async function run() {
   const args = process.argv.slice(2);
   let configPath = null;
+  let presetName = null;
   let isDryRun = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--config' && args[i + 1]) {
       configPath = args[i + 1];
+      i++;
+    } else if (args[i] === '--preset' && args[i + 1]) {
+      presetName = args[i + 1];
       i++;
     } else if (args[i] === '--dry-run') {
       isDryRun = true;
@@ -59,6 +64,19 @@ async function run() {
   } catch (err) {
     console.error(`❌ Error: Formato JSON inválido en "${resolvedPath}":`, err.message);
     process.exit(1);
+  }
+
+  if (presetName) {
+    const presetFeatures = resolvePresetFeatures(presetName);
+    if (!presetFeatures) {
+      console.error(`❌ Error de validación: Preset no reconocido "${presetName}". Presets permitidos: dental, non-dental, aesthetic.`);
+      process.exit(1);
+    }
+    rawConfig.features = {
+      ...(rawConfig.features || {}),
+      ...(presetFeatures || {}),
+    };
+    console.log(`ℹ️  Preset aplicado: "${presetName.toLowerCase()}" -> ${JSON.stringify(presetFeatures)}`);
   }
 
   // 1. Validaciones obligatorias

@@ -14,10 +14,16 @@ class Store {
       clinics: [],
       activeClinicId: localStorage.getItem('activeClinicId') || null,
       features: {
-        aiAutomations: false,
-        omnichannelMessaging: false,
-        notesAndOdontogram: true,
         crm: true,
+        omnichannel_messaging: false,
+        ai_automations: false,
+        cabinets: true,
+        promotional_packs: true,
+        calendar_productivity: true,
+        reports: true,
+        prescriptions: true,
+        odontogram: true,
+        dental_history: true,
       },
     };
     this.subscribers = {};

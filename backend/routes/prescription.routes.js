@@ -5,10 +5,13 @@ import { allRoles, roleMiddleware, managementOnly } from '../middlewares/role.mi
 import { validate } from '../middlewares/validation.middleware.js';
 import { createPrescriptionRules } from '../validators/prescription.validator.js';
 import { auditMiddleware } from '../middlewares/audit.middleware.js';
+import { requireFeature } from '../middlewares/feature.middleware.js';
+import { VALID_FEATURES } from '../config/features.js';
 
 const router = Router();
 
 router.use(authMiddleware);
+router.use(requireFeature(VALID_FEATURES.PRESCRIPTIONS));
 
 const doctorAndStaff = roleMiddleware('propietario', 'direccion', 'doctor');
 

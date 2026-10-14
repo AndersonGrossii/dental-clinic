@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { pool } from '../database/pool.js';
-import { VALID_FEATURES, isValidFeatureKey } from '../config/features.js';
+import { VALID_FEATURES, isValidFeatureKey, resolvePresetFeatures, CLINIC_PRESETS } from '../config/features.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,11 +15,15 @@ function printHelp() {
   console.log(`
 🦷 Vides Dental — Actualización de Configuración de Clínica
 Uso:
-  node backend/scripts/update-clinic-config.js --clinic <id> --config <ruta-json> [--dry-run]
+  node backend/scripts/update-clinic-config.js --clinic <id> [--config <ruta-json>] [--preset <dental|non-dental|aesthetic>] [--dry-run]
 
 Opciones:
-  --clinic <id>      Identificador numérico de la clínica a actualizar.
+  --clinic <id>      Identificador numérico de la clínica a actualizar (alias: --clinic-id).
   --config <path>    Ruta al archivo JSON con los cambios de configuración.
+  --preset <nombre>  Aplica un preset de especialidad con 1 solo comando:
+                     • 'dental': Habilita odontograma, historial dental y recetas.
+                     • 'non-dental': Deshabilita odontograma e historial odontológico.
+                     • 'aesthetic': Deshabilita odontograma e historial, mantiene recetas.
   --dry-run          Simula las modificaciones sin persistir en la base de datos.
   --help             Muestra esta ayuda.
 `);
@@ -29,14 +33,18 @@ async function run() {
   const args = process.argv.slice(2);
   let clinicId = null;
   let configPath = null;
+  let presetName = null;
   let isDryRun = false;
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--clinic' && args[i + 1]) {
+    if ((args[i] === '--clinic' || args[i] === '--clinic-id') && args[i + 1]) {
       clinicId = parseInt(args[i + 1], 10);
       i++;
     } else if (args[i] === '--config' && args[i + 1]) {
       configPath = args[i + 1];
+      i++;
+    } else if (args[i] === '--preset' && args[i + 1]) {
+      presetName = args[i + 1];
       i++;
     } else if (args[i] === '--dry-run') {
       isDryRun = true;
@@ -52,24 +60,39 @@ async function run() {
     process.exit(1);
   }
 
-  if (!configPath) {
-    console.error('❌ Error: El parámetro --config <ruta-json> es obligatorio.');
+  if (!configPath && !presetName) {
+    console.error('❌ Error: Debes proporcionar al menos --config <ruta-json> o --preset <nombre>.');
     printHelp();
     process.exit(1);
   }
 
-  const resolvedPath = path.resolve(process.cwd(), configPath);
-  if (!fs.existsSync(resolvedPath)) {
-    console.error(`❌ Error: El archivo de configuración no existe en "${resolvedPath}".`);
-    process.exit(1);
+  let rawConfig = {};
+  if (configPath) {
+    const resolvedPath = path.resolve(process.cwd(), configPath);
+    if (!fs.existsSync(resolvedPath)) {
+      console.error(`❌ Error: El archivo de configuración no existe en "${resolvedPath}".`);
+      process.exit(1);
+    }
+    try {
+      rawConfig = JSON.parse(fs.readFileSync(resolvedPath, 'utf8'));
+    } catch (err) {
+      console.error(`❌ Error: Formato JSON inválido en "${resolvedPath}":`, err.message);
+      process.exit(1);
+    }
   }
 
-  let rawConfig;
-  try {
-    rawConfig = JSON.parse(fs.readFileSync(resolvedPath, 'utf8'));
-  } catch (err) {
-    console.error(`❌ Error: Formato JSON inválido en "${resolvedPath}":`, err.message);
-    process.exit(1);
+  // Si se especificó un preset, fusionar sus features
+  if (presetName) {
+    const presetFeatures = resolvePresetFeatures(presetName);
+    if (!presetFeatures) {
+      console.error(`❌ Error de validación: Preset no reconocido "${presetName}". Presets permitidos: dental, non-dental, aesthetic.`);
+      process.exit(1);
+    }
+    rawConfig.features = {
+      ...(presetFeatures || {}),
+      ...(rawConfig.features || {}),
+    };
+    console.log(`ℹ️  Preset aplicado: "${presetName.toLowerCase()}" -> ${JSON.stringify(presetFeatures)}`);
   }
 
   // 1. Verificar existencia de la clínica

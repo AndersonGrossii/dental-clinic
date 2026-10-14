@@ -925,9 +925,11 @@ async function runAllTests() {
     const statusProgRes = await query(`SELECT id FROM appointment_status WHERE name = 'programada' LIMIT 1`);
     const progStatusId = statusProgRes.rows[0]?.id;
 
+    await query("DELETE FROM appointments WHERE appointment_date = $1 AND start_time = '16:00:00' AND clinic_id = 1", [tomorrowStr]);
+
     const testAppt24hRes = await query(
       `INSERT INTO appointments (clinic_id, patient_id, doctor_id, appointment_date, start_time, end_time, status_id)
-       VALUES (1, $1, $2, $3, '11:00:00', '11:30:00', $4)
+       VALUES (1, $1, $2, $3, '16:00:00', '16:30:00', $4)
        RETURNING id`,
       [testPatientId, docId, tomorrowStr, progStatusId]
     );

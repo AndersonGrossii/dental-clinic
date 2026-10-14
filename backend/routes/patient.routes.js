@@ -10,6 +10,8 @@ import { auditMiddleware } from '../middlewares/audit.middleware.js';
 import * as patientController from '../controllers/patient.controller.js';
 import * as prescriptionController from '../controllers/prescription.controller.js';
 import { uploadSingleImage, uploadDocument } from '../middlewares/upload.middleware.js';
+import { requireFeature } from '../middlewares/feature.middleware.js';
+import { VALID_FEATURES } from '../config/features.js';
 import odontogramRoutes from './odontogram.routes.js';
 
 const router = Router();
@@ -17,9 +19,9 @@ const router = Router();
 // Todas las rutas requieren autenticación
 router.use(authMiddleware);
 
-// Odontograma del paciente
-router.use('/:patientId/odontogram', odontogramRoutes);
-router.use('/odontogram', odontogramRoutes);
+// Odontograma del paciente (gated por feature 'odontogram')
+router.use('/:patientId/odontogram', requireFeature(VALID_FEATURES.ODONTOGRAM), odontogramRoutes);
+router.use('/odontogram', requireFeature(VALID_FEATURES.ODONTOGRAM), odontogramRoutes);
 
 /**
  * @route   GET /api/v1/patients
@@ -166,15 +168,15 @@ router.post('/:id/notes', roleMiddleware('propietario', 'direccion', 'doctor', '
  * @desc    Obtener prescripciones del paciente
  * @access  Todos los roles
  */
-router.get('/:id/prescriptions', allRoles, prescriptionController.getByPatient);
+router.get('/:id/prescriptions', allRoles, requireFeature(VALID_FEATURES.PRESCRIPTIONS), prescriptionController.getByPatient);
 
 /**
  * @route   POST /api/v1/patients/:id/dental-history
  * @desc    Crear entrada en historial odontológico / diario clínico
  * @access  Propietario, Dirección, Doctor, Higienista
  */
-router.post('/:id/dental-history', roleMiddleware('propietario', 'direccion', 'doctor', 'higienista'), patientController.addDentalHistory);
-router.put('/dental-history/:historyId', roleMiddleware('propietario', 'direccion', 'doctor', 'higienista'), patientController.updateDentalHistory);
-router.delete('/dental-history/:historyId', roleMiddleware('propietario', 'direccion', 'doctor', 'higienista'), patientController.deleteDentalHistory);
+router.post('/:id/dental-history', roleMiddleware('propietario', 'direccion', 'doctor', 'higienista'), requireFeature(VALID_FEATURES.DENTAL_HISTORY), patientController.addDentalHistory);
+router.put('/dental-history/:historyId', roleMiddleware('propietario', 'direccion', 'doctor', 'higienista'), requireFeature(VALID_FEATURES.DENTAL_HISTORY), patientController.updateDentalHistory);
+router.delete('/dental-history/:historyId', roleMiddleware('propietario', 'direccion', 'doctor', 'higienista'), requireFeature(VALID_FEATURES.DENTAL_HISTORY), patientController.deleteDentalHistory);
 
 export default router;
