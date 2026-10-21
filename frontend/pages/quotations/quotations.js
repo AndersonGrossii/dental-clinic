@@ -1073,6 +1073,7 @@ export class Quotations {
           <div class="form-group">
             <label class="form-label">Descuento Global (%)</label>
             <input type="number" step="0.01" name="discount_percentage" id="quote-discount-pct" class="form-input" value="${q.discount_percentage || 0}" min="0" max="100" />
+            <small id="quote-discount-amount-hint" style="font-size: 11px; display: block; margin-top: 3px; font-weight: 500;"></small>
           </div>
           <div class="form-group" style="grid-column: span 2;">
             <label class="form-label">Notas / Observaciones del Presupuesto</label>
@@ -1131,19 +1132,31 @@ export class Quotations {
         <!-- TOTALS SUMMARY BAR -->
         <div style="margin-top: var(--space-4); background: var(--gray-50); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 12px 18px;">
           <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-            <div>
-              <span style="font-size: 13px; color: var(--text-secondary);">Total Presupuesto:</span>
-              <strong id="quote-summary-grand-total" style="font-size: 17px; margin-left: 6px; color: var(--text-primary);">$0.00</strong>
-            </div>
-            ${isEdit && q.amount_paid > 0 ? `
+            <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
               <div>
-                <span style="font-size: 13px; color: var(--text-secondary);">Ya Cobrado:</span>
-                <strong style="font-size: 16px; margin-left: 6px; color: var(--success-700);">${formatCurrency(q.amount_paid)}</strong>
+                <span style="font-size: 13px; color: var(--text-secondary);">Subtotal:</span>
+                <strong id="quote-summary-subtotal" style="font-size: 15px; margin-left: 4px; color: var(--text-secondary);">$0.00</strong>
               </div>
-            ` : ''}
-            <div>
-              <span style="font-size: 13px; color: var(--text-secondary);">Seleccionado a Cobrar Ahora:</span>
-              <strong id="quote-summary-selected-pay" style="font-size: 17px; margin-left: 6px; color: var(--primary-700);">$0.00</strong>
+              <div id="quote-summary-discount-wrap" style="display: none;">
+                <span style="font-size: 13px; color: var(--danger-600);" id="quote-summary-discount-label">Descuento:</span>
+                <strong id="quote-summary-discount" style="font-size: 15px; margin-left: 4px; color: var(--danger-600);">$0.00</strong>
+              </div>
+              <div>
+                <span style="font-size: 13px; color: var(--text-secondary);">Total Presupuesto:</span>
+                <strong id="quote-summary-grand-total" style="font-size: 17px; margin-left: 6px; color: var(--text-primary);">$0.00</strong>
+              </div>
+            </div>
+            <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
+              ${isEdit && q.amount_paid > 0 ? `
+                <div>
+                  <span style="font-size: 13px; color: var(--text-secondary);">Ya Cobrado:</span>
+                  <strong style="font-size: 16px; margin-left: 6px; color: var(--success-700);">${formatCurrency(q.amount_paid)}</strong>
+                </div>
+              ` : ''}
+              <div>
+                <span style="font-size: 13px; color: var(--text-secondary);">Seleccionado a Cobrar Ahora:</span>
+                <strong id="quote-summary-selected-pay" style="font-size: 17px; margin-left: 6px; color: var(--primary-700);">$0.00</strong>
+              </div>
             </div>
           </div>
         </div>
@@ -1776,14 +1789,18 @@ export class Quotations {
       };
 
       const recalculateAll = () => {
-        let subtotal = 0;
+        let grossSubtotal = 0;
+        let itemsDiscountTotal = 0;
+        let itemsTotal = 0;
         let selectedToPay = 0;
 
         document.querySelectorAll('#quote-items-tbody .quote-item-table-row').forEach(row => {
           const qty = parseInt(row.querySelector('.quote-item-qty')?.value || 1, 10);
           const price = parseFloat(row.querySelector('.quote-item-price')?.value || 0);
           const disc = parseFloat(row.querySelector('.quote-item-discount')?.value || 0);
+          const itemGross = qty * price;
           const itemTotal = parseFloat((qty * price * (1 - disc / 100)).toFixed(2));
+          const itemDisc = Math.max(0, itemGross - itemTotal);
 
           const totalDisplay = row.querySelector('.quote-item-total-display');
           if (totalDisplay) totalDisplay.textContent = formatCurrency(itemTotal);
@@ -1792,7 +1809,9 @@ export class Quotations {
           const remainingAmt = Math.max(0, itemTotal - paidAmt);
           row.setAttribute('data-rem-amt', remainingAmt.toFixed(2));
 
-          subtotal += (qty * price);
+          grossSubtotal += itemGross;
+          itemsDiscountTotal += itemDisc;
+          itemsTotal += itemTotal;
 
           const payChk = row.querySelector('.quote-item-pay-chk');
           const payQtyWrap = row.querySelector('.quote-item-pay-qty-wrap');
@@ -1830,8 +1849,37 @@ export class Quotations {
         });
 
         const globalDiscPct = parseFloat(discountPctInput?.value || 0);
-        const globalDiscAmt = subtotal * (globalDiscPct / 100);
-        const grandTotal = Math.max(0, subtotal - globalDiscAmt);
+        const globalDiscAmt = itemsTotal * (globalDiscPct / 100);
+        const totalDiscount = itemsDiscountTotal + globalDiscAmt;
+        const grandTotal = Math.max(0, itemsTotal - globalDiscAmt);
+        const effectiveDiscountPct = grossSubtotal > 0 ? ((totalDiscount / grossSubtotal) * 100) : 0;
+        const pctStr = (effectiveDiscountPct % 1 === 0 ? effectiveDiscountPct.toFixed(0) : effectiveDiscountPct.toFixed(2)) + '%';
+
+        const discountHint = document.getElementById('quote-discount-amount-hint');
+        if (discountHint) {
+          if (totalDiscount > 0.001) {
+            discountHint.textContent = `Descuento total: -${formatCurrency(totalDiscount)} (${pctStr} del presupuesto)`;
+            discountHint.style.color = '#dc2626';
+          } else {
+            discountHint.textContent = '';
+          }
+        }
+
+        const subtotalElem = document.getElementById('quote-summary-subtotal');
+        if (subtotalElem) subtotalElem.textContent = formatCurrency(grossSubtotal);
+
+        const discountWrap = document.getElementById('quote-summary-discount-wrap');
+        const discountLabel = document.getElementById('quote-summary-discount-label');
+        const discountElem = document.getElementById('quote-summary-discount');
+        if (discountWrap && discountElem) {
+          if (totalDiscount > 0.001) {
+            discountWrap.style.display = 'block';
+            if (discountLabel) discountLabel.textContent = `Descuento (${pctStr}):`;
+            discountElem.textContent = `-${formatCurrency(totalDiscount)}`;
+          } else {
+            discountWrap.style.display = 'none';
+          }
+        }
 
         const grandTotalElem = document.getElementById('quote-summary-grand-total');
         if (grandTotalElem) grandTotalElem.textContent = formatCurrency(grandTotal);
@@ -2399,6 +2447,36 @@ export class Quotations {
       const logoUrl = clinic?.logo_url || '/assets/videsDentalLogo.jpg';
       const primaryColor = clinic?.primary_color || '#0f86ec';
 
+      const items = quote.items || [];
+      let computedGross = 0;
+      let computedItemDiscounts = 0;
+      for (const item of items) {
+        if (item.is_pack_item && !item.is_pack_header) continue;
+        const unitPrice = (item.is_pack_header && item.pack_fixed_price != null) ? parseFloat(item.pack_fixed_price) : parseFloat(item.unit_price || 0);
+        const qty = parseInt(item.quantity || 1, 10);
+        const itemSub = qty * unitPrice;
+        const itemTot = parseFloat(item.total !== undefined ? item.total : itemSub);
+        computedGross += itemSub;
+        computedItemDiscounts += Math.max(0, itemSub - itemTot);
+      }
+
+      const rawSubtotal = parseFloat(quote.subtotal || 0);
+      const subtotalVal = rawSubtotal > 0 ? rawSubtotal : computedGross;
+      const discountPct = parseFloat(quote.discount_percentage || 0);
+      const subtotalAfterItemDisc = Math.max(0, subtotalVal - computedItemDiscounts);
+      const globalDiscAmt = discountPct > 0 ? (subtotalAfterItemDisc * (discountPct / 100)) : 0;
+      const totalDiscountVal = parseFloat(quote.discount_amount || 0) > 0
+        ? parseFloat(quote.discount_amount)
+        : parseFloat((computedItemDiscounts + globalDiscAmt).toFixed(2));
+
+      const effectiveDiscountPct = subtotalVal > 0 ? ((totalDiscountVal / subtotalVal) * 100) : 0;
+      const pctStr = (effectiveDiscountPct % 1 === 0 ? effectiveDiscountPct.toFixed(0) : effectiveDiscountPct.toFixed(2)) + '%';
+
+      let finalTotalVal = parseFloat(quote.total || 0);
+      if (totalDiscountVal > 0 && (finalTotalVal >= subtotalVal || finalTotalVal <= 0)) {
+        finalTotalVal = Math.max(0, parseFloat((subtotalVal - totalDiscountVal).toFixed(2)));
+      }
+
       const printWindow = window.open('', '_blank');
       printWindow.document.write(`
         <html>
@@ -2498,11 +2576,19 @@ export class Quotations {
           </table>
 
           <div class="totals">
-            <p>Subtotal: ${formatCurrency(quote.subtotal)}</p>
-            ${parseFloat(quote.discount_amount || 0) > 0 ? `<p>Descuento: -${formatCurrency(quote.discount_amount)}</p>` : ''}
+            <p><strong>Subtotal:</strong> ${formatCurrency(subtotalVal)}</p>
+            ${totalDiscountVal > 0 ? `<p style="color: #dc2626;"><strong>Descuento (${pctStr}):</strong> -${formatCurrency(totalDiscountVal)}</p>` : ''}
 
             <hr/>
-            <h2 style="color: #0f86ec;">TOTAL: ${formatCurrency(quote.total)}</h2>
+            <h2 style="color: ${primaryColor};">TOTAL: ${formatCurrency(finalTotalVal)}</h2>
+            ${parseFloat(quote.amount_paid || 0) > 0 ? `
+              <p style="margin-top: 6px;">Monto Abonado: <strong style="color: #16a34a;">${formatCurrency(quote.amount_paid)}</strong></p>
+              <h2 style="color: ${parseFloat(quote.remaining_balance || 0) > 0 ? '#b45309' : '#16a34a'}; margin-top: 4px;">
+                ${parseFloat(quote.remaining_balance || 0) > 0 
+                  ? `PENDIENTE DE ABONAR: ${formatCurrency(quote.remaining_balance)}` 
+                  : `PRESUPUESTO 100% ABONADO (0,00 €)`}
+              </h2>
+            ` : ''}
           </div>
 
           <div class="footer">
@@ -2576,14 +2662,19 @@ export class Quotations {
     })();
 
     const storedTaxRate = 0;
+    const discPct = parseFloat(q.discount_percentage || 0);
 
     const itemAllocationsCardsHtml = acceptedItems.map(i => {
       const isTarget = !preselectedItemId || i.id === preselectedItemId;
       const quantity = parseInt(i.quantity || 1, 10) || 1;
-      const totalPrice = parseFloat(i.total || 0);
+      const baseItemTotal = parseFloat(i.total || 0);
+      const effectiveItemTotal = (i.effective_total !== undefined && i.effective_total !== null)
+        ? parseFloat(i.effective_total)
+        : (discPct > 0 ? parseFloat((baseItemTotal * (1 - discPct / 100)).toFixed(2)) : baseItemTotal);
+      const totalPrice = effectiveItemTotal;
       const paidAmount = parseFloat(i.amount_paid || 0);
-      const owedAmount = parseFloat(i.remaining_balance !== undefined ? i.remaining_balance : (totalPrice - paidAmount));
-      const unitPrice = parseFloat(i.unit_price || (quantity > 0 ? (totalPrice / quantity) : totalPrice));
+      const owedAmount = parseFloat(i.remaining_balance !== undefined ? i.remaining_balance : Math.max(0, totalPrice - paidAmount));
+      const unitPrice = parseFloat(quantity > 0 ? (totalPrice / quantity) : totalPrice);
       
       const owedUnits = quantity > 1 && unitPrice > 0 ? Math.min(quantity, Math.max(1, Math.round(owedAmount / unitPrice))) : 1;
       const selectedUnits = isTarget ? owedUnits : 0;
@@ -2624,6 +2715,7 @@ export class Quotations {
               <strong style="font-size: 13px; color: var(--text-primary);">${i.description}</strong>
               ${quantity > 1 ? `<span class="badge badge-info" style="font-size: 11px; margin-left: 6px; padding: 2px 6px; font-weight: 600;">Cant: ${quantity} × ${formatCurrency(unitPrice)}</span>` : ''}
               ${i.tooth_number ? `<span style="font-size: 11px; color: var(--text-secondary); margin-left: 4px;">(Pieza #${i.tooth_number})</span>` : ''}
+              ${discPct > 0 ? `<span class="badge badge-warning" style="font-size: 10px; margin-left: 6px; padding: 1px 5px;">Desc. -${discPct}%</span>` : ''}
             </div>
             <div style="text-align: right; font-size: 12px;">
               Total: <strong>${formatCurrency(totalPrice)}</strong> &nbsp;|&nbsp;
@@ -2642,8 +2734,12 @@ export class Quotations {
 
     const initialTotal = acceptedItems.reduce((acc, i) => {
       if (preselectedItemId && i.id !== preselectedItemId) return acc;
+      const baseItemTotal = parseFloat(i.total || 0);
+      const effectiveItemTotal = (i.effective_total !== undefined && i.effective_total !== null)
+        ? parseFloat(i.effective_total)
+        : (discPct > 0 ? parseFloat((baseItemTotal * (1 - discPct / 100)).toFixed(2)) : baseItemTotal);
       const paidAmount = parseFloat(i.amount_paid || 0);
-      const owedAmount = parseFloat(i.remaining_balance !== undefined ? i.remaining_balance : (parseFloat(i.total || 0) - paidAmount));
+      const owedAmount = parseFloat(i.remaining_balance !== undefined ? i.remaining_balance : Math.max(0, effectiveItemTotal - paidAmount));
       return acc + Math.max(0, owedAmount);
     }, 0);
 
@@ -2830,7 +2926,14 @@ export class Quotations {
 
     recalc();
 
-    amountInput?.addEventListener('input', recalc);
+    amountInput?.addEventListener('input', () => {
+      const P = parseFloat(amountInput?.value || 0);
+      const allocInputs = document.querySelectorAll('.quote-item-alloc-input');
+      if (allocInputs.length === 1) {
+        allocInputs[0].value = P.toFixed(2);
+      }
+      recalc();
+    });
 
     const confirmBtn = document.getElementById('confirm-quote-payment-btn');
     confirmBtn?.addEventListener('click', async () => {
@@ -2853,6 +2956,10 @@ export class Quotations {
           itemAllocations.push({ id: itemId, amount });
         }
       });
+
+      if (itemAllocations.length === 1 && Math.abs(itemAllocations[0].amount - amountVal) > 0.001) {
+        itemAllocations[0].amount = amountVal;
+      }
 
       if (itemAllocations.length === 0) {
         toast.error('Debe ingresar un monto de abono mayor a 0 para al menos un tratamiento.');

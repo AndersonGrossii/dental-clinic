@@ -2871,14 +2871,29 @@ export class PatientProfile {
       const docTitle = isReceipt ? 'RECIBO DE PAGO' : 'FACTURA OFICIAL';
       const docIcon = isReceipt ? '🧾' : '📄';
 
-      const itemsHtml = (doc.items || []).map(item => `
+      const quoteNum = doc.quotation_number || doc.quotation?.quote_number || '';
+      const quoteTotal = doc.quotation_total !== null && doc.quotation_total !== undefined ? parseFloat(doc.quotation_total) : (doc.quotation?.total ? parseFloat(doc.quotation.total) : null);
+      const quotePaid = doc.quotation_amount_paid !== null && doc.quotation_amount_paid !== undefined ? parseFloat(doc.quotation_amount_paid) : (doc.quotation?.amount_paid ? parseFloat(doc.quotation.amount_paid) : null);
+      const quoteRemaining = doc.quotation_remaining_balance !== null && doc.quotation_remaining_balance !== undefined ? parseFloat(doc.quotation_remaining_balance) : (doc.quotation?.remaining_balance !== undefined ? parseFloat(doc.quotation.remaining_balance) : null);
+      const hasQuotation = quoteRemaining !== null && !isNaN(quoteRemaining);
+
+      const itemsHtml = (doc.items || []).map(item => {
+        const itemTot = parseFloat(item.total || 0);
+        const origTot = parseFloat(item.original_total || 0);
+        const isPartial = origTot > itemTot + 0.01;
+        const displayDesc = item.clean_description || item.description;
+        return `
         <tr>
-          <td style="padding: 8px; border-bottom: 1px solid var(--border-color);">${item.description}</td>
+          <td style="padding: 8px; border-bottom: 1px solid var(--border-color);">
+            <div><strong>${displayDesc}</strong> ${isPartial ? `<span class="badge badge-warning" style="font-size: 10px; padding: 1px 5px; margin-left: 4px;">Abono Parcial</span>` : ''}</div>
+            ${isPartial ? `<div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">Precio Tratamiento: ${formatCurrency(origTot)} &bull; Importe abonado en este comprobante: ${formatCurrency(itemTot)}</div>` : ''}
+          </td>
           <td style="padding: 8px; border-bottom: 1px solid var(--border-color); text-align: center;">${item.quantity}</td>
           <td style="padding: 8px; border-bottom: 1px solid var(--border-color); text-align: right;">${formatCurrency(item.unit_price)}</td>
           <td style="padding: 8px; border-bottom: 1px solid var(--border-color); text-align: right;">${formatCurrency(item.total)}</td>
         </tr>
-      `).join('');
+      `;
+      }).join('');
 
       const content = `
         <div id="printable-profile-doc" style="padding: var(--space-4); font-family: inherit;">
@@ -2897,6 +2912,7 @@ export class PatientProfile {
             <p style="margin: 0;"><strong>Paciente:</strong> ${doc.patient_name || 'N/A'}</p>
             ${doc.patient_dni ? `<p style="margin: 4px 0 0 0;"><strong>DNI/ID:</strong> ${doc.patient_dni}</p>` : ''}
             ${doc.doctor_name ? `<p style="margin: 4px 0 0 0;"><strong>Atendido por:</strong> Dr/a. ${doc.doctor_name}</p>` : ''}
+            ${quoteNum ? `<p style="margin: 4px 0 0 0;"><strong>Presupuesto Asociado:</strong> #${quoteNum}</p>` : ''}
           </div>
 
           <table style="width: 100%; border-collapse: collapse; margin-bottom: var(--space-4);">
@@ -2913,14 +2929,40 @@ export class PatientProfile {
             </tbody>
           </table>
 
-          <div style="display: flex; justify-content: flex-end; margin-top: var(--space-4);">
-            <div style="width: 260px;">
+          <div style="display: flex; flex-direction: column; align-items: flex-end; margin-top: var(--space-4);">
+            ${hasQuotation ? `
+              <div style="width: 100%; max-width: 440px; background: ${quoteRemaining > 0 ? '#fffbeb' : '#f0fdf4'}; border: 1.5px solid ${quoteRemaining > 0 ? '#f59e0b' : '#16a34a'}; border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; text-align: right;">
+                <div style="font-size: 12px; color: #475569;">
+                  Total Tratamiento / Presupuesto ${quoteNum ? `(#${quoteNum})` : ''}: <strong>${formatCurrency(quoteTotal)}</strong>
+                </div>
+                <div style="font-size: 12px; color: #475569; margin-top: 2px;">
+                  Total Abonado al Presupuesto: <strong>${formatCurrency(quotePaid)}</strong>
+                </div>
+                <div style="font-size: 14px; font-weight: 700; color: ${quoteRemaining > 0 ? '#b45309' : '#15803d'}; margin-top: 6px; padding-top: 6px; border-top: 1px solid ${quoteRemaining > 0 ? '#fde68a' : '#bbf7d0'};">
+                  ${quoteRemaining > 0 
+                    ? `⚠️ Saldo pendiente que debe el paciente a la clínica: ${formatCurrency(quoteRemaining)}` 
+                    : `✅ Tratamiento / Presupuesto totalmente abonado (0,00 €)`}
+                </div>
+              </div>
+            ` : ''}
+            <div style="width: 280px;">
               <div style="display: flex; justify-content: space-between; padding: 4px 0;"><span>Subtotal:</span> <span>${formatCurrency(doc.subtotal)}</span></div>
               ${parseFloat(doc.discount_amount || 0) > 0 ? `<div style="display: flex; justify-content: space-between; padding: 4px 0;"><span>Descuento:</span> <span>-${formatCurrency(doc.discount_amount)}</span></div>` : ''}
-              <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 18px; font-weight: bold; border-top: 2px solid var(--border-color);"><span>TOTAL:</span> <span>${formatCurrency(doc.total)}</span></div>
-              <div style="display: flex; justify-content: space-between; padding: 4px 0; color: var(--success-600); font-weight: 600;"><span>Monto Pagado:</span> <span>${formatCurrency(doc.amount_paid)}</span></div>
+              <div style="display: flex; justify-content: space-between; padding: 4px 0; color: var(--success-600); font-weight: 600;"><span>Monto Pagado en este documento:</span> <span>${formatCurrency(doc.amount_paid)}</span></div>
               <div style="display: flex; justify-content: space-between; padding: 4px 0; color: var(--text-secondary); font-weight: 500;"><span>Método de Pago:</span> <span>${formatPaymentMethods(doc)}</span></div>
-              <div style="display: flex; justify-content: space-between; padding: 4px 0; color: var(--danger-600); font-weight: 600;"><span>Saldo Restante:</span> <span>${formatCurrency(doc.balance)}</span></div>
+              ${hasQuotation && quoteRemaining > 0 ? `
+                <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 15px; font-weight: bold; border-top: 2px solid var(--border-color); color: #b45309;">
+                  <span>Debe a la clínica:</span> 
+                  <span>${formatCurrency(quoteRemaining)}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; color: var(--text-secondary);">
+                  <span>Abono en este comprobante:</span> 
+                  <strong>${formatCurrency(doc.total)}</strong>
+                </div>
+              ` : `
+                <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 18px; font-weight: bold; border-top: 2px solid var(--border-color);"><span>TOTAL:</span> <span>${formatCurrency(doc.total)}</span></div>
+                <div style="display: flex; justify-content: space-between; padding: 4px 0; color: var(--danger-600); font-weight: 600;"><span>Saldo Restante:</span> <span>${formatCurrency(doc.balance)}</span></div>
+              `}
             </div>
           </div>
         </div>

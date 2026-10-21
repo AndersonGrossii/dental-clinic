@@ -599,7 +599,10 @@ class PDFService {
       },
       docDate: invoice.created_at,
       dueDate: invoice.due_date,
-      extraLabels: invoice.receipt_number ? [`Recibo Vinculado: #${invoice.receipt_number}`] : [],
+      extraLabels: [
+        ...(invoice.receipt_number ? [`Recibo Vinculado: #${invoice.receipt_number}`] : []),
+        ...(invoice.quotation_number ? [`Presupuesto: #${invoice.quotation_number}`] : []),
+      ],
     }, clinic);
 
     // 3. Tabla de Conceptos / Tratamientos
@@ -653,10 +656,6 @@ class PDFService {
       currY = 40;
     }
 
-    doc
-      .roundedRect(summaryX, currY, summaryWidth, 108, 4)
-      .fillAndStroke(COLORS.bgCard, COLORS.border);
-
     const subtotal = parseFloat(invoice.subtotal || 0);
     const discount = parseFloat(invoice.discount_amount || 0);
     const taxRate = parseFloat(invoice.tax_rate || 0);
@@ -665,20 +664,35 @@ class PDFService {
     const amountPaid = parseFloat(invoice.amount_paid || 0);
     const balance = Math.max(0, parseFloat((total - amountPaid).toFixed(2)));
 
+    const quoteRemaining = invoice.quotation_remaining_balance;
+    const hasQuote = invoice.quotation_id && quoteRemaining !== null && quoteRemaining !== undefined;
+
+    let lineCount = 4; // subtotal, total, amountPaid, balance
+    if (discount > 0) lineCount++;
+    if (taxRate > 0) lineCount++;
+    if (hasQuote) lineCount += 3; // total presupuesto, abonado presupuesto, pendiente presupuesto
+    const summaryHeight = 16 + (lineCount * 13) + (hasQuote ? 12 : 6);
+
+    doc
+      .roundedRect(summaryX, currY, summaryWidth, summaryHeight, 4)
+      .fillAndStroke(COLORS.bgCard, COLORS.border);
+
     let rowY = currY + 8;
     const printLine = (label, val, bold = false, color = COLORS.text, fontSize = 8.5) => {
       doc
         .fillColor(color)
         .font(bold ? 'Helvetica-Bold' : 'Helvetica')
         .fontSize(fontSize)
-        .text(label, summaryX + 12, rowY, { width: 110 })
-        .text(val, summaryX + 120, rowY, { width: 88, align: 'right' });
+        .text(label, summaryX + 10, rowY, { width: 116 })
+        .text(val, summaryX + 118, rowY, { width: 92, align: 'right' });
       rowY += 13;
     };
 
     printLine('Subtotal Bruto:', this.formatCurrency(subtotal, clinic.currency));
     if (discount > 0) {
-      printLine('Descuento:', `-${this.formatCurrency(discount, clinic.currency)}`, false, COLORS.danger);
+      const effectivePct = subtotal > 0 ? ((discount / subtotal) * 100) : parseFloat(invoice.discount_percentage || 0);
+      const pctStr = (effectivePct % 1 === 0 ? effectivePct.toFixed(0) : effectivePct.toFixed(2)) + '%';
+      printLine(`Descuento (${pctStr}):`, `-${this.formatCurrency(discount, clinic.currency)}`, false, COLORS.danger);
     }
     if (taxRate > 0) {
       printLine(`IVA (${taxRate}%):`, this.formatCurrency(taxAmount, clinic.currency));
@@ -686,14 +700,26 @@ class PDFService {
     rowY += 2;
     doc.strokeColor(COLORS.border).lineWidth(0.5).moveTo(summaryX + 10, rowY).lineTo(summaryX + summaryWidth - 10, rowY).stroke();
     rowY += 4;
-    printLine('TOTAL FACTURA:', this.formatCurrency(total, clinic.currency), true, theme.primaryDark, 10);
+    printLine(isFactura ? 'TOTAL FACTURA:' : 'TOTAL RECIBO:', this.formatCurrency(total, clinic.currency), true, theme.primaryDark, 10);
     printLine('Importe Abonado:', this.formatCurrency(amountPaid, clinic.currency), false, COLORS.success);
-    printLine('Saldo Pendiente:', this.formatCurrency(balance, clinic.currency), true, balance > 0 ? COLORS.danger : COLORS.textSecondary);
+    printLine(isFactura ? 'Saldo Pend. Factura:' : 'Saldo Pend. Recibo:', this.formatCurrency(balance, clinic.currency), true, balance > 0 ? COLORS.danger : COLORS.textSecondary);
+
+    if (hasQuote) {
+      rowY += 2;
+      doc.strokeColor(COLORS.border).lineWidth(0.5).moveTo(summaryX + 10, rowY).lineTo(summaryX + summaryWidth - 10, rowY).stroke();
+      rowY += 4;
+      const quoteNumStr = invoice.quotation_number ? ` (#${invoice.quotation_number})` : '';
+      printLine(`Total Presupuesto${quoteNumStr}:`, this.formatCurrency(invoice.quotation_total || 0, clinic.currency), false, COLORS.textSecondary, 8);
+      printLine('Abonado al Presupuesto:', this.formatCurrency(invoice.quotation_amount_paid || 0, clinic.currency), false, COLORS.textSecondary, 8);
+      const pendingColor = quoteRemaining > 0 ? '#b45309' : COLORS.success;
+      const pendingVal = quoteRemaining > 0 ? this.formatCurrency(quoteRemaining, clinic.currency) : '0,00 ' + (clinic.currency || '€');
+      printLine('Debe del Presupuesto:', pendingVal, true, pendingColor, 8.5);
+    }
 
     // 5. Historial de Pagos si existen
     const payments = invoice.payments || [];
     if (payments.length > 0) {
-      doc.y = Math.max(currY + 118, doc.y + 10);
+      doc.y = Math.max(currY + summaryHeight + 10, doc.y + 10);
       if (doc.y > 680) doc.addPage();
 
       doc
@@ -727,7 +753,13 @@ class PDFService {
     }
 
     // 6. Observaciones y Cláusula Fiscal
-    if (invoice.notes) {
+    const notesText = invoice.notes ? this.stripEmojis(invoice.notes) : '';
+    const quoteNote = (hasQuote && quoteRemaining > 0)
+      ? `Saldo pendiente del presupuesto #${invoice.quotation_number}: ${this.formatCurrency(quoteRemaining, clinic.currency)} pendiente de abonar a la clínica.`
+      : '';
+    const fullNotes = [notesText, quoteNote].filter(Boolean).join('\n');
+
+    if (fullNotes) {
       if (doc.y > 700) doc.addPage();
       doc
         .fillColor(COLORS.textSecondary)
@@ -735,7 +767,7 @@ class PDFService {
         .fontSize(8)
         .text('Observaciones:', margin, doc.y + 6)
         .font('Helvetica')
-        .text(this.stripEmojis(invoice.notes), margin, doc.y + 1, { width: 350 });
+        .text(fullNotes, margin, doc.y + 1, { width: 350 });
     }
 
     // 7. Pie de página y numeración
@@ -907,15 +939,47 @@ class PDFService {
       currY = 40;
     }
 
-    doc
-      .roundedRect(summaryX, currY, summaryWidth, 90, 4)
-      .fillAndStroke(COLORS.bgCard, COLORS.border);
+    let subtotal = parseFloat(quote.subtotal || 0);
+    let discount = parseFloat(quote.discount_amount || 0);
+    let total = parseFloat(quote.total || 0);
 
-    const subtotal = parseFloat(quote.subtotal || 0);
-    const discount = parseFloat(quote.discount_amount || 0);
-    const total = parseFloat(quote.total || 0);
+    // Compute defensively in case older records or item-level discounts
+    let computedGross = 0;
+    let computedItemDiscounts = 0;
+    for (const item of (quote.items || [])) {
+      if (item.is_pack_item && !item.is_pack_header) continue;
+      const unitPrice = (item.is_pack_header && item.pack_fixed_price != null) ? parseFloat(item.pack_fixed_price) : parseFloat(item.unit_price || 0);
+      const qty = parseInt(item.quantity || 1, 10);
+      const itemSub = qty * unitPrice;
+      const itemTot = parseFloat(item.total !== undefined ? item.total : itemSub);
+      computedGross += itemSub;
+      computedItemDiscounts += Math.max(0, itemSub - itemTot);
+    }
+
+    if (subtotal <= 0) {
+      subtotal = computedGross;
+    }
+
+    const discountPct = parseFloat(quote.discount_percentage || 0);
+    const subtotalAfterItemDisc = Math.max(0, subtotal - computedItemDiscounts);
+    const globalDiscAmt = discountPct > 0 ? (subtotalAfterItemDisc * (discountPct / 100)) : 0;
+    const computedTotalDiscount = parseFloat((computedItemDiscounts + globalDiscAmt).toFixed(2));
+
+    if (discount <= 0 && computedTotalDiscount > 0) {
+      discount = computedTotalDiscount;
+    }
+
+    if (discount > 0 && (total >= subtotal || total <= 0)) {
+      total = Math.max(0, parseFloat((subtotal - discount).toFixed(2)));
+    }
+
     const amountPaid = parseFloat(quote.amount_paid || 0);
     const remaining = Math.max(0, parseFloat((total - amountPaid).toFixed(2)));
+
+    const summaryHeight = (amountPaid > 0 ? (discount > 0 ? 100 : 85) : (discount > 0 ? 75 : 60));
+    doc
+      .roundedRect(summaryX, currY, summaryWidth, summaryHeight, 4)
+      .fillAndStroke(COLORS.bgCard, COLORS.border);
 
     let rowY = currY + 8;
     const printLine = (label, val, bold = false, color = COLORS.text, fontSize = 8.5) => {
@@ -930,7 +994,9 @@ class PDFService {
 
     printLine('Subtotal Presupuesto:', this.formatCurrency(subtotal, clinic.currency));
     if (discount > 0) {
-      printLine('Descuento Total:', `-${this.formatCurrency(discount, clinic.currency)}`, false, COLORS.danger);
+      const effectivePct = subtotal > 0 ? ((discount / subtotal) * 100) : 0;
+      const pctStr = (effectivePct % 1 === 0 ? effectivePct.toFixed(0) : effectivePct.toFixed(2)) + '%';
+      printLine(`Descuento (${pctStr}):`, `-${this.formatCurrency(discount, clinic.currency)}`, false, COLORS.danger);
     }
     rowY += 2;
     doc.strokeColor(COLORS.border).lineWidth(0.5).moveTo(summaryX + 10, rowY).lineTo(summaryX + summaryWidth - 10, rowY).stroke();

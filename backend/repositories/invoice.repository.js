@@ -3,6 +3,7 @@
 // ============================================
 import { query, scopeClinic, transaction, als } from '../database/pool.js';
 import { BaseRepository } from './base.repository.js';
+import quotationRepository from './quotation.repository.js';
 
 /**
  * Repositorio para operaciones de datos de facturas.
@@ -32,9 +33,15 @@ class InvoiceRepository extends BaseRepository {
     }
 
     if (filters.document_type) {
-      conditions.push(`i.document_type = $${paramIndex}`);
-      params.push(filters.document_type);
-      paramIndex++;
+      if (filters.document_type === 'factura') {
+        conditions.push(`(i.document_type = 'factura' OR (i.document_type IS NULL AND (i.invoice_number LIKE 'FAC%' OR i.invoice_number NOT LIKE 'REC%')))`);
+      } else if (filters.document_type === 'recibo') {
+        conditions.push(`(i.document_type = 'recibo' OR i.invoice_number LIKE 'REC%')`);
+      } else {
+        conditions.push(`i.document_type = $${paramIndex}`);
+        params.push(filters.document_type);
+        paramIndex++;
+      }
     }
 
     if (filters.unlinked_receipts === 'true' || filters.unlinked_receipts === true) {
@@ -53,15 +60,18 @@ class InvoiceRepository extends BaseRepository {
       paramIndex++;
     }
 
-    if (filters.start_date) {
+    const startDate = filters.start_date || filters.date_from;
+    if (startDate) {
       conditions.push(`i.created_at >= $${paramIndex}`);
-      params.push(filters.start_date);
+      params.push(startDate);
       paramIndex++;
     }
 
-    if (filters.end_date) {
+    const endDate = filters.end_date || filters.date_to;
+    if (endDate) {
+      const formattedEndDate = typeof endDate === 'string' && endDate.length === 10 ? `${endDate} 23:59:59` : endDate;
       conditions.push(`i.created_at <= $${paramIndex}`);
-      params.push(filters.end_date);
+      params.push(formattedEndDate);
       paramIndex++;
     }
 
@@ -239,8 +249,47 @@ class InvoiceRepository extends BaseRepository {
       payParams
     );
 
+    let effectiveQuotationId = invoiceResult.rows[0].quotation_id || null;
+    if (!effectiveQuotationId && invoiceResult.rows[0].receipt_id) {
+      const linkedRes = await query(`SELECT quotation_id FROM invoices WHERE id = $1`, [invoiceResult.rows[0].receipt_id]);
+      effectiveQuotationId = linkedRes.rows[0]?.quotation_id || null;
+    }
+    if (!effectiveQuotationId) {
+      const qItem = processedItems.find(it => it.quotation_item_id);
+      if (qItem) {
+        const qiRes = await query(`SELECT quotation_id FROM quotation_items WHERE id = $1`, [qItem.quotation_item_id]);
+        effectiveQuotationId = qiRes.rows[0]?.quotation_id || null;
+      }
+    }
+
+    let quotationInfo = null;
+    if (effectiveQuotationId) {
+      try {
+        const quote = await quotationRepository.findByIdWithItems(effectiveQuotationId);
+        if (quote) {
+          quotationInfo = {
+            id: quote.id,
+            quote_number: quote.quote_number,
+            total: parseFloat(quote.accepted_total || quote.total || 0),
+            amount_paid: parseFloat(quote.amount_paid || 0),
+            remaining_balance: parseFloat(quote.remaining_balance || 0),
+            status: quote.status,
+            payment_status: quote.payment_status,
+          };
+        }
+      } catch (err) {
+        console.error('Error fetching quotation for invoice:', err);
+      }
+    }
+
     return {
       ...invoiceResult.rows[0],
+      quotation_id: effectiveQuotationId,
+      quotation_number: quotationInfo?.quote_number || null,
+      quotation_total: quotationInfo ? quotationInfo.total : null,
+      quotation_amount_paid: quotationInfo ? quotationInfo.amount_paid : null,
+      quotation_remaining_balance: quotationInfo ? quotationInfo.remaining_balance : null,
+      quotation: quotationInfo,
       items: processedItems,
       payments: paymentsResult.rows,
     };

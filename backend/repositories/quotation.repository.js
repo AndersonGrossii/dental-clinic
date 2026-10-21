@@ -90,14 +90,16 @@ class QuotationRepository extends BaseRepository {
                  FROM invoices inv2
                  WHERE inv2.quotation_id = q.id
                    AND inv2.deleted_at IS NULL
-                   AND inv2.status != 'cancelada'),
+                   AND inv2.status != 'cancelada'
+                   AND NOT (inv2.document_type = 'recibo' AND inv2.receipt_id IS NOT NULL)),
                 (SELECT SUM(ii.total * (CASE WHEN inv2.total > 0 THEN (inv2.amount_paid / inv2.total) ELSE 0 END))
                  FROM invoice_items ii
                  JOIN invoices inv2 ON ii.invoice_id = inv2.id
                  JOIN quotation_items qi ON ii.quotation_item_id = qi.id
                  WHERE qi.quotation_id = q.id
                    AND inv2.deleted_at IS NULL
-                   AND inv2.status != 'cancelada'),
+                   AND inv2.status != 'cancelada'
+                   AND NOT (inv2.document_type = 'recibo' AND inv2.receipt_id IS NOT NULL)),
                 0
               ) + COALESCE(
                 (SELECT SUM(pay.amount)
@@ -137,7 +139,11 @@ class QuotationRepository extends BaseRepository {
 
     const rows = dataResult.rows.map(row => {
       const qTotal = parseFloat(row.total || 0);
-      const qAccepted = parseFloat(row.accepted_total || 0);
+      const discPct = parseFloat(row.discount_percentage || 0);
+      let qAccepted = parseFloat(row.accepted_total || 0);
+      if (discPct > 0 && qAccepted > 0) {
+        qAccepted = parseFloat((qAccepted * (1 - discPct / 100)).toFixed(2));
+      }
       const targetTotal = (qAccepted > 0 && (row.status === 'parcial' || row.status === 'aceptada')) ? qAccepted : qTotal;
       const qPaid = parseFloat(row.amount_paid || 0);
       const remainingBalance = Math.max(0, parseFloat((targetTotal - qPaid).toFixed(2)));
@@ -201,7 +207,8 @@ class QuotationRepository extends BaseRepository {
                  WHERE (ii.quotation_item_id = qi.id 
                      OR (ii.patient_treatment_id IS NOT NULL AND ii.patient_treatment_id = qi.patient_treatment_id))
                    AND inv2.deleted_at IS NULL
-                   AND inv2.status != 'cancelada'),
+                   AND inv2.status != 'cancelada'
+                   AND NOT (inv2.document_type = 'recibo' AND inv2.receipt_id IS NOT NULL)),
                 0
               ) + COALESCE(
                 (SELECT SUM(pay.amount)
@@ -239,30 +246,39 @@ class QuotationRepository extends BaseRepository {
       [id]
     );
 
+    const qTotal = parseFloat(quotationResult.rows[0].total || 0);
+    const discPct = parseFloat(quotationResult.rows[0].discount_percentage || 0);
+
     const processedItems = itemsResult.rows.map(item => {
       const itemTotal = parseFloat(item.total || 0);
+      const effectiveItemTotal = (discPct > 0 && itemTotal > 0)
+        ? parseFloat((itemTotal * (1 - discPct / 100)).toFixed(2))
+        : itemTotal;
       const amountPaid = parseFloat(item.amount_paid || 0);
-      const remainingBalance = Math.max(0, parseFloat((itemTotal - amountPaid).toFixed(2)));
+      const remainingBalance = Math.max(0, parseFloat((effectiveItemTotal - amountPaid).toFixed(2)));
       let paymentStatus = 'ninguno';
-      if (amountPaid >= itemTotal - 0.001 && itemTotal > 0) {
+      if (amountPaid >= effectiveItemTotal - 0.001 && effectiveItemTotal > 0) {
         paymentStatus = 'pagado';
       } else if (amountPaid > 0) {
         paymentStatus = 'parcial';
       }
       return {
         ...item,
+        effective_total: effectiveItemTotal,
+        discounted_total: effectiveItemTotal,
         amount_paid: amountPaid,
         remaining_balance: remainingBalance,
         payment_status: paymentStatus,
         paid_with_credit: !!item.paid_with_credit,
       };
     });
-
-    const qTotal = parseFloat(quotationResult.rows[0].total || 0);
     const acceptedItems = processedItems.filter(i => i.status === 'aceptado');
-    const qAccepted = acceptedItems.length > 0
+    let qAccepted = acceptedItems.length > 0
       ? parseFloat(acceptedItems.reduce((acc, i) => acc + parseFloat(i.total || 0), 0).toFixed(2))
       : 0;
+    if (discPct > 0 && qAccepted > 0) {
+      qAccepted = parseFloat((qAccepted * (1 - discPct / 100)).toFixed(2));
+    }
     const targetTotal = (qAccepted > 0 && (quotationResult.rows[0].status === 'parcial' || quotationResult.rows[0].status === 'aceptada')) ? qAccepted : qTotal;
 
     const totalPaid = parseFloat(processedItems.reduce((acc, i) => acc + i.amount_paid, 0).toFixed(2));
@@ -611,6 +627,7 @@ class QuotationRepository extends BaseRepository {
         COALESCE(pt.doctor_id, q.doctor_id) AS doctor_id,
         pt.clinic_id,
         COALESCE(pt.tax_rate, 0) AS quote_tax_rate,
+        0 AS quote_discount_pct,
         d.first_name AS doctor_first_name,
         d.last_name AS doctor_last_name,
         t.name AS catalog_treatment_name,
@@ -646,6 +663,7 @@ class QuotationRepository extends BaseRepository {
         q.doctor_id,
         q.clinic_id,
         q.tax_rate AS quote_tax_rate,
+        q.discount_percentage AS quote_discount_pct,
         d.first_name AS doctor_first_name,
         d.last_name AS doctor_last_name,
         t.name AS catalog_treatment_name,
@@ -657,7 +675,8 @@ class QuotationRepository extends BaseRepository {
            JOIN invoices inv2 ON ii.invoice_id = inv2.id
            WHERE (ii.quotation_item_id = qi.id OR (ii.patient_treatment_id IS NOT NULL AND ii.patient_treatment_id = qi.patient_treatment_id))
              AND inv2.deleted_at IS NULL
-             AND inv2.status != 'cancelada'),
+             AND inv2.status != 'cancelada'
+             AND NOT (inv2.document_type = 'recibo' AND inv2.receipt_id IS NOT NULL)),
           0
         ) + COALESCE(
           (SELECT SUM(pay.amount)
@@ -667,13 +686,14 @@ class QuotationRepository extends BaseRepository {
              AND pay.invoice_id IS NULL),
           0
         )) AS amount_paid,
-        GREATEST(0, (qi.total * (1 + COALESCE(q.tax_rate, 0) / 100)) - (COALESCE(
+        GREATEST(0, (qi.total * (1 - COALESCE(q.discount_percentage, 0) / 100) * (1 + COALESCE(q.tax_rate, 0) / 100)) - (COALESCE(
           (SELECT SUM(ii.total * (CASE WHEN inv2.total > 0 THEN (inv2.amount_paid / inv2.total) ELSE 0 END))
            FROM invoice_items ii
            JOIN invoices inv2 ON ii.invoice_id = inv2.id
            WHERE (ii.quotation_item_id = qi.id OR (ii.patient_treatment_id IS NOT NULL AND ii.patient_treatment_id = qi.patient_treatment_id))
              AND inv2.deleted_at IS NULL
-             AND inv2.status != 'cancelada'),
+             AND inv2.status != 'cancelada'
+             AND NOT (inv2.document_type = 'recibo' AND inv2.receipt_id IS NOT NULL)),
           0
         ) + COALESCE(
           (SELECT SUM(pay.amount)
@@ -690,7 +710,8 @@ class QuotationRepository extends BaseRepository {
              JOIN invoices inv2 ON ii.invoice_id = inv2.id
              WHERE (ii.quotation_item_id = qi.id OR (ii.patient_treatment_id IS NOT NULL AND ii.patient_treatment_id = qi.patient_treatment_id))
                AND inv2.deleted_at IS NULL
-               AND inv2.status != 'cancelada'),
+               AND inv2.status != 'cancelada'
+               AND NOT (inv2.document_type = 'recibo' AND inv2.receipt_id IS NOT NULL)),
             0
           ) + COALESCE(
             (SELECT SUM(pay.amount + pay.credit_used)
@@ -699,14 +720,15 @@ class QuotationRepository extends BaseRepository {
                AND pay.deleted_at IS NULL
                AND pay.invoice_id IS NULL),
             0
-          )) >= (qi.total * (1 + COALESCE(q.tax_rate, 0) / 100)) - 0.001 THEN 'pagado'
+          )) >= (qi.total * (1 - COALESCE(q.discount_percentage, 0) / 100) * (1 + COALESCE(q.tax_rate, 0) / 100)) - 0.001 THEN 'pagado'
           WHEN (COALESCE(
             (SELECT SUM(ii.total * (CASE WHEN inv2.total > 0 THEN (inv2.amount_paid / inv2.total) ELSE 0 END))
              FROM invoice_items ii
              JOIN invoices inv2 ON ii.invoice_id = inv2.id
              WHERE (ii.quotation_item_id = qi.id OR (ii.patient_treatment_id IS NOT NULL AND ii.patient_treatment_id = qi.patient_treatment_id))
                AND inv2.deleted_at IS NULL
-               AND inv2.status != 'cancelada'),
+               AND inv2.status != 'cancelada'
+               AND NOT (inv2.document_type = 'recibo' AND inv2.receipt_id IS NOT NULL)),
             0
           ) + COALESCE(
             (SELECT SUM(pay.amount + pay.credit_used)

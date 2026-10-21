@@ -18,6 +18,12 @@ export class Invoices {
   constructor(container) {
     this.container = container;
     this.invoicesList = [];
+    this.currentPage = 1;
+    this.totalPages = 1;
+    this.totalItems = 0;
+    this.limit = 15;
+    this.searchQuery = '';
+    this.searchTimeout = null;
     this.abortController = null;
   }
 
@@ -26,17 +32,78 @@ export class Invoices {
       this.abortController.abort();
       this.abortController = null;
     }
+    if (this.searchTimeout) {
+      clearTimeout(this.searchTimeout);
+      this.searchTimeout = null;
+    }
   }
 
   async render() {
+    await this.loadInvoices();
+  }
+
+  async loadInvoices() {
     try {
-      const response = await invoiceService.getAll({ document_type: 'factura' });
-      const rawList = Array.isArray(response) ? response : (response?.invoices || response?.data || []);
+      const params = {
+        document_type: 'factura',
+        page: this.currentPage,
+        limit: this.limit,
+      };
+      if (this.searchQuery) {
+        params.search = this.searchQuery;
+      }
+
+      const response = await invoiceService.getAll(params, { returnFullResponse: true });
+      const rawList = response?.data || response?.invoices || (Array.isArray(response) ? response : []);
       this.invoicesList = rawList.filter(i => i.document_type === 'factura' || (!i.document_type && i.invoice_number?.startsWith('FAC')));
+
+      const pag = response?.pagination;
+      this.totalItems = pag?.totalItems ?? pag?.total ?? this.invoicesList.length;
+      this.totalPages = pag?.totalPages ?? Math.max(1, Math.ceil(this.totalItems / this.limit));
+      this.currentPage = pag?.currentPage ?? pag?.page ?? this.currentPage;
+
+      if (this.currentPage > this.totalPages && this.totalPages > 0) {
+        this.currentPage = this.totalPages;
+        return this.loadInvoices();
+      }
+
       this.renderView();
     } catch (err) {
+      console.error('Error al cargar facturas:', err);
       toast.error('Error al cargar facturas');
     }
+  }
+
+  renderPaginationButtons(totalPages, currentPage, prefix = 'invoice') {
+    if (totalPages <= 1) {
+      return `<button type="button" class="pagination-btn ${prefix}-page-btn active" data-page="1">1</button>`;
+    }
+
+    const pages = [];
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      pages.push(1);
+      if (currentPage > 3) pages.push('...');
+
+      const start = Math.max(2, currentPage - 1);
+      const end = Math.min(totalPages - 1, currentPage + 1);
+
+      for (let i = start; i <= end; i++) {
+        if (!pages.includes(i)) pages.push(i);
+      }
+
+      if (currentPage < totalPages - 2) pages.push('...');
+      if (!pages.includes(totalPages)) pages.push(totalPages);
+    }
+
+    return pages.map(p => {
+      if (p === '...') {
+        return `<span style="display: flex; align-items: center; justify-content: center; min-width: 24px; color: var(--text-secondary);">&hellip;</span>`;
+      }
+      const isActive = p === currentPage;
+      return `<button type="button" class="pagination-btn ${prefix}-page-btn ${isActive ? 'active' : ''}" data-page="${p}" ${isActive ? 'aria-current="page"' : ''}>${p}</button>`;
+    }).join('');
   }
 
   renderView() {
@@ -77,8 +144,14 @@ export class Invoices {
     }).join('');
 
     if (this.invoicesList.length === 0) {
-      rows = `<tr><td colspan="6" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">No hay facturas registradas.</td></tr>`;
+      rows = `<tr><td colspan="6" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">No hay facturas registradas${this.searchQuery ? ' que coincidan con la búsqueda' : ''}.</td></tr>`;
     }
+
+    const startItem = this.totalItems === 0 ? 0 : (this.currentPage - 1) * this.limit + 1;
+    const endItem = Math.min(this.currentPage * this.limit, this.totalItems);
+    const paginationInfoText = this.totalItems === 0
+      ? '0 facturas registradas'
+      : `Mostrando <strong>${startItem}-${endItem}</strong> de <strong>${this.totalItems}</strong> facturas (Página <strong>${this.currentPage}</strong> de <strong>${this.totalPages}</strong>)`;
 
     this.container.innerHTML = `
       <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-6);">
@@ -88,6 +161,32 @@ export class Invoices {
         </div>
         <div style="display: flex; gap: var(--space-2);">
           <button id="add-invoice-btn" class="btn btn-primary">+ Nueva Factura</button>
+        </div>
+      </div>
+
+      <!-- Filtros y Búsqueda -->
+      <div class="card" style="margin-bottom: var(--space-4); padding: var(--space-4);">
+        <div style="display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap;">
+          <div style="flex: 1; min-width: 240px;">
+            <input 
+              type="text" 
+              id="invoice-search-input" 
+              class="form-input" 
+              placeholder="Buscar por no. factura o paciente..." 
+              value="${this.searchQuery || ''}" 
+              style="width: 100%;"
+            />
+          </div>
+          <div style="display: flex; gap: var(--space-2); align-items: center;">
+            <label for="invoice-per-page-select" style="font-size: var(--text-sm); color: var(--text-secondary); white-space: nowrap;">Por página:</label>
+            <select id="invoice-per-page-select" class="form-select" style="width: 80px;">
+              <option value="10" ${this.limit === 10 ? 'selected' : ''}>10</option>
+              <option value="15" ${this.limit === 15 ? 'selected' : ''}>15</option>
+              <option value="25" ${this.limit === 25 ? 'selected' : ''}>25</option>
+              <option value="50" ${this.limit === 50 ? 'selected' : ''}>50</option>
+            </select>
+            ${this.searchQuery ? `<button id="clear-invoice-filters-btn" class="btn btn-outline btn-sm" style="white-space: nowrap;">Limpiar filtro</button>` : ''}
+          </div>
         </div>
       </div>
 
@@ -109,6 +208,32 @@ export class Invoices {
             </tbody>
           </table>
         </div>
+
+        <!-- Barra de Paginación -->
+        <div class="pagination">
+          <div class="pagination-info">
+            ${paginationInfoText}
+          </div>
+          <div class="pagination-controls">
+            <button 
+              type="button" 
+              id="invoice-prev-btn" 
+              class="btn btn-sm btn-outline pagination-btn" 
+              ${this.currentPage <= 1 ? 'disabled' : ''}
+              title="Página anterior"
+            >&laquo; Anterior</button>
+            <div id="invoice-pages-container" style="display: flex; gap: 4px; align-items: center;">
+              ${this.renderPaginationButtons(this.totalPages, this.currentPage, 'invoice')}
+            </div>
+            <button 
+              type="button" 
+              id="invoice-next-btn" 
+              class="btn btn-sm btn-outline pagination-btn" 
+              ${this.currentPage >= this.totalPages ? 'disabled' : ''}
+              title="Página siguiente"
+            >Siguiente &raquo;</button>
+          </div>
+        </div>
       </div>
     `;
   }
@@ -117,10 +242,50 @@ export class Invoices {
     this.destroy();
     this.abortController = new AbortController();
 
-    this.container.addEventListener('click', (e) => {
+    this.container.addEventListener('click', async (e) => {
       const addInvoiceBtn = e.target.closest('#add-invoice-btn');
       if (addInvoiceBtn) {
         this.showAddInvoiceModal();
+        return;
+      }
+
+      const prevBtn = e.target.closest('#invoice-prev-btn');
+      if (prevBtn && !prevBtn.disabled) {
+        if (this.currentPage > 1) {
+          this.currentPage--;
+          await this.loadInvoices();
+          this.mount();
+        }
+        return;
+      }
+
+      const nextBtn = e.target.closest('#invoice-next-btn');
+      if (nextBtn && !nextBtn.disabled) {
+        if (this.currentPage < this.totalPages) {
+          this.currentPage++;
+          await this.loadInvoices();
+          this.mount();
+        }
+        return;
+      }
+
+      const pageBtn = e.target.closest('.invoice-page-btn');
+      if (pageBtn && !pageBtn.disabled) {
+        const page = parseInt(pageBtn.getAttribute('data-page'), 10);
+        if (!isNaN(page) && page !== this.currentPage) {
+          this.currentPage = page;
+          await this.loadInvoices();
+          this.mount();
+        }
+        return;
+      }
+
+      const clearFiltersBtn = e.target.closest('#clear-invoice-filters-btn');
+      if (clearFiltersBtn) {
+        this.searchQuery = '';
+        this.currentPage = 1;
+        await this.loadInvoices();
+        this.mount();
         return;
       }
 
@@ -156,6 +321,35 @@ export class Invoices {
             mainRow.classList.add('row-active');
           }
         }
+      }
+    }, { signal: this.abortController.signal });
+
+    this.container.addEventListener('change', async (e) => {
+      const perPageSelect = e.target.closest('#invoice-per-page-select');
+      if (perPageSelect) {
+        this.limit = parseInt(perPageSelect.value, 10) || 15;
+        this.currentPage = 1;
+        await this.loadInvoices();
+        this.mount();
+      }
+    }, { signal: this.abortController.signal });
+
+    this.container.addEventListener('input', (e) => {
+      const searchInput = e.target.closest('#invoice-search-input');
+      if (searchInput) {
+        if (this.searchTimeout) clearTimeout(this.searchTimeout);
+        this.searchTimeout = setTimeout(async () => {
+          this.searchQuery = searchInput.value.trim();
+          this.currentPage = 1;
+          await this.loadInvoices();
+          this.mount();
+          const refreshedInput = this.container.querySelector('#invoice-search-input');
+          if (refreshedInput) {
+            refreshedInput.focus();
+            const len = refreshedInput.value.length;
+            refreshedInput.setSelectionRange(len, len);
+          }
+        }, 300);
       }
     }, { signal: this.abortController.signal });
   }
@@ -260,6 +454,7 @@ export class Invoices {
           <div class="form-group">
             <label class="form-label">Descuento Global ($)</label>
             <input type="number" step="0.01" name="discount" class="form-input" value="0.00" min="0" required />
+            <small id="invoice-discount-hint" style="font-size: 11px; display: block; margin-top: 3px; font-weight: 500;"></small>
           </div>
           <div class="form-group">
             <label class="form-label">Notas</label>
@@ -292,7 +487,7 @@ export class Invoices {
               <strong id="calc-subtotal">€0,00</strong>
             </div>
             <div style="display: flex; justify-content: space-between; font-size: var(--text-sm); color: var(--danger-600);">
-              <span>Descuento:</span>
+              <span id="calc-discount-label">Descuento:</span>
               <strong id="calc-discount">-€0,00</strong>
             </div>
             <div style="display: flex; justify-content: space-between; font-size: var(--text-lg); font-weight: 700; border-top: 1px solid var(--border-color); padding-top: var(--space-2); margin-top: var(--space-1);">
@@ -499,7 +694,18 @@ export class Invoices {
         });
 
         const discount = parseFloat(modalBody.querySelector('input[name="discount"]')?.value || 0);
+        const effectivePct = subtotal > 0 ? ((discount / subtotal) * 100) : 0;
+        const pctStr = (effectivePct % 1 === 0 ? effectivePct.toFixed(0) : effectivePct.toFixed(2)) + '%';
         const total = Math.max(0, subtotal - discount);
+
+        const discountHint = modalBody.querySelector('#invoice-discount-hint');
+        if (discountHint) {
+          discountHint.textContent = discount > 0 ? `Descuento: -${formatCurrency(discount)} (${pctStr} del subtotal)` : '';
+          discountHint.style.color = '#dc2626';
+        }
+
+        const discLabelEl = modalBody.querySelector('#calc-discount-label');
+        if (discLabelEl) discLabelEl.textContent = `Descuento (${pctStr}):`;
 
         modalBody.querySelector('#calc-subtotal').textContent = formatCurrency(subtotal);
         modalBody.querySelector('#calc-discount').textContent = `-${formatCurrency(discount)}`;
@@ -814,6 +1020,20 @@ export class Invoices {
       const logoUrl = clinic?.logo_url || '/assets/videsDentalLogo.jpg';
       const primaryColor = clinic?.primary_color || '#0f86ec';
 
+      const subtotalVal = parseFloat(invoice.subtotal || 0);
+      const discountVal = parseFloat(invoice.discount_amount || 0);
+      let pctVal = parseFloat(invoice.discount_percentage || 0);
+      if (pctVal <= 0 && subtotalVal > 0 && discountVal > 0) {
+        pctVal = (discountVal / subtotalVal) * 100;
+      }
+      const pctStr = (pctVal % 1 === 0 ? pctVal.toFixed(0) : pctVal.toFixed(2)) + '%';
+
+      const quoteNum = invoice.quotation_number || invoice.quotation?.quote_number || '';
+      const quoteTotal = invoice.quotation_total !== null && invoice.quotation_total !== undefined ? parseFloat(invoice.quotation_total) : (invoice.quotation?.total ? parseFloat(invoice.quotation.total) : null);
+      const quotePaid = invoice.quotation_amount_paid !== null && invoice.quotation_amount_paid !== undefined ? parseFloat(invoice.quotation_amount_paid) : (invoice.quotation?.amount_paid ? parseFloat(invoice.quotation.amount_paid) : null);
+      const quoteRemaining = invoice.quotation_remaining_balance !== null && invoice.quotation_remaining_balance !== undefined ? parseFloat(invoice.quotation_remaining_balance) : (invoice.quotation?.remaining_balance !== undefined ? parseFloat(invoice.quotation.remaining_balance) : null);
+      const hasQuotation = quoteRemaining !== null && !isNaN(quoteRemaining);
+
       const printWindow = window.open('', '_blank');
       printWindow.document.write(`
         <html>
@@ -870,6 +1090,7 @@ export class Invoices {
             <div>
               <strong>Paciente:</strong> ${invoice.patient_name || 'N/A'}<br>
               <strong>DNI:</strong> ${invoice.patient_dni || 'N/A'}
+              ${quoteNum ? `<br><strong>Presupuesto Asociado:</strong> #${quoteNum}` : ''}
             </div>
             <div style="text-align: right;">
               <strong>Fecha de Emisión:</strong> ${formatDate(invoice.created_at)}<br>
@@ -889,11 +1110,15 @@ export class Invoices {
             <tbody>
               ${(invoice.items || []).map(item => {
                 let displayDesc = item.clean_description || item.description;
+                const itemTot = parseFloat(item.total || 0);
+                const origTot = parseFloat(item.original_total || 0);
+                const isPartial = origTot > itemTot + 0.01;
 
                 return `
                   <tr>
                     <td>
-                      <div><strong>${displayDesc}</strong></div>
+                      <div><strong>${displayDesc}</strong> ${isPartial ? `<span style="font-size: 11px; margin-left: 6px; padding: 2px 6px; background: #fef3c7; color: #92400e; border: 1px solid #fde68a; border-radius: 4px; font-weight: 600;">Abono Parcial</span>` : ''}</div>
+                      ${isPartial ? `<div style="font-size: 11px; color: #64748b; margin-top: 2px;">Precio Tratamiento: ${formatCurrency(origTot)} &bull; Importe abonado en esta factura: ${formatCurrency(itemTot)}</div>` : ''}
                     </td>
                     <td style="text-align: right;">${formatCurrency(item.unit_price)}</td>
                     <td style="text-align: center;">${item.quantity}</td>
@@ -905,13 +1130,34 @@ export class Invoices {
           </table>
 
           <div class="totals">
-            <p>Subtotal: ${formatCurrency(invoice.subtotal)}</p>
-            <p>Descuento: -${formatCurrency(invoice.discount_amount)}</p>
-            <p>Montante Pagado: ${formatCurrency(invoice.amount_paid)}</p>
+            ${hasQuotation ? `
+              <div style="background: ${quoteRemaining > 0 ? '#fffbeb' : '#f0fdf4'}; border: 1.5px solid ${quoteRemaining > 0 ? '#f59e0b' : '#16a34a'}; border-radius: 6px; padding: 12px 14px; text-align: right; margin-bottom: 14px;">
+                <p style="margin: 2px 0; font-size: 13px; color: #475569;">
+                  Total Tratamiento / Presupuesto ${quoteNum ? `(#${quoteNum})` : ''}: <strong>${formatCurrency(quoteTotal)}</strong>
+                </p>
+                <p style="margin: 2px 0; font-size: 13px; color: #475569;">
+                  Total Abonado al Presupuesto: <strong>${formatCurrency(quotePaid)}</strong>
+                </p>
+                <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid ${quoteRemaining > 0 ? '#fde68a' : '#bbf7d0'}; font-size: 16px; font-weight: 700; color: ${quoteRemaining > 0 ? '#b45309' : '#15803d'};">
+                  ${quoteRemaining > 0 
+                    ? `⚠️ Saldo pendiente que debe el paciente a la clínica: ${formatCurrency(quoteRemaining)}` 
+                    : `✅ Presupuesto completado y totalmente abonado (0,00 €)`}
+                </div>
+              </div>
+            ` : ''}
+
+            <p><strong>Subtotal Factura:</strong> ${formatCurrency(subtotalVal)}</p>
+            ${discountVal > 0 ? `<p style="color: #dc2626;"><strong>Descuento (${pctStr}):</strong> -${formatCurrency(discountVal)}</p>` : ''}
+            <p>Monto Abonado en esta Factura: <strong>${formatCurrency(invoice.amount_paid)}</strong></p>
             <p>Método de Pago: ${formatPaymentMethods(invoice)}</p>
             <hr/>
-            <h2>Saldo Restante: ${formatCurrency(invoice.balance)}</h2>
-            <h2 style="color: #0f86ec;">TOTAL FACTURA: ${formatCurrency(invoice.total)}</h2>
+            ${hasQuotation && quoteRemaining > 0 ? `
+              <h2 style="color: #b45309; margin: 8px 0 4px 0;">PENDIENTE DE ABONAR DEL TRATAMIENTO: ${formatCurrency(quoteRemaining)}</h2>
+              <p style="color: #64748b; font-size: 13px; margin: 2px 0;">Importe abonado en esta Factura: <strong>${formatCurrency(invoice.total)}</strong> (de un total de <strong>${formatCurrency(quoteTotal)}</strong>)</p>
+            ` : `
+              <p>Saldo Restante Factura: <strong>${formatCurrency(invoice.balance)}</strong></p>
+              <h2 style="color: ${primaryColor};">TOTAL FACTURA: ${formatCurrency(invoice.total)}</h2>
+            `}
           </div>
 
           <div class="footer">
@@ -1125,6 +1371,7 @@ export class Invoices {
             <div class="form-group" style="margin-bottom: var(--space-2);">
               <label class="form-label" style="font-size: var(--text-xs);">Descuento ($)</label>
               <input type="number" name="discount" class="form-input" value="${invoice.discount_amount || 0}" step="0.01" min="0" />
+              <small id="calc-edit-discount-hint" style="font-size: 11px; display: block; margin-top: 3px; font-weight: 500;"></small>
             </div>
             <div style="border-top: 1px solid var(--border-color); padding-top: var(--space-2); margin-top: var(--space-2); display: flex; flex-direction: column; gap: 4px;">
               <div style="display: flex; justify-content: space-between; font-size: 13px;">
@@ -1132,7 +1379,7 @@ export class Invoices {
                 <strong id="calc-subtotal">${formatCurrency(invoice.subtotal || 0)}</strong>
               </div>
               <div style="display: flex; justify-content: space-between; font-size: 13px; color: var(--danger-600);">
-                <span>Descuento:</span>
+                <span id="calc-edit-discount-label">Descuento:</span>
                 <strong id="calc-discount">-${formatCurrency(invoice.discount_amount || 0)}</strong>
               </div>
               <div style="display: flex; justify-content: space-between; font-size: 15px; font-weight: 700; border-top: 1px solid var(--border-color); padding-top: 4px;">
@@ -1232,14 +1479,27 @@ export class Invoices {
       });
 
       const discount = parseFloat(modalBody.querySelector('input[name="discount"]')?.value || 0);
+      const effectivePct = subtotal > 0 ? ((discount / subtotal) * 100) : 0;
+      const pctStr = (effectivePct % 1 === 0 ? effectivePct.toFixed(0) : effectivePct.toFixed(2)) + '%';
       const total = Math.max(0, parseFloat((subtotal - discount).toFixed(2)));
       const balance = Math.max(0, parseFloat((total - amountPaid).toFixed(2)));
+
+      const discountHint = modalBody.querySelector('#calc-edit-discount-hint') || modalBody.querySelector('#invoice-discount-hint');
+      if (discountHint) {
+        discountHint.textContent = discount > 0 ? `Descuento: -${formatCurrency(discount)} (${pctStr} del subtotal)` : '';
+        discountHint.style.color = '#dc2626';
+      }
+
+      const discLabelEl = modalBody.querySelector('#calc-edit-discount-label') || modalBody.querySelector('#calc-discount-label');
+      if (discLabelEl) discLabelEl.textContent = `Descuento (${pctStr}):`;
 
       if (modalBody.querySelector('#calc-subtotal')) modalBody.querySelector('#calc-subtotal').textContent = formatCurrency(subtotal);
       if (modalBody.querySelector('#calc-discount')) modalBody.querySelector('#calc-discount').textContent = `-${formatCurrency(discount)}`;
       if (modalBody.querySelector('#calc-total')) modalBody.querySelector('#calc-total').textContent = formatCurrency(total);
       if (modalBody.querySelector('#calc-balance')) modalBody.querySelector('#calc-balance').textContent = formatCurrency(balance);
     };
+
+    recalculate();
 
     modalBody.addEventListener('input', (e) => {
       if (e.target.name === 'discount' || e.target.name.startsWith('item_qty_') || e.target.name.startsWith('item_price_')) {

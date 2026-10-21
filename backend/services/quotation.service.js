@@ -45,8 +45,9 @@ function processItems(items) {
   });
 }
 
-function computeTotals(processedItems, discountPct, taxRate) {
-  let subtotal = 0;
+function computeTotals(processedItems, discountPct = 0, taxRate = 0, explicitDiscountAmount = null) {
+  let grossSubtotal = 0;
+  let itemsDiscountAmount = 0;
   const standaloneGroupsHandled = new Set();
 
   for (const item of processedItems) {
@@ -56,19 +57,42 @@ function computeTotals(processedItems, discountPct, taxRate) {
       if (!hasHeader) {
         if (!standaloneGroupsHandled.has(item.pack_group_id)) {
           standaloneGroupsHandled.add(item.pack_group_id);
-          subtotal += round(item.pack_fixed_price || 0);
+          grossSubtotal += round(item.pack_fixed_price || 0);
         }
         continue;
       }
     }
-    subtotal += item.subtotal;
+    const itemSub = round(item.subtotal || 0);
+    const itemTot = item.total !== undefined ? round(item.total) : itemSub;
+    grossSubtotal += itemSub;
+    itemsDiscountAmount += Math.max(0, round(itemSub - itemTot));
   }
 
-  const discountAmount = round(subtotal * (discountPct || 0) / 100);
-  const taxableAmount = subtotal - discountAmount;
+  grossSubtotal = round(grossSubtotal);
+  itemsDiscountAmount = round(itemsDiscountAmount);
+
+  const subtotalAfterItemDiscounts = Math.max(0, round(grossSubtotal - itemsDiscountAmount));
+
+  let globalDiscountAmount = 0;
+  if (explicitDiscountAmount !== null && explicitDiscountAmount !== undefined && !isNaN(explicitDiscountAmount) && explicitDiscountAmount > 0) {
+    globalDiscountAmount = round(parseFloat(explicitDiscountAmount));
+  } else if (discountPct > 0) {
+    globalDiscountAmount = round(subtotalAfterItemDiscounts * (discountPct / 100));
+  }
+
+  const totalDiscountAmount = round(itemsDiscountAmount + globalDiscountAmount);
+  const taxableAmount = Math.max(0, round(grossSubtotal - totalDiscountAmount));
   const taxAmount = round(taxableAmount * (taxRate || 0) / 100);
   const total = round(taxableAmount + taxAmount);
-  return { subtotal: round(subtotal), discount_amount: discountAmount, tax_amount: taxAmount, total };
+
+  return {
+    subtotal: grossSubtotal,
+    items_discount_amount: itemsDiscountAmount,
+    global_discount_amount: globalDiscountAmount,
+    discount_amount: totalDiscountAmount,
+    tax_amount: taxAmount,
+    total,
+  };
 }
 
 class QuotationService {
@@ -99,9 +123,9 @@ class QuotationService {
     }
 
     const processedItems = processItems(items || []);
-    const discountPct = fields.discount_percentage || 0;
-    const taxRate = fields.tax_rate || 0;
-    const totals = computeTotals(processedItems, discountPct, taxRate);
+    const discountPct = parseFloat(fields.discount_percentage || 0);
+    const taxRate = parseFloat(fields.tax_rate || 0);
+    const totals = computeTotals(processedItems, discountPct, taxRate, fields.discount_amount);
 
     const quotationNumber = await quotationRepository.generateNumber();
 
@@ -152,9 +176,9 @@ class QuotationService {
 
     if (data.items) {
       const processedItems = processItems(data.items);
-      const discountPct = data.discount_percentage !== undefined ? data.discount_percentage : existing.discount_percentage;
-      const taxRate = data.tax_rate !== undefined ? data.tax_rate : parseFloat(existing.tax_rate || 0);
-      const totals = computeTotals(processedItems, discountPct, taxRate);
+      const discountPct = data.discount_percentage !== undefined ? parseFloat(data.discount_percentage || 0) : parseFloat(existing.discount_percentage || 0);
+      const taxRate = data.tax_rate !== undefined ? parseFloat(data.tax_rate || 0) : parseFloat(existing.tax_rate || 0);
+      const totals = computeTotals(processedItems, discountPct, taxRate, data.discount_amount);
 
       quotationData.subtotal = totals.subtotal;
       quotationData.tax_rate = taxRate;
@@ -175,8 +199,20 @@ class QuotationService {
       return this.getById(id);
     }
 
-    if (data.tax_rate !== undefined) quotationData.tax_rate = data.tax_rate;
-    if (data.discount_percentage !== undefined) quotationData.discount_percentage = data.discount_percentage;
+    if (data.tax_rate !== undefined || data.discount_percentage !== undefined || data.discount_amount !== undefined) {
+      const fullExisting = await quotationRepository.findByIdWithItems(id);
+      const processedItems = processItems(fullExisting?.items || []);
+      const discountPct = data.discount_percentage !== undefined ? parseFloat(data.discount_percentage || 0) : parseFloat(existing.discount_percentage || 0);
+      const taxRate = data.tax_rate !== undefined ? parseFloat(data.tax_rate || 0) : parseFloat(existing.tax_rate || 0);
+      const totals = computeTotals(processedItems, discountPct, taxRate, data.discount_amount !== undefined ? data.discount_amount : existing.discount_amount);
+
+      quotationData.subtotal = totals.subtotal;
+      quotationData.tax_rate = taxRate;
+      quotationData.tax_amount = totals.tax_amount;
+      quotationData.discount_percentage = discountPct || 0;
+      quotationData.discount_amount = totals.discount_amount;
+      quotationData.total = totals.total;
+    }
 
     if (Object.keys(quotationData).length === 0) {
       throw new AppError('No se proporcionaron datos para actualizar.', 400);

@@ -14,6 +14,12 @@ export class Receipts {
   constructor(container) {
     this.container = container;
     this.receiptsList = [];
+    this.currentPage = 1;
+    this.totalPages = 1;
+    this.totalItems = 0;
+    this.limit = 15;
+    this.searchQuery = '';
+    this.searchTimeout = null;
     this.abortController = null;
   }
 
@@ -22,17 +28,78 @@ export class Receipts {
       this.abortController.abort();
       this.abortController = null;
     }
+    if (this.searchTimeout) {
+      clearTimeout(this.searchTimeout);
+      this.searchTimeout = null;
+    }
   }
 
   async render() {
+    await this.loadReceipts();
+  }
+
+  async loadReceipts() {
     try {
-      const response = await invoiceService.getAll({ document_type: 'recibo' });
-      const rawList = Array.isArray(response) ? response : (response?.invoices || response?.data || []);
+      const params = {
+        document_type: 'recibo',
+        page: this.currentPage,
+        limit: this.limit,
+      };
+      if (this.searchQuery) {
+        params.search = this.searchQuery;
+      }
+
+      const response = await invoiceService.getAll(params, { returnFullResponse: true });
+      const rawList = response?.data || response?.invoices || (Array.isArray(response) ? response : []);
       this.receiptsList = rawList.filter(r => r.document_type === 'recibo' || (r.invoice_number && r.invoice_number.startsWith('REC')));
+
+      const pag = response?.pagination;
+      this.totalItems = pag?.totalItems ?? pag?.total ?? this.receiptsList.length;
+      this.totalPages = pag?.totalPages ?? Math.max(1, Math.ceil(this.totalItems / this.limit));
+      this.currentPage = pag?.currentPage ?? pag?.page ?? this.currentPage;
+
+      if (this.currentPage > this.totalPages && this.totalPages > 0) {
+        this.currentPage = this.totalPages;
+        return this.loadReceipts();
+      }
+
       this.renderView();
     } catch (err) {
+      console.error('Error al cargar recibos de pago:', err);
       toast.error('Error al cargar recibos de pago');
     }
+  }
+
+  renderPaginationButtons(totalPages, currentPage, prefix = 'receipt') {
+    if (totalPages <= 1) {
+      return `<button type="button" class="pagination-btn ${prefix}-page-btn active" data-page="1">1</button>`;
+    }
+
+    const pages = [];
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      pages.push(1);
+      if (currentPage > 3) pages.push('...');
+
+      const start = Math.max(2, currentPage - 1);
+      const end = Math.min(totalPages - 1, currentPage + 1);
+
+      for (let i = start; i <= end; i++) {
+        if (!pages.includes(i)) pages.push(i);
+      }
+
+      if (currentPage < totalPages - 2) pages.push('...');
+      if (!pages.includes(totalPages)) pages.push(totalPages);
+    }
+
+    return pages.map(p => {
+      if (p === '...') {
+        return `<span style="display: flex; align-items: center; justify-content: center; min-width: 24px; color: var(--text-secondary);">&hellip;</span>`;
+      }
+      const isActive = p === currentPage;
+      return `<button type="button" class="pagination-btn ${prefix}-page-btn ${isActive ? 'active' : ''}" data-page="${p}" ${isActive ? 'aria-current="page"' : ''}>${p}</button>`;
+    }).join('');
   }
 
   renderView() {
@@ -77,14 +144,46 @@ export class Receipts {
     }).join('');
 
     if (this.receiptsList.length === 0) {
-      rows = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">No hay recibos de pago registrados.</td></tr>`;
+      rows = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: var(--space-6);">No hay recibos de pago registrados${this.searchQuery ? ' que coincidan con la búsqueda' : ''}.</td></tr>`;
     }
+
+    const startItem = this.totalItems === 0 ? 0 : (this.currentPage - 1) * this.limit + 1;
+    const endItem = Math.min(this.currentPage * this.limit, this.totalItems);
+    const paginationInfoText = this.totalItems === 0
+      ? '0 recibos registrados'
+      : `Mostrando <strong>${startItem}-${endItem}</strong> de <strong>${this.totalItems}</strong> recibos (Página <strong>${this.currentPage}</strong> de <strong>${this.totalPages}</strong>)`;
 
     this.container.innerHTML = `
       <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-6);">
         <div>
           <h1 class="page-title">Recibos de Pago</h1>
           <p style="color: var(--text-secondary);">Comprobantes de pago registrados para tratamientos</p>
+        </div>
+      </div>
+
+      <!-- Filtros y Búsqueda -->
+      <div class="card" style="margin-bottom: var(--space-4); padding: var(--space-4);">
+        <div style="display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap;">
+          <div style="flex: 1; min-width: 240px;">
+            <input 
+              type="text" 
+              id="receipt-search-input" 
+              class="form-input" 
+              placeholder="Buscar por no. recibo o paciente..." 
+              value="${this.searchQuery || ''}" 
+              style="width: 100%;"
+            />
+          </div>
+          <div style="display: flex; gap: var(--space-2); align-items: center;">
+            <label for="receipt-per-page-select" style="font-size: var(--text-sm); color: var(--text-secondary); white-space: nowrap;">Por página:</label>
+            <select id="receipt-per-page-select" class="form-select" style="width: 80px;">
+              <option value="10" ${this.limit === 10 ? 'selected' : ''}>10</option>
+              <option value="15" ${this.limit === 15 ? 'selected' : ''}>15</option>
+              <option value="25" ${this.limit === 25 ? 'selected' : ''}>25</option>
+              <option value="50" ${this.limit === 50 ? 'selected' : ''}>50</option>
+            </select>
+            ${this.searchQuery ? `<button id="clear-receipt-filters-btn" class="btn btn-outline btn-sm" style="white-space: nowrap;">Limpiar filtro</button>` : ''}
+          </div>
         </div>
       </div>
 
@@ -97,6 +196,7 @@ export class Receipts {
                 <th>Paciente</th>
                 <th>Monto Total</th>
                 <th>Monto Pagado</th>
+                <th>Saldo</th>
                 <th>Estado</th>
                 <th>Fecha Emisión</th>
                 <th style="text-align: right;">Acciones</th>
@@ -107,6 +207,32 @@ export class Receipts {
             </tbody>
           </table>
         </div>
+
+        <!-- Barra de Paginación -->
+        <div class="pagination">
+          <div class="pagination-info">
+            ${paginationInfoText}
+          </div>
+          <div class="pagination-controls">
+            <button 
+              type="button" 
+              id="receipt-prev-btn" 
+              class="btn btn-sm btn-outline pagination-btn" 
+              ${this.currentPage <= 1 ? 'disabled' : ''}
+              title="Página anterior"
+            >&laquo; Anterior</button>
+            <div id="receipt-pages-container" style="display: flex; gap: 4px; align-items: center;">
+              ${this.renderPaginationButtons(this.totalPages, this.currentPage, 'receipt')}
+            </div>
+            <button 
+              type="button" 
+              id="receipt-next-btn" 
+              class="btn btn-sm btn-outline pagination-btn" 
+              ${this.currentPage >= this.totalPages ? 'disabled' : ''}
+              title="Página siguiente"
+            >Siguiente &raquo;</button>
+          </div>
+        </div>
       </div>
     `;
   }
@@ -115,7 +241,47 @@ export class Receipts {
     this.destroy();
     this.abortController = new AbortController();
 
-    this.container.addEventListener('click', (e) => {
+    this.container.addEventListener('click', async (e) => {
+      const prevBtn = e.target.closest('#receipt-prev-btn');
+      if (prevBtn && !prevBtn.disabled) {
+        if (this.currentPage > 1) {
+          this.currentPage--;
+          await this.loadReceipts();
+          this.mount();
+        }
+        return;
+      }
+
+      const nextBtn = e.target.closest('#receipt-next-btn');
+      if (nextBtn && !nextBtn.disabled) {
+        if (this.currentPage < this.totalPages) {
+          this.currentPage++;
+          await this.loadReceipts();
+          this.mount();
+        }
+        return;
+      }
+
+      const pageBtn = e.target.closest('.receipt-page-btn');
+      if (pageBtn && !pageBtn.disabled) {
+        const page = parseInt(pageBtn.getAttribute('data-page'), 10);
+        if (!isNaN(page) && page !== this.currentPage) {
+          this.currentPage = page;
+          await this.loadReceipts();
+          this.mount();
+        }
+        return;
+      }
+
+      const clearFiltersBtn = e.target.closest('#clear-receipt-filters-btn');
+      if (clearFiltersBtn) {
+        this.searchQuery = '';
+        this.currentPage = 1;
+        await this.loadReceipts();
+        this.mount();
+        return;
+      }
+
       const toggleBtn = e.target.closest('.toggle-receipt-actions-btn');
       if (toggleBtn) {
         const id = toggleBtn.getAttribute('data-id');
@@ -167,7 +333,50 @@ export class Receipts {
         this.confirmDeleteReceipt(deleteBtn.getAttribute('data-id'));
         return;
       }
-    });
+
+      const mainRow = e.target.closest('.receipt-main-row');
+      if (mainRow) {
+        const id = mainRow.getAttribute('data-id');
+        const actionsRow = this.container.querySelector(`#receipt-actions-${id}`);
+        if (actionsRow) {
+          const isVisible = actionsRow.style.display !== 'none';
+          this.container.querySelectorAll('.receipt-actions-bar-row').forEach(row => row.style.display = 'none');
+          if (!isVisible) {
+            actionsRow.style.display = 'table-row';
+          }
+        }
+        return;
+      }
+    }, { signal: this.abortController.signal });
+
+    this.container.addEventListener('change', async (e) => {
+      const perPageSelect = e.target.closest('#receipt-per-page-select');
+      if (perPageSelect) {
+        this.limit = parseInt(perPageSelect.value, 10) || 15;
+        this.currentPage = 1;
+        await this.loadReceipts();
+        this.mount();
+      }
+    }, { signal: this.abortController.signal });
+
+    this.container.addEventListener('input', (e) => {
+      const searchInput = e.target.closest('#receipt-search-input');
+      if (searchInput) {
+        if (this.searchTimeout) clearTimeout(this.searchTimeout);
+        this.searchTimeout = setTimeout(async () => {
+          this.searchQuery = searchInput.value.trim();
+          this.currentPage = 1;
+          await this.loadReceipts();
+          this.mount();
+          const refreshedInput = this.container.querySelector('#receipt-search-input');
+          if (refreshedInput) {
+            refreshedInput.focus();
+            const len = refreshedInput.value.length;
+            refreshedInput.setSelectionRange(len, len);
+          }
+        }, 300);
+      }
+    }, { signal: this.abortController.signal });
   }
 
   async printReceipt(id) {
@@ -177,6 +386,20 @@ export class Receipts {
       const clinic = state.get('clinicInfo') || {};
       const logoUrl = clinic?.logo_url || '/assets/videsDentalLogo.jpg';
       const primaryColor = clinic?.primary_color || '#0f86ec';
+
+      const subtotalVal = parseFloat(rec.subtotal || 0);
+      const discountVal = parseFloat(rec.discount_amount || 0);
+      let pctVal = parseFloat(rec.discount_percentage || 0);
+      if (pctVal <= 0 && subtotalVal > 0 && discountVal > 0) {
+        pctVal = (discountVal / subtotalVal) * 100;
+      }
+      const pctStr = (pctVal % 1 === 0 ? pctVal.toFixed(0) : pctVal.toFixed(2)) + '%';
+
+      const quoteNum = rec.quotation_number || rec.quotation?.quote_number || '';
+      const quoteTotal = rec.quotation_total !== null && rec.quotation_total !== undefined ? parseFloat(rec.quotation_total) : (rec.quotation?.total ? parseFloat(rec.quotation.total) : null);
+      const quotePaid = rec.quotation_amount_paid !== null && rec.quotation_amount_paid !== undefined ? parseFloat(rec.quotation_amount_paid) : (rec.quotation?.amount_paid ? parseFloat(rec.quotation.amount_paid) : null);
+      const quoteRemaining = rec.quotation_remaining_balance !== null && rec.quotation_remaining_balance !== undefined ? parseFloat(rec.quotation_remaining_balance) : (rec.quotation?.remaining_balance !== undefined ? parseFloat(rec.quotation.remaining_balance) : null);
+      const hasQuotation = quoteRemaining !== null && !isNaN(quoteRemaining);
 
       const printWindow = window.open('', '_blank');
       printWindow.document.write(`
@@ -234,6 +457,7 @@ export class Receipts {
             <div>
               <strong>Paciente:</strong> ${rec.patient_name || 'N/A'}<br>
               <strong>DNI:</strong> ${rec.patient_dni || 'N/A'}
+              ${quoteNum ? `<br><strong>Presupuesto Asociado:</strong> #${quoteNum}` : ''}
             </div>
             <div style="text-align: right;">
               <strong>Fecha de Emisión:</strong> ${formatDate(rec.created_at)}<br>
@@ -253,10 +477,15 @@ export class Receipts {
             <tbody>
               ${(rec.items || []).map(item => {
                 let displayDesc = item.clean_description || item.description;
+                const itemTot = parseFloat(item.total || 0);
+                const origTot = parseFloat(item.original_total || 0);
+                const isPartial = origTot > itemTot + 0.01;
+
                 return `
                   <tr>
                     <td>
-                      <div><strong>${displayDesc}</strong></div>
+                      <div><strong>${displayDesc}</strong> ${isPartial ? `<span style="font-size: 11px; margin-left: 6px; padding: 2px 6px; background: #fef3c7; color: #92400e; border: 1px solid #fde68a; border-radius: 4px; font-weight: 600;">Abono Parcial</span>` : ''}</div>
+                      ${isPartial ? `<div style="font-size: 11px; color: #64748b; margin-top: 2px;">Precio Tratamiento: ${formatCurrency(origTot)} &bull; Importe abonado en este recibo: ${formatCurrency(itemTot)}</div>` : ''}
                     </td>
                     <td style="text-align: right;">${formatCurrency(item.unit_price)}</td>
                     <td style="text-align: center;">${item.quantity}</td>
@@ -268,13 +497,34 @@ export class Receipts {
           </table>
 
           <div class="totals">
-            <p>Subtotal: ${formatCurrency(rec.subtotal)}</p>
-            <p>Descuento: -${formatCurrency(rec.discount_amount)}</p>
-            <p>Monto Pagado: ${formatCurrency(rec.amount_paid)}</p>
+            ${hasQuotation ? `
+              <div style="background: ${quoteRemaining > 0 ? '#fffbeb' : '#f0fdf4'}; border: 1.5px solid ${quoteRemaining > 0 ? '#f59e0b' : '#16a34a'}; border-radius: 6px; padding: 12px 14px; text-align: right; margin-bottom: 14px;">
+                <p style="margin: 2px 0; font-size: 13px; color: #475569;">
+                  Total Tratamiento / Presupuesto ${quoteNum ? `(#${quoteNum})` : ''}: <strong>${formatCurrency(quoteTotal)}</strong>
+                </p>
+                <p style="margin: 2px 0; font-size: 13px; color: #475569;">
+                  Total Abonado al Presupuesto: <strong>${formatCurrency(quotePaid)}</strong>
+                </p>
+                <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid ${quoteRemaining > 0 ? '#fde68a' : '#bbf7d0'}; font-size: 16px; font-weight: 700; color: ${quoteRemaining > 0 ? '#b45309' : '#15803d'};">
+                  ${quoteRemaining > 0 
+                    ? `⚠️ Saldo pendiente que debe el paciente a la clínica: ${formatCurrency(quoteRemaining)}` 
+                    : `✅ Presupuesto completado y totalmente abonado (0,00 €)`}
+                </div>
+              </div>
+            ` : ''}
+
+            <p><strong>Subtotal Recibo:</strong> ${formatCurrency(subtotalVal)}</p>
+            ${discountVal > 0 ? `<p style="color: #dc2626;"><strong>Descuento (${pctStr}):</strong> -${formatCurrency(discountVal)}</p>` : ''}
+            <p>Monto Abonado en este Recibo: <strong>${formatCurrency(rec.amount_paid)}</strong></p>
             <p>Método de Pago: ${formatPaymentMethods(rec)}</p>
             <hr/>
-            <h2>A falta de abonar: ${formatCurrency(rec.balance)}</h2>
-            <h2 style="color: #0f86ec;">TOTAL RECIBO: ${formatCurrency(rec.total)}</h2>
+            ${hasQuotation && quoteRemaining > 0 ? `
+              <h2 style="color: #b45309; margin: 8px 0 4px 0;">A FALTA DE ABONAR DEL TRATAMIENTO: ${formatCurrency(quoteRemaining)}</h2>
+              <p style="color: #64748b; font-size: 13px; margin: 2px 0;">Importe abonado en este Recibo: <strong>${formatCurrency(rec.total)}</strong> (de un total de <strong>${formatCurrency(quoteTotal)}</strong>)</p>
+            ` : `
+              <p>A falta de abonar de este recibo: <strong>${formatCurrency(rec.balance)}</strong></p>
+              <h2 style="color: ${primaryColor};">TOTAL RECIBO: ${formatCurrency(rec.total)}</h2>
+            `}
           </div>
 
           <div class="footer">

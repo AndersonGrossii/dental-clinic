@@ -26,7 +26,7 @@ class InvoiceService {
       filters,
     });
 
-    const totalPages = Math.ceil(total / limit);
+    const totalPages = Math.max(1, Math.ceil(total / limit));
 
     return {
       invoices: rows,
@@ -35,6 +35,11 @@ class InvoiceService {
         page,
         limit,
         totalPages,
+        currentPage: page,
+        totalItems: total,
+        itemsPerPage: limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
       },
     };
   }
@@ -112,7 +117,7 @@ class InvoiceService {
       tax_rate: taxRate,
       tax_amount: taxAmount,
       discount_amount: discount,
-      discount_percentage: data.discount_percentage || 0,
+      discount_percentage: data.discount_percentage !== undefined ? parseFloat(data.discount_percentage) : (subtotal > 0 && discount > 0 ? parseFloat(((discount / subtotal) * 100).toFixed(2)) : 0),
       total,
       balance: total, // Set initial balance to the total invoice amount
       amount_paid: 0,
@@ -203,6 +208,9 @@ class InvoiceService {
     }
     if (data.discount_percentage !== undefined) {
       updateFields.discount_percentage = parseFloat(data.discount_percentage);
+    } else if (updateFields.discount_amount !== undefined) {
+      const curSubtotal = parseFloat(existing.subtotal || 0);
+      updateFields.discount_percentage = curSubtotal > 0 ? parseFloat(((updateFields.discount_amount / curSubtotal) * 100).toFixed(2)) : 0;
     }
 
     // Si se envían items, reemplazar e igualar totales
@@ -467,10 +475,14 @@ class InvoiceService {
       };
     });
 
+    const hasAllocations = itemAllocMap.size > 0;
     const subtotal = parseFloat(items.reduce((acc, item) => acc + item.subtotal, 0).toFixed(2));
     const taxRate = parseFloat(quotation.tax_rate || 0);
-    const discountPct = parseFloat(quotation.discount_percentage || 0);
-    const discountAmount = parseFloat((subtotal * (discountPct / 100)).toFixed(2));
+    // When creating a payment document (receipt or invoice) from specific item payment allocations,
+    // the allocated amounts represent the exact payment received from the patient (e.g. 500€).
+    // The payment amount received must NOT be discounted!
+    const discountPct = hasAllocations ? 0 : parseFloat(quotation.discount_percentage || 0);
+    const discountAmount = hasAllocations ? 0 : parseFloat((subtotal * (discountPct / 100)).toFixed(2));
     const taxableAmount = subtotal - discountAmount;
     const taxAmount = parseFloat((taxableAmount * (taxRate / 100)).toFixed(2));
     const total = parseFloat((taxableAmount + taxAmount).toFixed(2));
@@ -641,7 +653,7 @@ class InvoiceService {
       subtotal,
       tax_rate: taxRateVal,
       tax_amount: taxAmount,
-      discount_percentage: 0,
+      discount_percentage: subtotal > 0 && discountVal > 0 ? parseFloat(((discountVal / subtotal) * 100).toFixed(2)) : parseFloat(receipt.discount_percentage || 0),
       discount_amount: discountVal,
       total,
       amount_paid: total,

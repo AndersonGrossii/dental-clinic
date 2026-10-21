@@ -4,8 +4,8 @@
 import api from './api.service.js';
 
 class InvoiceService {
-  async getAll(params = {}) {
-    return await api.get('/invoices', params);
+  async getAll(params = {}, options = {}) {
+    return await api.get('/invoices', params, options);
   }
 
   async getById(id) {
