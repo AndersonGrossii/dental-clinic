@@ -34,7 +34,7 @@ app.use(helmet({
 // In production, explicitly configure every browser origin that should access the API.
 // Requests without an Origin header (e.g. server-to-server/webhook calls) are not browser CORS requests.
 const configuredCorsOrigins = [
-  config.app.frontendUrl,
+  process.env.FRONTEND_URL || (config.app.env === 'development' ? config.app.frontendUrl : ''),
   ...(process.env.CORS_ALLOWED_ORIGINS || '').split(','),
 ]
   .map((origin) => origin.trim().replace(/\/$/, ''))
