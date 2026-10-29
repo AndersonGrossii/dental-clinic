@@ -10,6 +10,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const suites = [
+  { name: 'Seguridad de firmas Webhook Meta', file: 'test_webhook_security.js' },
   { name: 'E2E & Domain Services (150 pruebas)', file: 'run_all_tests.js' },
   { name: 'Días Festivos, Alcàntera de Xúquer y Fines de Semana (18 pruebas)', file: 'test_holidays_and_weekends.js' },
   { name: 'Aislamiento Multi-Tenant y Seguridad entre Clínicas (11 pruebas)', file: 'test_multi_tenant_isolation.js' },
