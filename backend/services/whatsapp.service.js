@@ -33,22 +33,23 @@ class WhatsAppService {
    * Valida la firma criptográfica HMAC-SHA256 del payload de Meta.
    */
   validateSignature(signatureHeader, rawBody) {
-    if (!this.appSecret) {
-      // Si no hay secret configurado en entorno, permitir continuar (verificado previamente por challenge)
-      return true;
-    }
-
-    if (!signatureHeader || !signatureHeader.startsWith('sha256=')) {
+    if (!this.appSecret || !signatureHeader || !signatureHeader.startsWith('sha256=') || !rawBody) {
       return false;
     }
 
     try {
-      const signature = signatureHeader.replace('sha256=', '');
-      const hmac = crypto.createHmac('sha256', this.appSecret);
-      const bodyStr = typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody);
-      const expectedSignature = hmac.update(bodyStr).digest('hex');
+      const signature = signatureHeader.slice('sha256='.length);
+      if (!/^[a-f0-9]{64}$/i.test(signature)) return false;
 
-      return crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expectedSignature, 'hex'));
+      // Meta signs the exact raw request bytes; serializing parsed JSON can change the signature.
+      const bodyBuffer = Buffer.isBuffer(rawBody)
+        ? rawBody
+        : Buffer.from(typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody));
+      const expectedSignature = crypto.createHmac('sha256', this.appSecret).update(bodyBuffer).digest();
+      const providedSignature = Buffer.from(signature, 'hex');
+
+      return providedSignature.length === expectedSignature.length
+        && crypto.timingSafeEqual(providedSignature, expectedSignature);
     } catch {
       return false;
     }
