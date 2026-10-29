@@ -31,18 +31,39 @@ app.use(helmet({
 }));
 
 // ---- CORS ----
+// In production, explicitly configure every browser origin that should access the API.
+// Requests without an Origin header (e.g. server-to-server/webhook calls) are not browser CORS requests.
+const configuredCorsOrigins = [
+  config.app.frontendUrl,
+  ...(process.env.CORS_ALLOWED_ORIGINS || '').split(','),
+]
+  .map((origin) => origin.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+const allowedCorsOrigins = new Set(configuredCorsOrigins);
+
 app.use(cors({
-  origin: config.app.env === 'development' ? config.app.frontendUrl : true,
+  origin(origin, callback) {
+    if (!origin || allowedCorsOrigins.has(origin.replace(/\/$/, ''))) {
+      return callback(null, true);
+    }
+    return callback(null, false);
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Clinic-ID'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Clinic-ID', 'X-Hub-Signature-256'],
 }));
 
 // ---- Rate Limiting ----
 app.use(generalLimiter);
 
 // ---- Body Parsing ----
-app.use(express.json({ limit: '10mb' }));
+// Meta signs the exact request bytes. Preserve the raw JSON body before parsing it.
+app.use(express.json({
+  limit: '10mb',
+  verify(req, _res, buffer) {
+    req.rawBody = Buffer.from(buffer);
+  },
+}));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // ---- Sanitización XSS ----
@@ -52,7 +73,7 @@ app.use(sanitizeBody);
 app.use(morgan(config.app.env === 'production' ? 'combined' : 'dev'));
 
 // ---- Archivos estáticos (uploads) ----
-app.use('/uploads', express.static(config.upload.path));
+// TODO(security): replace public static delivery with authenticated, clinic-scoped file access.
 
 // ---- Archivos estáticos (frontend) en producción ----
 if (config.app.env === 'production') {
