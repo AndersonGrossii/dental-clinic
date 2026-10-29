@@ -65,7 +65,7 @@ function run() {
     assert.equal(malformedSignature.nextCalled, false);
     assert.equal(malformedSignature.statusCode, 401);
 
-    const missingRawBody = invokeMiddleware('/whatsapp', validSignature, undefined);
+    const missingRawBody = invokeMiddleware('/whatsapp', validSignature, null);
     assert.equal(missingRawBody.nextCalled, false);
     assert.equal(missingRawBody.statusCode, 400);
 
