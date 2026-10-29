@@ -74,6 +74,8 @@ app.use(morgan(config.app.env === 'production' ? 'combined' : 'dev'));
 
 // ---- Archivos estáticos (uploads) ----
 // TODO(security): replace public static delivery with authenticated, clinic-scoped file access.
+// Keep the existing route until secure file streaming and frontend token handling are implemented together.
+app.use('/uploads', express.static(config.upload.path));
 
 // ---- Archivos estáticos (frontend) en producción ----
 if (config.app.env === 'production') {
