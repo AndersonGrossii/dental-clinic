@@ -1,3 +1,4 @@
+process.env.NODE_ENV = 'test';
 // ============================================
 // Suite de Pruebas: IA en Mensajería, Leads CRM, Supervisión y Multi-Clínica
 // Certifica:
@@ -169,14 +170,39 @@ async function runSuite() {
       const updatedConv = await query(`SELECT automation_enabled, status FROM conversations WHERE id = $1`, [conv.id]);
       assert.strictEqual(updatedConv.rows[0].automation_enabled, false, 'La automatización debe pausarse');
 
-      // 4. Verificar que se insertó el mensaje de aviso en internal_chat_messages para clínica 1
+      // 4. Verificar que se insertó el mensaje de aviso en internal_chat_messages para clínica 1 registrado como Sofía
       const chatMsg = await query(
-        `SELECT * FROM internal_chat_messages 
-         WHERE clinic_id = 1 AND message ILIKE '%TRASPASO URGENTE%'
-         ORDER BY created_at DESC LIMIT 1`
+        `SELECT m.*, u.first_name, u.last_name 
+         FROM internal_chat_messages m
+         JOIN users u ON m.sender_id = u.id
+         WHERE m.clinic_id = 1 AND m.message ILIKE '%TRASPASO URGENTE%'
+         ORDER BY m.created_at DESC LIMIT 1`
       );
       assert(chatMsg.rows.length > 0, 'Debe existir mensaje de traspaso en el chat interno');
       assert(chatMsg.rows[0].message.includes('Paciente Prueba Traspaso'), 'El aviso debe incluir el nombre del paciente');
+      assert.strictEqual(chatMsg.rows[0].first_name, 'Sofía', 'El remitente en el chat interno debe ser Sofía');
+      assert(chatMsg.rows[0].sender_id !== 1, 'El remitente no debe ser el propietario (ID 1)');
+
+      // 5. Verificar que se creó la tarea con nota por Sofía
+      const taskRes = await query(
+        `SELECT * FROM tasks 
+         WHERE clinic_id = 1 AND contact_id = $1 
+         ORDER BY id DESC LIMIT 1`,
+        [contact.id]
+      );
+      assert(taskRes.rows.length > 0, 'Debe existir la tarea creada por Sofía');
+      assert.strictEqual(taskRes.rows[0].created_by_user_id, chatMsg.rows[0].sender_id, 'La tarea debe estar creada por Sofía');
+      assert(taskRes.rows[0].description.includes('NOTA DE SOFÍA'), 'La tarea debe incluir la sección de nota');
+
+      // 6. Verificar que se creó la nota vinculada en crm_notes
+      const noteRes = await query(
+        `SELECT * FROM crm_notes 
+         WHERE clinic_id = 1 AND contact_id = $1 
+         ORDER BY id DESC LIMIT 1`,
+        [contact.id]
+      );
+      assert(noteRes.rows.length > 0, 'Debe existir una nota comercial en crm_notes');
+      assert(noteRes.rows[0].note.includes(`Nota en Tarea #${taskRes.rows[0].id}`), 'La nota debe referenciar la tarea creada');
     } finally {
       // Limpieza garantizada
       await query(`DELETE FROM messages WHERE conversation_id = $1`, [conv.id]);

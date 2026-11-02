@@ -39,12 +39,10 @@ const guardRoute = (featureKey, PageClass) => {
       this.container = container;
       this.params = params;
       const features = state.get('features') || {};
-      const isEnabled = Boolean(
-        features[featureKey] ??
+      const val = features[featureKey] ??
         (featureKey === 'omnichannelMessaging' ? features.omnichannel_messaging : undefined) ??
-        (featureKey === 'aiAutomations' ? features.ai_automations : undefined) ??
-        false
-      );
+        (featureKey === 'aiAutomations' ? features.ai_automations : undefined);
+      const isEnabled = val !== undefined ? Boolean(val) : true;
       if (!isEnabled) {
         window.location.hash = '#/';
         this.page = null;

@@ -282,7 +282,7 @@ class AIToolsService {
     }
 
     const res = await query(
-      `SELECT id, clinic_id, contact_id, status, service_interest, estimated_value, notes, created_at, updated_at
+      `SELECT id, clinic_id, contact_id, status, interest, ai_score, ai_extracted_interest, notes, created_at, updated_at
        FROM crm_leads
        WHERE clinic_id = $1 AND contact_id = $2
        LIMIT 1`,

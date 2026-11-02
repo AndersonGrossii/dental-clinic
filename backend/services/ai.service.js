@@ -88,9 +88,17 @@ class AIService {
    * - TREATMENT_INFORMATION
    * - INFO / GREETING
    */
-  async classifyIntent(messageText) {
+  /**
+   * Clasifica TODOS los temas o intenciones presentes en el mensaje del usuario.
+   * Permite detectar mensajes multi-tema (ej. cita + ubicación, precio + horario).
+   */
+  classifyAllIntents(messageText) {
     const text = (messageText || '').trim();
     const lower = text.toLowerCase();
+    const clean = lower.replace(/[^a-záéíóúñü0-9]+/gi, ' ').trim();
+    const words = clean.split(' ').filter(Boolean);
+
+    const detected = [];
 
     // 1. Detección de petición de hablar con una persona / recepcionista
     const wantsHuman = [
@@ -98,10 +106,7 @@ class AIService {
       'hablar con alguien', 'operador', 'secretaria', 'asesor', 'atencion humana',
       'pasame con', 'pásame con', 'quiero hablar', 'puedo hablar', 'hablar con una persona'
     ].some(k => lower.includes(k));
-
-    if (wantsHuman) {
-      return { intent: 'TRANSFER_TO_HUMAN', confidence: 0.99, provider: 'heuristic' };
-    }
+    if (wantsHuman) detected.push('TRANSFER_TO_HUMAN');
 
     // 2. Detección de urgencia clínica médica
     const isUrgent = [
@@ -109,43 +114,31 @@ class AIService {
       'infeccion', 'infección', 'fiebre', 'roto', 'caido', 'accidente', 'fuerte',
       'sangrando', 'flemón', 'flemon', 'golpe', 'muela'
     ].some(w => lower.includes(w));
-
-    if (isUrgent) {
-      return { intent: 'URGENT', confidence: 0.98, provider: 'heuristic' };
-    }
+    if (isUrgent) detected.push('URGENT');
 
     // 3. Detección de consulta de precios (activar guardrail de precio cero)
     const asksPrice = [
       'precio', 'precios', 'cuanto cuesta', 'cuánto cuesta', 'tarifa', 'tarifas',
       'presupuesto', 'coste', 'costo', 'costaria', 'costaría', 'cuanto costaria', 'cuánto costaría',
-      'cuanto vale', 'cuánto vale', 'valor',
+      'cuanto vale', 'cuánto vale',
       'cuanto saldria', 'cuánto saldría', 'promocion', 'descuento'
-    ].some(k => lower.includes(k)) || /\b(?:precio|precios|tarifa|tarifas|presupuesto|cost[eo]|costar[íi]a)\b/i.test(lower);
+    ].some(k => lower.includes(k)) || /\b(?:precio|precios|tarifa|tarifas|presupuesto|cost[eo]|costar[íi]a|valor)\b/i.test(lower);
+    if (asksPrice) detected.push('PRICE_INQUIRY');
 
-    if (asksPrice) {
-      return { intent: 'PRICE_INQUIRY', confidence: 0.97, provider: 'heuristic' };
-    }
-
-    // 4. Detección de confirmación, reagendamiento y cancelación
-    const words = lower.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, ' ').split(/\s+/).filter(Boolean);
-    const isConfirm = ['1', '1️⃣', 'si', 'sí', 'sim', 'confirmo', 'confirmar', 'confirmado', 'ok', 'estare', 'estarei', 'estoy', 'voy', 'perfecto', 'claro'].some(
-      w => words.includes(w) || lower === w
-    );
+    // 4. Detección de reagendamiento y cancelación
     const isReschedule = [
       'cambiar cita', 'cambiar mi cita', 'cambiar la cita', 'reagendar', 'reprogramar',
       'cambiar de dia', 'cambiar de día', 'cambiar de hora', 'mover cita', 'mover mi cita',
       'otro dia', 'otro día', 'otra hora', 'cambiarla para', 'cambiarla de dia', 'cambiarla de día', 'cambiarla'
     ].some(k => lower.includes(k)) || /\b(?:cambiar\w*|reagendar|reprogramar|posponer)\b/i.test(lower);
+    if (isReschedule) detected.push('RESCHEDULE');
 
     const isCancel = [
       '2', '2️⃣', 'cancelar', 'cancelo', 'cancelar mi cita', 'cancelar la cita',
       'no podre ir', 'no podré ir', 'no voy a poder ir', 'no podre asistir', 'no podré asistir',
       'imposible asistir', 'anular cita', 'anular mi cita'
     ].some(w => words.includes(w) || lower.includes(w));
-
-    if (isReschedule) return { intent: 'RESCHEDULE', confidence: 0.98, provider: 'heuristic' };
-    if (isCancel && !isConfirm) return { intent: 'CANCEL', confidence: 0.98, provider: 'heuristic' };
-    if (isConfirm && !isCancel) return { intent: 'CONFIRM', confidence: 0.99, provider: 'heuristic' };
+    if (isCancel && !isReschedule) detected.push('CANCEL');
 
     // 5. Detección de ubicación / cómo llegar
     const isLocation = [
@@ -153,20 +146,18 @@ class AIService {
       'ubicacion', 'ubicación', 'direccion', 'dirección', 'como llegar', 'cómo llegar',
       'donde se encuentran', 'en que calle', 'en qué calle'
     ].some(k => lower.includes(k));
-
-    if (isLocation) {
-      return { intent: 'LOCATION', confidence: 0.96, provider: 'heuristic' };
-    }
+    if (isLocation) detected.push('LOCATION');
 
     // 6. Detección de horarios de apertura / cierre
     const isOpeningHours = [
-      'horario', 'horarios', 'a que hora abren', 'a qué hora abren', 'a que hora abris', 'a qué hora abrís',
+      'a que hora abren', 'a qué hora abren', 'a que hora abris', 'a qué hora abrís',
       'a que hora cierran', 'a qué hora cierran', 'estan abiertos', 'están abiertos', 'estais abiertos', 'estáis abiertos',
-      'cuando abren', 'cuándo abren', 'abren los sabados', 'abren los sábados'
-    ].some(k => lower.includes(k));
+      'cuando abren', 'cuándo abren', 'abren los sabados', 'abren los sábados', 'abierto hoy', 'abren hoy',
+      'horario de atencion', 'horario de atención', 'horario de apertura', 'horarios de apertura'
+    ].some(k => lower.includes(k)) || (/\b(?:horarios?)\b/i.test(lower) && !/\b(?:algun|algún|un|el|este)?\s*horarios?\s+(?:con|libre|disponible|para)\b/i.test(lower) && !/\b(?:algun\s+horario|algún\s+horario|horario\s+con)\b/i.test(lower));
 
     if (isOpeningHours) {
-      return { intent: 'OPENING_HOURS', confidence: 0.95, provider: 'heuristic' };
+      detected.push('OPENING_HOURS');
     }
 
     // 7. Detección de primera visita / revisión gratuita
@@ -174,10 +165,7 @@ class AIService {
       'primera visita', 'primera revision', 'primera revisión', 'primera consulta',
       'primera cita', 'revision gratuita', 'revisión gratuita', 'revision gratis', 'revisión gratis'
     ].some(k => lower.includes(k));
-
-    if (isFirstVisit) {
-      return { intent: 'FIRST_VISIT', confidence: 0.95, provider: 'heuristic' };
-    }
+    if (isFirstVisit) detected.push('FIRST_VISIT');
 
     // 8. Detección de consulta sobre citas propias del paciente
     const isMyAppointment = [
@@ -187,10 +175,7 @@ class AIService {
       'que dia tengo cita', 'qué día tengo cita', 'tengo cita', 'tengo alguna cita', 'tengo citas',
       'mis citas agendadas', 'citas pendientes', 'recordarme mi cita', 'recordarme cuándo', 'recordarme cuando'
     ].some(k => lower.includes(k)) || /\b(?:mi|mis|tengo|recordar\w*)\s+(?:alguna\s+)?(?:pr[oó]xima\s+)?citas?\b/i.test(lower) || /\bcu[aá]ndo\s+(?:es|tengo)\s+(?:mi|alguna)\s+cita\b/i.test(lower);
-
-    if (isMyAppointment) {
-      return { intent: 'MY_APPOINTMENTS', confidence: 0.96, provider: 'heuristic' };
-    }
+    if (isMyAppointment && !isReschedule && !isCancel) detected.push('MY_APPOINTMENTS');
 
     // 9. Detección de consulta sobre el cuadro médico o doctores
     const isDoctorInquiry = [
@@ -199,33 +184,93 @@ class AIService {
       'cuadro medico', 'cuadro médico', 'equipo medico', 'equipo médico', 'doctores atienden', 'especialistas atienden',
       'doctores o especialistas', 'especialistas y doctores'
     ].some(k => lower.includes(k));
+    if (isDoctorInquiry) detected.push('DOCTOR_INQUIRY');
 
-    if (isDoctorInquiry) {
-      return { intent: 'DOCTOR_INQUIRY', confidence: 0.93, provider: 'heuristic' };
-    }
-
-    // 10. Detección de intención de cita / agendar
+    // 10. Detección de intención de cita / agendar / horario
     const wantsBooking = [
-      'cita', 'citas', 'agendar', 'pedir cita', 'reservar', 'hora',
-      'hueco', 'cuando puedo ir', 'cuándo puedo ir', 'disponibilidad'
-    ].some(k => lower.includes(k));
+      'cita', 'citas', 'agendar', 'pedir cita', 'reservar', 'pedir hora', 'dar hora',
+      'hueco', 'cuando puedo ir', 'cuándo puedo ir', 'disponibilidad',
+      'algun horario', 'algún horario', 'horario con', 'horario libre', 'hueco libre',
+      'puedo ir a las', 'tienen a las', 'tiene a las', 'horario a las'
+    ].some(k => lower.includes(k)) || /\b(?:cita|citas|agendar|reservar|hueco|disponib\w*)\b/i.test(lower) || /\b(?:a\s+las?\s+\d{1,2}|las\s+\d{1,2})\b/i.test(lower);
+    if (wantsBooking && !isOpeningHours && !isMyAppointment && !isReschedule && !isCancel) detected.push('BOOKING');
 
-    if (wantsBooking) {
-      return { intent: 'BOOKING', confidence: 0.95, provider: 'heuristic' };
-    }
-
-    // 9. Detección de información sobre tratamientos clínicos específicos
-    const isTreatment = [
+    // 11. Detección de información sobre tratamientos clínicos específicos
+    const hasTreatmentKeyword = [
       'implante', 'implantes', 'ortodoncia', 'invisalign', 'brackets',
       'blanqueamiento', 'carillas', 'limpieza', 'endodoncia', 'protesis', 'prótesis',
       'estetica', 'estética', 'rejuvenecimiento', 'arrugas', 'acido hialuronico', 'ácido hialurónico'
     ].some(k => lower.includes(k));
 
-    if (isTreatment) {
-      return { intent: 'TREATMENT_INFORMATION', confidence: 0.92, provider: 'heuristic' };
+    const isExplicitTreatmentInfo = /\b(?:informaci[oó]n|en qu[eé] consiste|c[oó]mo es|qu[eé] es|c[oó]mo se hace|qu[eé] tratamientos|qu[eé] hac[eé]is|hac[eé]is|hacen)\b/i.test(lower);
+    if (hasTreatmentKeyword && (!asksPrice && !wantsBooking || isExplicitTreatmentInfo)) {
+      detected.push('TREATMENT_INFORMATION');
     }
 
-    return { intent: 'INFO', confidence: 0.85, provider: 'heuristic' };
+    // 12. Detección de confirmación
+    // Un mensaje es confirmación si es una respuesta afirmativa a una propuesta previa
+    const isAffirmativePhrase = /\b(?:estare\s+presente|estarei\s+presente|estare\s+all[ií]|estar[eé]\s+all[ií]|asistir[eé]|asistire|confirmo|confirmar|confirmado)\b/i.test(lower);
+    const isConditionalSi = /^\s*si\s+(?:a\s+las?|las?|hay|tienen|tiene|atienden|atiende|puedo|es\s+posible|el\s+doctor|la\s+doctora|dr|dra|tuvieran|tuviesen|hubiera|hubiese)\b/i.test(lower);
+    const hasInquiryKeywords = asksPrice || isLocation || isOpeningHours || isDoctorInquiry || (detected.includes('TREATMENT_INFORMATION') && isExplicitTreatmentInfo) || (wantsBooking && /[?¿]/.test(text));
+    const exactAffirmations = ['1', '1️⃣', 'si', 'sí', 'sim', 'confirmo', 'confirmar', 'confirmado', 'ok', 'vale', 'de acuerdo', 'perfecto', 'claro', 'por favor', 'me viene bien', 'estare', 'estarei', 'voy'];
+    const isStandaloneAffirmation = exactAffirmations.includes(clean) || (exactAffirmations.some(w => words.includes(w)) && (words.length <= 4 || isAffirmativePhrase) && !hasInquiryKeywords && !isConditionalSi);
+
+    if ((isStandaloneAffirmation || isAffirmativePhrase) && !isCancel && !isConditionalSi) {
+      detected.push('CONFIRM');
+    }
+
+    if (detected.length === 0) {
+      detected.push('INFO');
+    }
+
+    // Prioridad del primaryIntent:
+    const priorityOrder = [
+      'URGENT', 'TRANSFER_TO_HUMAN', 'CANCEL', 'RESCHEDULE', 'CONFIRM',
+      'PRICE_INQUIRY', 'MY_APPOINTMENTS', 'DOCTOR_INQUIRY', 'OPENING_HOURS', 'LOCATION',
+      'BOOKING', 'FIRST_VISIT', 'TREATMENT_INFORMATION', 'INFO'
+    ];
+    const primaryIntent = priorityOrder.find(p => detected.includes(p)) || detected[0];
+
+    // Agrupar en familias temáticas independientes para determinar multi-intención real
+    const topicFamilies = new Set();
+    for (const intent of detected) {
+      if (['BOOKING', 'FIRST_VISIT'].includes(intent)) {
+        topicFamilies.add('BOOKING');
+      } else if (['PRICE_INQUIRY'].includes(intent)) {
+        topicFamilies.add('PRICE_INQUIRY');
+      } else if (['LOCATION'].includes(intent)) {
+        topicFamilies.add('LOCATION');
+      } else if (['OPENING_HOURS'].includes(intent)) {
+        topicFamilies.add('OPENING_HOURS');
+      } else if (['DOCTOR_INQUIRY'].includes(intent)) {
+        topicFamilies.add('DOCTOR_INQUIRY');
+      } else if (['MY_APPOINTMENTS'].includes(intent)) {
+        topicFamilies.add('MY_APPOINTMENTS');
+      } else if (['TREATMENT_INFORMATION'].includes(intent)) {
+        if (!detected.includes('PRICE_INQUIRY') && !detected.includes('BOOKING') && !detected.includes('FIRST_VISIT')) {
+          topicFamilies.add('TREATMENT_INFORMATION');
+        }
+      }
+    }
+
+    const hasMultipleIntents = !['URGENT', 'TRANSFER_TO_HUMAN', 'CANCEL', 'RESCHEDULE'].includes(primaryIntent) && topicFamilies.size > 1;
+
+    return {
+      primaryIntent,
+      allIntents: detected,
+      hasMultipleIntents,
+    };
+  }
+
+  async classifyIntent(messageText) {
+    const res = this.classifyAllIntents(messageText);
+    return {
+      intent: res.primaryIntent,
+      allIntents: res.allIntents,
+      hasMultipleIntents: res.hasMultipleIntents,
+      confidence: 0.95,
+      provider: 'heuristic',
+    };
   }
 
   /**
@@ -234,6 +279,11 @@ class AIService {
   extractInformedName(text, wasAskedForName = false) {
     if (!text) return null;
     const clean = text.trim();
+
+    // Si contiene signos de interrogación o palabras de pregunta, es una pregunta o consulta, no un nombre
+    if (/[?¿]/.test(clean) || /^(donde|dónde|cuando|cuándo|como|cómo|que|qué|cuanto|cuánto|quien|quién|por que|por qué|tienen|hay|abren|puedo|es posible)\b/i.test(clean)) {
+      return null;
+    }
 
     // 1. Patrón explícito de presentación: "Me llamo X", "Mi nombre es X", "Soy X", "Dime X"
     const introMatch = clean.match(/(?:me\s+llamo|mi\s+nombre\s+es|soy|puedes\s+llamarme|me\s+llaman|dime)\s+([A-Za-zÁÉÍÓÚáéíóúñÑüÜ\s]{2,40})/i);
@@ -247,22 +297,25 @@ class AIService {
       }
     }
 
-    // 2. Si el bot preguntó previamente el nombre o si el texto es muy breve (1 a 4 palabras solo letras)
+    // 2. Si el bot preguntó previamente el nombre: solo aceptar si son 1 a 3 palabras puramente de nombre
     const words = clean.replace(/[.,;:!?¿¡]/g, '').trim().split(/\s+/);
     const stopWords = new Set([
       'si', 'sí', 'no', 'hola', 'buenas', 'buenos', 'dias', 'días', 'tardes', 'noches',
       'ok', 'vale', 'bien', 'gracias', 'precio', 'precios', 'cita', 'citas', 'implante',
       'implantes', 'ortodoncia', 'invisalign', 'blanqueamiento', 'cuanto', 'cuánto', 'cuesta',
       'urgencia', 'dolor', 'recepcionista', 'persona', 'humano', 'queria', 'quería', 'saber',
-      'informacion', 'información', 'consulta', 'horario', 'abierto', 'cerrado', 'muela',
-      'coste', 'costo', 'presupuesto', 'atencion', 'atención'
+      'informacion', 'información', 'consulta', 'horario', 'horarios', 'abierto', 'cerrado', 'muela',
+      'coste', 'costo', 'presupuesto', 'atencion', 'atención', 'donde', 'dónde', 'cuando', 'cuándo',
+      'queda', 'quedan', 'clinica', 'clínica', 'doctor', 'doctora', 'dr', 'dra', 'abren', 'cierran',
+      'calle', 'ubicacion', 'ubicación', 'direccion', 'dirección', 'tienen', 'tiene', 'puedo', 'hora',
+      'horas', 'mañana', 'tarde', 'hoy', 'favor', 'por'
     ]);
 
-    if (words.length >= 1 && words.length <= 4) {
+    if (wasAskedForName && words.length >= 1 && words.length <= 3) {
       const isAllLetters = words.every(w => /^[A-Za-zÁÉÍÓÚáéíóúñÑüÜ]+$/.test(w));
       const hasStopWord = words.some(w => stopWords.has(w.toLowerCase()));
 
-      if (isAllLetters && !hasStopWord && (wasAskedForName || words.length <= 3)) {
+      if (isAllLetters && !hasStopWord) {
         return this.formatName(words.join(' '));
       }
     }
@@ -292,6 +345,7 @@ class AIService {
     ragResults = { articles: [], topMatch: null, confidence: 'NONE' },
     patient = { name: null, firstName: null, isConfirmed: false },
     slots = [],
+    timeSpecificFeedback = null,
     patientAppointments = null,
     clinicDoctors = null,
     requiredToolResult = null,
@@ -313,6 +367,8 @@ class AIService {
         openingHoursText: clinicStatus.openingHoursText,
       },
       intent: intentData.intent,
+      allIntents: intentData.allIntents || [intentData.intent],
+      hasMultipleIntents: Boolean(intentData.hasMultipleIntents),
       patient: {
         name: patient.name || null,
         firstName: patient.firstName || null,
@@ -343,6 +399,7 @@ class AIService {
         clinicStatus,
         docInfo,
         slots: slots || [],
+        timeSpecificFeedback: timeSpecificFeedback || null,
         patientAppointments: patientAppointments || null,
         clinicDoctors: clinicDoctors || null,
         requiredToolResult: requiredToolResult || null,
@@ -388,6 +445,15 @@ class AIService {
       prompt += `(No se encontraron artículos oficiales específicos para esta consulta. Aplica la regla de no-invención y ofrece contactar con recepción).\n`;
     }
 
+    if (tools.timeSpecificFeedback && !tools.timeSpecificFeedback.isAvailable) {
+      const fb = tools.timeSpecificFeedback;
+      prompt += `\nFEEDBACK DE HORARIO ESPECÍFICO SOLICITADO:\n`;
+      prompt += `El usuario solicitó las ${fb.requestedTime}, pero no está disponible porque: ${fb.explanation}.\n`;
+      if (fb.closestBefore) prompt += `* Horario libre anterior: ${fb.closestBefore.date} a las ${fb.closestBefore.time}\n`;
+      if (fb.closestAfter) prompt += `* Horario libre posterior: ${fb.closestAfter.date} a las ${fb.closestAfter.time}\n`;
+      prompt += `INSTRUCCIÓN OBLIGATORIA: Explica al paciente que el doctor no pasa consulta a esa hora exacta debido a su descanso/pausa de almuerzo, y ofrece amablemente el horario inmediatamente anterior y/o posterior disponible.\n`;
+    }
+
     if (tools.slots && tools.slots.length > 0) {
       prompt += `\nDISPONIBILIDAD DE AGENDA REAL (TOOLS):\n`;
       tools.slots.slice(0, 2).forEach(s => {
@@ -409,6 +475,9 @@ class AIService {
         prompt += `* ${d.name} (${d.specialty || 'Especialista'})\n`;
       });
     }
+
+    prompt += `\n6. MENSAJES MULTI-TEMA: Si el usuario plantea 2 o más preguntas o temas distintos en un mismo mensaje (por ejemplo, disponibilidad de cita + ubicación, o precio + horarios), responde de forma organizada y completa a TODOS los temas preguntados en la misma respuesta, sin omitir ninguno.\n`;
+    prompt += `7. CAMBIOS DE PREGUNTA: Si el usuario cambia de tema respecto al turno anterior, responde directamente a su nueva consulta sin insistir en temas antiguos ni repetir saludos innecesarios.\n`;
 
     return prompt;
   }
@@ -547,6 +616,141 @@ class AIService {
     const askNamePhrase = (!patient.isConfirmed)
       ? ' Por cierto, para poder dirigirnos adecuadamente a usted, ¿con quién tengo el gusto de hablar?'
       : '';
+
+    // A. Manejo de Múltiples Temas / Preguntas en el mismo mensaje
+    if (ctx.hasMultipleIntents && ctx.allIntents && ctx.allIntents.length > 1) {
+      const sections = [];
+      const intentsHandled = new Set();
+
+      // 1. Manejo de Cita / Booking / Horario con doctor
+      if (ctx.allIntents.includes('BOOKING') || ctx.allIntents.includes('FIRST_VISIT')) {
+        intentsHandled.add('BOOKING');
+        intentsHandled.add('FIRST_VISIT');
+        const timeFeedback = tools.timeSpecificFeedback;
+        const docName = docInfo.doctorTitle || 'el especialista solicitado';
+
+        if (timeFeedback && !timeFeedback.isAvailable) {
+          let altText = '';
+          if (timeFeedback.closestBefore && timeFeedback.closestAfter) {
+            altText = `Disponemos del horario anterior a las ${timeFeedback.closestBefore.time}h o el siguiente a las ${timeFeedback.closestAfter.time}h el próximo ${timeFeedback.closestAfter.date}.`;
+          } else if (timeFeedback.closestAfter) {
+            altText = `Disponemos del siguiente hueco libre a las ${timeFeedback.closestAfter.time}h el próximo ${timeFeedback.closestAfter.date}.`;
+          } else if (timeFeedback.closestBefore) {
+            altText = `Disponemos del hueco anterior a las ${timeFeedback.closestBefore.time}h el próximo ${timeFeedback.closestBefore.date}.`;
+          }
+          sections.push(`• Cita y disponibilidad: Para su cita con ${docName}, le informamos que ${timeFeedback.explanation}. ${altText}`);
+        } else if (slots.length > 0) {
+          let slotStr = `el próximo ${slots[0].date} ${slots[0].formattedArrival || slots[0].time}`;
+          if (slots.length > 1) slotStr += ` o ${slots[1].formattedArrival || slots[1].time}`;
+          sections.push(`• Cita y disponibilidad: Con mucho gusto. Para su cita con ${docName}, disponemos de hueco libre ${slotStr}.`);
+        } else {
+          sections.push(`• Cita y disponibilidad: Con mucho gusto podemos reservarle una primera consulta de valoración presencial en la clínica.`);
+        }
+      }
+
+      // 2. Consulta de Precios (Guardrail de precio cero)
+      if (ctx.allIntents.includes('PRICE_INQUIRY')) {
+        intentsHandled.add('PRICE_INQUIRY');
+        const clinicFocus = cid === 1 ? 'salud bucodental' : 'medicina estética y tratamientos faciales';
+        sections.push(`• Tarifas y presupuesto: En Clínica Vides cada anatomía y paciente son únicos. Por ética médica y rigor profesional en ${clinicFocus}, no facilitamos presupuestos cerrados por chat sin diagnóstico previo. Ofrecemos una primera consulta de valoración presencial totalmente gratuita y sin compromiso, donde el doctor examinará su caso y le entregará su presupuesto exacto en mano.`);
+      }
+
+      // 3. Ubicación
+      if (ctx.allIntents.includes('LOCATION')) {
+        intentsHandled.add('LOCATION');
+        const locArt = (rag.articles || []).find(a => a.category === 'UBICACION' || a.title?.toLowerCase().includes('ubicaci') || a.title?.toLowerCase().includes('dónde') || a.title?.toLowerCase().includes('donde'));
+        const loc = locArt
+          ? locArt.content
+          : (cid === 1 
+              ? 'Clínica Vides Dental Xúquer está situada en Av. Reforma 1234, Alcàntera de Xúquer, Valencia.' 
+              : 'Nuestra clínica de estética en Castellón está situada en Calle Cabanes 123, Cabanes, Castellón.');
+        sections.push(`• Ubicación: ${loc}`);
+      }
+
+      // 4. Horarios de apertura
+      if (ctx.allIntents.includes('OPENING_HOURS')) {
+        intentsHandled.add('OPENING_HOURS');
+        const hrsArt = (rag.articles || []).find(a => a.category === 'HORARIOS' || a.title?.toLowerCase().includes('horario') || a.title?.toLowerCase().includes('apertura'));
+        const hrs = hrsArt
+          ? hrsArt.content
+          : (cid === 1
+              ? 'Clínica Vides Dental Xúquer está abierta de lunes a viernes en horario ininterrumpido de 09:00 a 20:00.'
+              : 'Nuestra clínica de estética en Castellón atiende de lunes a viernes de 10:00 a 19:00.');
+        sections.push(`• Horario de atención: ${hrs}`);
+      }
+
+      // 5. Cuadro médico / Doctores
+      if (ctx.allIntents.includes('DOCTOR_INQUIRY')) {
+        intentsHandled.add('DOCTOR_INQUIRY');
+        const docsData = tools.clinicDoctors;
+        if (docsData && docsData.doctors && docsData.doctors.length > 0) {
+          const docList = docsData.doctors.map(d => `${d.name} (${d.specialty || 'Especialista'})`).join(', ');
+          sections.push(`• Equipo médico: Contamos con un equipo multidisciplinar colegiado: ${docList}.`);
+        } else {
+          sections.push(`• Equipo médico: Contamos con profesionales colegiados especializados en implantología, ortodoncia y estética dental.`);
+        }
+      }
+
+      // 6. Información de Tratamiento
+      if (ctx.allIntents.includes('TREATMENT_INFORMATION')) {
+        intentsHandled.add('TREATMENT_INFORMATION');
+        const treatArt = (rag.articles || []).find(a => a.category === 'TRATAMIENTOS' || a.category === 'CLINICA');
+        let treatmentText = treatArt ? treatArt.content : '';
+        if (!treatmentText) {
+          treatmentText = cid === 1
+            ? 'Realizamos implantología dental avanzada, ortodoncia invisible, estética y blanqueamiento, prótesis, endodoncia y limpiezas profesionales.'
+            : 'Disponemos de tratamientos de medicina estética facial y corporal, armonización facial y rejuvenecimiento cutáneo.';
+        }
+        sections.push(`• Tratamiento: ${treatmentText}`);
+      }
+
+      // 7. Citas propias del paciente
+      if (ctx.allIntents.includes('MY_APPOINTMENTS')) {
+        intentsHandled.add('MY_APPOINTMENTS');
+        const apptData = tools.patientAppointments;
+        if (apptData && apptData.count > 0 && apptData.nextAppointment) {
+          const next = apptData.nextAppointment;
+          sections.push(`• Sus citas programadas: Su próxima cita es el ${next.date} a las ${next.formattedArrival || next.time} con ${next.doctorName}.`);
+        } else {
+          sections.push(`• Sus citas programadas: No consta ninguna cita próxima registrada a su nombre en el sistema.`);
+        }
+      }
+
+      if (sections.length > 0) {
+        return {
+          replyText: `${greetingPrefix}con mucho gusto respondo a sus consultas:\n\n${sections.join('\n\n')}\n\n¿Le vendría bien que le reservemos un hueco para su visita o necesita que le aclare algún punto adicional?${askNamePhrase}${humanOption}`,
+          action: ctx.allIntents.includes('PRICE_INQUIRY') ? 'OFFER_FIRST_VISIT' : 'MULTI_INTENT_REPLIED',
+          intent: ctx.intent,
+          allIntents: ctx.allIntents,
+          slots,
+          timeSpecificFeedback: tools.timeSpecificFeedback,
+        };
+      }
+    }
+
+    // B. Manejo de consulta de hora específica no disponible (ej. pausa / almuerzo del doctor o fuera de horario)
+    const timeFeedback = tools.timeSpecificFeedback;
+    if (timeFeedback && !timeFeedback.isAvailable) {
+      const docName = docInfo.doctorTitle || 'el especialista solicitado';
+      let altText = '';
+      if (timeFeedback.closestBefore && timeFeedback.closestAfter) {
+        altText = `Disponemos del horario anterior a las ${timeFeedback.closestBefore.time}h o el siguiente a las ${timeFeedback.closestAfter.time}h el próximo ${timeFeedback.closestAfter.date}.`;
+      } else if (timeFeedback.closestAfter) {
+        altText = `Disponemos del siguiente hueco libre a las ${timeFeedback.closestAfter.time}h el próximo ${timeFeedback.closestAfter.date}.`;
+      } else if (timeFeedback.closestBefore) {
+        altText = `Disponemos del hueco anterior a las ${timeFeedback.closestBefore.time}h el próximo ${timeFeedback.closestBefore.date}.`;
+      }
+
+      return {
+        replyText: `Comprendo su consulta${firstName ? ', ' + firstName : ''}. Para su cita con ${docName}, le informamos que ${timeFeedback.explanation}. ${altText}\n\n¿Le vendría bien alguna de estas opciones para su cita, o prefiere otro día?${askNamePhrase}${humanOption}`,
+        action: 'SLOTS_OFFERED',
+        intent: 'BOOKING',
+        slots,
+        doctor: docInfo.doctor,
+        doctorTitle: docInfo.doctorTitle,
+        timeSpecificFeedback: timeFeedback,
+      };
+    }
 
     // 1. TRANSFER_TO_HUMAN
     if (intent === 'TRANSFER_TO_HUMAN') {
@@ -871,12 +1075,41 @@ class AIService {
     const effectiveName = detectedName || confirmedName || null;
     const firstName = effectiveName ? effectiveName.split(' ')[0] : null;
 
-    // 1. Analizar intención, horario de la clínica y búsqueda guiada en la Base de Conocimiento RAG
-    const [intentData, clinicStatus, docInfo] = await Promise.all([
+    // 1. Analizar intención, horario de la clínica, solicitud de doctor específico y doctor habitual
+    const [intentData, clinicStatus, habitualDocInfo, requestedDoc] = await Promise.all([
       this.classifyIntent(text),
       this.isClinicOpenNow(cid),
       aiBookingService.getDoctorForPatient({ clinicId: cid, phone: senderPhone }),
+      aiBookingService.resolveRequestedDoctor({ clinicId: cid, text }),
     ]);
+
+    // Si el usuario solicitó expresamente un doctor (ej: "Dr Juan" o "Dr Anderson Grossi"), prevalece sobre su doctor habitual
+    const docInfo = requestedDoc
+      ? {
+          isReturningPatient: Boolean(habitualDocInfo?.isReturningPatient),
+          isFirstVisit: false,
+          isRequestedDoctor: true,
+          patientId: habitualDocInfo?.patientId || null,
+          patientName: habitualDocInfo?.patientName || null,
+          doctor: requestedDoc,
+          slotDurationMinutes: requestedDoc.consultation_duration || 30,
+          clinicType: cid === 2 ? 'ESTETICA' : 'DENTAL',
+          welcomeFocus: `consulta con ${requestedDoc.title}`,
+          doctorTitle: requestedDoc.title,
+          habitualDoctorName: habitualDocInfo?.habitualDoctorName || null,
+          visitCount: habitualDocInfo?.visitCount || 0,
+        }
+      : habitualDocInfo;
+
+    // Contextualización inteligente por historial previo:
+    const words = text.toLowerCase().replace(/[^a-záéíóúñü0-9]+/gi, ' ').split(/\s+/).filter(Boolean);
+    const isConditionalSi = /^\s*si\s+(?:a\s+las?|las?|hay|tienen|tiene|atienden|atiende|puedo|es\s+posible|el\s+doctor|la\s+doctora|dr|dra|tuvieran|tuviesen|hubiera|hubiese)\b/i.test(text.toLowerCase());
+    const isShortAffirmation = !isConditionalSi && ['si', 'sí', 'sim', 'vale', 'ok', 'de acuerdo', 'perfecto', 'claro', 'por favor', 'me viene bien'].some(w => words.includes(w) || text.toLowerCase() === w) && words.length <= 4;
+    const offeredBookingRecently = /hueco|cita|reserva|revisión|revision|valoración|valoracion|agend|consulta|disponemos/i.test(lastOutbound);
+
+    if (isShortAffirmation && offeredBookingRecently && !['TRANSFER_TO_HUMAN', 'URGENT', 'CANCEL'].includes(intentData.intent)) {
+      intentData.intent = 'BOOKING';
+    }
 
     // Búsqueda RAG orientada a intención y sinónimos (Top-K = 3)
     const ragResults = await aiKnowledgeRepository.searchRelevant(cid, text, {
@@ -893,8 +1126,9 @@ class AIService {
       intent: intentData.intent,
     };
 
-    // Si el usuario SOLO nos proporcionó su nombre (o respondió a la pregunta de nombre)
-    if (detectedName && (intentData.intent === 'INFO' || wasAskedForName) && text.length <= 40) {
+    // Si el usuario SOLO nos proporcionó su nombre (o respondió a la pregunta de nombre sin otra consulta)
+    const isPureNameResponse = detectedName && (intentData.intent === 'INFO' || intentData.intent === 'NAME_PROVIDED') && (!intentData.allIntents || intentData.allIntents.every(i => i === 'INFO' || i === 'NAME_PROVIDED'));
+    if (isPureNameResponse && text.length <= 40) {
       const greeting = `¡Mucho gusto, ${firstName}! Es un placer saludarle.`;
       const offer = cid === 1
         ? `En Clínica Vides Dental Xúquer estamos a su entera disposición para cuidar de su salud bucodental. Le recordamos que disponemos de una primera consulta de revisión y diagnóstico totalmente gratuita y sin compromiso.\n\n¿En qué podemos ayudarle hoy o le gustaría que le reservemos un hueco para su revisión?`
@@ -914,10 +1148,24 @@ class AIService {
       };
     }
 
-    // Obtener disponibilidad de franjas si la intención es de agendamiento o reagendamiento
+    // Obtener disponibilidad de franjas si la intención es de agendamiento, reagendamiento o solicitud de doctor/hora
     let slots = [];
-    if (intentData.intent === 'BOOKING' || intentData.intent === 'FIRST_VISIT' || intentData.intent === 'RESCHEDULE') {
-      const slotsData = await aiBookingService.getAvailableSlots(cid, null, { phone: senderPhone });
+    let slotsData = null;
+    const requestedTime = aiBookingService.extractRequestedTime(text);
+    const needsSlots = intentData.intent === 'BOOKING' ||
+                       intentData.intent === 'FIRST_VISIT' ||
+                       intentData.intent === 'RESCHEDULE' ||
+                       Boolean(requestedDoc) ||
+                       Boolean(requestedTime) ||
+                       (intentData.allIntents && intentData.allIntents.includes('BOOKING'));
+
+    if (needsSlots) {
+      const requestedDate = aiBookingService.extractRequestedDate(text);
+      slotsData = await aiBookingService.getAvailableSlots(cid, requestedDate, {
+        phone: senderPhone,
+        doctorId: docInfo?.doctor?.id || null,
+        preferredTime: requestedTime,
+      });
       slots = (slotsData.availableSlots || []).slice(0, 2);
     }
 
@@ -967,6 +1215,7 @@ class AIService {
       ragResults,
       patient: { name: effectiveName, firstName, isConfirmed: hasConfirmedName, phone: senderPhone },
       slots,
+      timeSpecificFeedback: slotsData?.timeSpecificFeedback || null,
       patientAppointments,
       clinicDoctors,
       requiredToolResult,
@@ -1020,6 +1269,12 @@ class AIService {
       isNameConfirmed: Boolean(effectiveName),
       ragContext,
       slots: deterministic.slots || undefined,
+      doctor: deterministic.doctor || docInfo?.doctor || undefined,
+      doctorId: deterministic.doctor?.id || docInfo?.doctor?.id || undefined,
+      doctorTitle: deterministic.doctorTitle || docInfo?.doctorTitle || undefined,
+      timeSpecificFeedback: deterministic.timeSpecificFeedback || slotsData?.timeSpecificFeedback || undefined,
+      allIntents: intentData.allIntents || [intentData.intent],
+      hasMultipleIntents: Boolean(intentData.hasMultipleIntents),
       appointments: deterministic.appointments || patientAppointments?.appointments || undefined,
       appointmentId: deterministic.appointmentId || undefined,
       doctors: deterministic.doctors || clinicDoctors?.doctors || undefined,

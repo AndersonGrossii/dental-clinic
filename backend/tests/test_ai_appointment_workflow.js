@@ -42,7 +42,7 @@ async function runSuite() {
     console.log('🔹 [1/7] Identificación y Vinculación de Pacientes (resolveOrCreatePatient)');
 
     // 1.1 Paciente existente
-    const existing = (await query(`SELECT id, phone FROM patients WHERE clinic_id = 1 AND phone IS NOT NULL LIMIT 1`)).rows[0];
+    const existing = (await query(`SELECT id, phone FROM patients WHERE clinic_id = 1 AND phone IS NOT NULL AND deleted_at IS NULL LIMIT 1`)).rows[0];
     const resolvedId = await aiBookingService.resolveOrCreatePatient({
       clinicId: 1,
       phone: existing.phone,

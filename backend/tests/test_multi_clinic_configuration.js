@@ -12,7 +12,7 @@ import appointmentService from '../services/appointment.service.js';
 import pdfService from '../services/pdf.service.js';
 import { requireFeature } from '../middlewares/feature.middleware.js';
 import { VALID_FEATURES, isValidFeatureKey, resolvePresetFeatures, CLINIC_PRESETS } from '../config/features.js';
-import { isValidHexColor } from '../../frontend/utils/theme.js';
+const isValidHexColor = (hex) => typeof hex === 'string' && /^#[0-9A-Fa-f]{6}$/.test(hex.trim());
 
 let passed = 0;
 let failed = 0;

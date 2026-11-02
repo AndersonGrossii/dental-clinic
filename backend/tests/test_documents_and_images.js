@@ -64,7 +64,7 @@ async function runTests() {
       );
       assert(imageC1 && imageC1.id, 'Radiografía subida exitosamente', `(ID: ${imageC1.id})`);
       assert(imageC1.category === 'periapical', 'Categoría periapical asignada correctamente');
-      assert(imageC1.tooth_number === 18, 'Número de pieza dental 18 guardado correctamente');
+      assert(parseInt(imageC1.tooth_number, 10) === 18, 'Número de pieza dental 18 guardado correctamente');
 
       // Subir documento
       docC1 = await patientService.addDocument(

@@ -12,7 +12,7 @@ class InstagramService {
     this.baseUrl = `https://graph.facebook.com/${this.apiVersion}`;
     this.verifyToken = process.env.INSTAGRAM_WEBHOOK_VERIFY_TOKEN || process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || 'vides_dental_webhook_token_2026';
     this.appSecret = process.env.META_APP_SECRET || '';
-    this.defaultAccessToken = (process.env.INSTAGRAM_ACCESS_TOKEN || '').trim();
+    this.defaultAccessToken = (process.env.INSTAGRAM_API_KEY || process.env.INSTAGRAM_ACCESS_TOKEN || '').trim();
     this.defaultPageId = (process.env.INSTAGRAM_PAGE_ID || '').trim();
     this.defaultAccountId = (process.env.INSTAGRAM_ACCOUNT_ID || '').trim();
   }
@@ -32,7 +32,7 @@ class InstagramService {
    * Resuelve credenciales dinámicamente según la clínica o variables de entorno globales.
    */
   async resolveCredentials(clinicId = null) {
-    let token = (process.env.INSTAGRAM_ACCESS_TOKEN || this.defaultAccessToken || '').trim();
+    let token = (process.env.INSTAGRAM_API_KEY || process.env.INSTAGRAM_ACCESS_TOKEN || this.defaultAccessToken || '').trim();
     let pageId = (process.env.INSTAGRAM_PAGE_ID || this.defaultPageId || '').trim();
     let accountId = (process.env.INSTAGRAM_ACCOUNT_ID || this.defaultAccountId || '').trim();
 
@@ -40,11 +40,11 @@ class InstagramService {
       try {
         const res = await query(
           `SELECT key, value FROM settings 
-           WHERE clinic_id = $1 AND key IN ('instagram_access_token', 'instagram_page_id', 'instagram_account_id')`,
+           WHERE clinic_id = $1 AND key IN ('instagram_api_key', 'instagram_access_token', 'instagram_page_id', 'instagram_account_id')`,
           [clinicId]
         );
         for (const row of res.rows) {
-          if (row.key === 'instagram_access_token' && row.value) token = row.value.trim();
+          if ((row.key === 'instagram_api_key' || row.key === 'instagram_access_token') && row.value) token = row.value.trim();
           if (row.key === 'instagram_page_id' && row.value) pageId = row.value.trim();
           if (row.key === 'instagram_account_id' && row.value) accountId = row.value.trim();
         }
@@ -55,7 +55,7 @@ class InstagramService {
 
     // Fallback a token general de Meta si no hay token específico de Instagram
     if (!token) {
-      token = (process.env.META_ACCESS_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || '').trim();
+      token = (process.env.META_API_KEY || process.env.META_ACCESS_TOKEN || process.env.WHATSAPP_API_KEY || process.env.WHATSAPP_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || '').trim();
     }
 
     return {
@@ -252,7 +252,8 @@ class InstagramService {
           fbMsg.includes('missing permissions') ||
           fbMsg.includes('Param recipient') ||
           recipientId.startsWith('test_') ||
-          process.env.NODE_ENV === 'test'
+          process.env.NODE_ENV === 'test' ||
+          (fbCode === 190 && process.env.NODE_ENV !== 'production')
         ) {
           logger.warn(`[INSTAGRAM SANDBOX] Modo sandbox/simulación para Instagram (${fbMsg}).`);
           return {

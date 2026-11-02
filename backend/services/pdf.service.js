@@ -229,10 +229,15 @@ class PDFService {
 
       // Buscar en frontend/assets y frontend/ (donde vive paratilogo.jpeg)
       candidates.push(
+        path.resolve(__dirname, '../assets', clean),
+        path.resolve(__dirname, '../assets', cleanWithoutCPrefix),
+        path.resolve(process.cwd(), 'assets', clean),
+        path.resolve(process.cwd(), 'assets', cleanWithoutCPrefix),
         path.resolve(__dirname, '../../frontend', relativePath),
         path.resolve(__dirname, '../../frontend/assets', clean),
         path.resolve(__dirname, '../../frontend/assets', cleanWithoutCPrefix),
         path.resolve(__dirname, '../../backend/assets', clean),
+        path.resolve(__dirname, '../../backend/assets', cleanWithoutCPrefix),
         path.resolve(process.cwd(), 'frontend', relativePath),
         path.resolve(process.cwd(), 'frontend/assets', clean),
         path.resolve(process.cwd(), 'frontend/assets', cleanWithoutCPrefix),

@@ -341,6 +341,182 @@ class AIBookingService {
    * Obtiene franjas disponibles para una fecha específica o el siguiente día hábil.
    * Soporta filtrado por franja horaria (timeframe: 'morning' | 'afternoon').
    */
+  /**
+   * Resuelve si el paciente solicitó expresamente un doctor específico o especialidad por texto.
+   * Da prioridad absoluta a la solicitud del paciente sobre su doctor habitual.
+   */
+  async resolveRequestedDoctor({ clinicId = 1, text = '' }) {
+    if (!text || typeof text !== 'string') return null;
+    const cid = parseInt(clinicId, 10) || 1;
+    const norm = (str) => (str || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const lower = norm(text);
+
+    const res = await query(
+      `SELECT d.id, d.specialty, d.consultation_duration, d.color,
+              u.first_name, u.last_name, u.email, u.phone
+       FROM doctors d
+       JOIN users u ON d.user_id = u.id
+       WHERE u.clinic_id = $1 AND d.deleted_at IS NULL
+       ORDER BY d.id ASC`,
+      [cid]
+    );
+
+    for (const doc of res.rows) {
+      const fn = norm(doc.first_name);
+      const ln = norm(doc.last_name);
+      const fullName = `${fn} ${ln}`.trim();
+      const fnTokens = fn.split(/\s+/).filter(p => p.length >= 3 && !['dra', 'dr', 'doctor', 'doctora'].includes(p));
+      const lnTokens = ln.split(/\s+/).filter(p => p.length >= 3);
+
+      const matchesFullName = fullName.length >= 4 && lower.includes(fullName);
+      const matchesLastName = lnTokens.some(p => lower.includes(p));
+      const matchesFirstName = fnTokens.some(p => lower.includes(p));
+
+      if (matchesFullName || matchesLastName || (matchesFirstName && (lower.includes('dr') || lower.includes('doctor') || lower.includes('con ') || lower.includes('com ')))) {
+        const title = `Dr/a. ${doc.first_name} ${doc.last_name}`
+          .replace('Dr/a. Dra.', 'Dra.')
+          .replace('Dr/a. Dr.', 'Dr.')
+          .replace('Dr/a. dr/a.', 'Dr/a.');
+
+        return {
+          id: doc.id,
+          consultation_duration: doc.consultation_duration,
+          specialty: doc.specialty,
+          color: doc.color,
+          first_name: doc.first_name,
+          last_name: doc.last_name,
+          email: doc.email,
+          phone: doc.phone,
+          title,
+        };
+      }
+    }
+
+    // 2. Coincidencia por especialidad clínica
+    const specialtyMap = [
+      { key: 'ciruj', match: ['cirujano', 'cirugia', 'cirurjano', 'extraccion compleja'] },
+      { key: 'ortodon', match: ['ortodoncia', 'ortodoncista', 'brackets', 'invisalign'] },
+      { key: 'infantil', match: ['infantil', 'ninos', 'niños', 'pediatra', 'odontopediatra'] },
+      { key: 'estetica', match: ['estetica', 'botox', 'acido hialuronico'] },
+      { key: 'general', match: ['general', 'empaste', 'limpieza dental', 'profilaxis'] },
+    ];
+
+    for (const item of specialtyMap) {
+      if (item.match.some(m => lower.includes(m))) {
+        const matchedDoc = res.rows.find(d => {
+          const s = norm(d.specialty);
+          return s.includes(item.key);
+        });
+        if (matchedDoc) {
+          const title = `Dr/a. ${matchedDoc.first_name} ${matchedDoc.last_name}`
+            .replace('Dr/a. Dra.', 'Dra.')
+            .replace('Dr/a. Dr.', 'Dr.')
+            .replace('Dr/a. dr/a.', 'Dr/a.');
+
+          return {
+            id: matchedDoc.id,
+            consultation_duration: matchedDoc.consultation_duration,
+            specialty: matchedDoc.specialty,
+            color: matchedDoc.color,
+            first_name: matchedDoc.first_name,
+            last_name: matchedDoc.last_name,
+            email: matchedDoc.email,
+            phone: matchedDoc.phone,
+            title,
+          };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Extrae fecha solicitada en el texto (ej: "el dia 4 de noviembre", "mañana", "el lunes").
+   */
+  extractRequestedDate(text) {
+    if (!text || typeof text !== 'string') return null;
+    const lower = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const now = new Date();
+
+    if (lower.includes('pasado manana')) {
+      const d = new Date(now);
+      d.setDate(d.getDate() + 2);
+      return d.toISOString().split('T')[0];
+    }
+    if (lower.includes('manana')) {
+      const d = new Date(now);
+      d.setDate(d.getDate() + 1);
+      return d.toISOString().split('T')[0];
+    }
+
+    const months = {
+      enero: 0, febrero: 1, marzo: 2, abril: 3, mayo: 4, junio: 5,
+      julio: 6, agosto: 7, septiembre: 8, setiembre: 8, octubre: 9, noviembre: 10, diciembre: 11
+    };
+
+    const monthMatch = lower.match(/(?:dia\s+)?(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)/);
+    if (monthMatch) {
+      const day = parseInt(monthMatch[1], 10);
+      const monthIndex = months[monthMatch[2]];
+      const year = now.getFullYear();
+      let targetDate = new Date(year, monthIndex, day, 12, 0, 0);
+      if (targetDate.getTime() < now.getTime() - 86400000 * 30) {
+        targetDate = new Date(year + 1, monthIndex, day, 12, 0, 0);
+      }
+      return targetDate.toISOString().split('T')[0];
+    }
+
+    const numMatch = lower.match(/\b(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?\b/);
+    if (numMatch) {
+      const day = parseInt(numMatch[1], 10);
+      const month = parseInt(numMatch[2], 10) - 1;
+      const year = numMatch[3] ? (numMatch[3].length === 2 ? 2000 + parseInt(numMatch[3], 10) : parseInt(numMatch[3], 10)) : now.getFullYear();
+      const targetDate = new Date(year, month, day, 12, 0, 0);
+      return targetDate.toISOString().split('T')[0];
+    }
+
+    const daysOfWeek = { domingo: 0, lunes: 1, martes: 2, miercoles: 3, jueves: 4, viernes: 5, sabado: 6 };
+    const dowMatch = lower.match(/\b(?:el\s+)?(lunes|martes|miercoles|jueves|viernes)\b/);
+    if (dowMatch) {
+      const targetDow = daysOfWeek[dowMatch[1]];
+      const curDow = now.getDay();
+      let diff = targetDow - curDow;
+      if (diff <= 0) diff += 7;
+      const targetDate = new Date(now);
+      targetDate.setDate(targetDate.getDate() + diff);
+      return targetDate.toISOString().split('T')[0];
+    }
+
+    return null;
+  }
+
+  /**
+   * Extrae hora solicitada en el texto (ej: "las 9:00", "a las 9", "las 13", "a la 1 de la tarde").
+   */
+  extractRequestedTime(text) {
+    if (!text || typeof text !== 'string') return null;
+    const lower = text.toLowerCase();
+
+    // 1. Tarde / PM ("a la 1 de la tarde", "a las 3 de la tarde")
+    const pmMatch = lower.match(/\b(?:a\s+las?|las?|a\s+la)\s*([1-9]|1[0-2])(?::(\d{2}))?\s*(?:de\s+la\s+tarde|de\s+la\s+noche|pm)\b/);
+    if (pmMatch) {
+      let h = parseInt(pmMatch[1], 10);
+      if (h < 12) h += 12;
+      const m = pmMatch[2] ? String(parseInt(pmMatch[2], 10)).padStart(2, '0') : '00';
+      return `${String(h).padStart(2, '0')}:${m}`;
+    }
+
+    // 2. Horas en formato 24h o estándar ("a las 13", "las 13", "a las 9", "a las 9:30")
+    const timeMatch = lower.match(/\b(?:a\s+las?|las?|a\s+la)\s*(\d{1,2})(?::(\d{2}))?\s*(?:h|hrs|horas)?\b/);
+    if (timeMatch) {
+      const hour = String(parseInt(timeMatch[1], 10)).padStart(2, '0');
+      const min = timeMatch[2] ? String(parseInt(timeMatch[2], 10)).padStart(2, '0') : '00';
+      return `${hour}:${min}`;
+    }
+    return null;
+  }
+
   async getAvailableSlots(clinicId = 1, targetDateStr = null, options = {}) {
     const cid = parseInt(clinicId, 10) || 1;
 
@@ -489,9 +665,79 @@ class AIBookingService {
         currentMinutes += slotMinutes;
       }
 
+      let timeSpecificFeedback = null;
+      if (options.preferredTime) {
+        const [pH, pM] = options.preferredTime.split(':').map(Number);
+        const pMin = pH * 60 + pM;
+        const isAvailable = daySlots.some(s => s.time === options.preferredTime);
+
+        if (isAvailable) {
+          timeSpecificFeedback = {
+            requestedTime: options.preferredTime,
+            isAvailable: true,
+            reason: 'AVAILABLE',
+            explanation: `disponemos justamente de hueco libre a las ${options.preferredTime}h`,
+          };
+          const prefIdx = daySlots.findIndex(s => s.time === options.preferredTime);
+          if (prefIdx > 0) {
+            const [prefSlot] = daySlots.splice(prefIdx, 1);
+            daySlots.unshift(prefSlot);
+          }
+        } else {
+          // Determinar la causa exacta de no disponibilidad (Pausa médica, Fuera de turno, Ocupado)
+          let reasonType = 'UNAVAILABLE';
+          let explanation = '';
+
+          if (breakStartMin !== null && breakEndMin !== null && pMin >= breakStartMin && pMin < breakEndMin) {
+            reasonType = 'BREAK';
+            explanation = `el ${docInfo.doctorTitle || 'doctor'} no pasa consulta de ${breakStartStr} a ${breakEndStr} (su horario de pausa/almuerzo)`;
+          } else if (pMin < startH * 60 + startM || pMin >= endH * 60 + endM) {
+            reasonType = 'OUTSIDE_HOURS';
+            explanation = `el horario de consulta del ${docInfo.doctorTitle || 'doctor'} es de ${startTimeStr} a ${endTimeStr}`;
+          } else {
+            reasonType = 'BOOKED';
+            explanation = `el horario de las ${options.preferredTime}h ya se encuentra reservado`;
+          }
+
+          // Encontrar huecos libres más cercanos: anterior y posterior
+          const earlierSlots = daySlots.filter(s => {
+            const [h, m] = s.time.split(':').map(Number);
+            return (h * 60 + m) < pMin;
+          });
+          const laterSlots = daySlots.filter(s => {
+            const [h, m] = s.time.split(':').map(Number);
+            return (h * 60 + m) > pMin;
+          });
+
+          const closestBefore = earlierSlots.length > 0 ? earlierSlots[earlierSlots.length - 1] : null;
+          const closestAfter = laterSlots.length > 0 ? laterSlots[0] : null;
+
+          timeSpecificFeedback = {
+            requestedTime: options.preferredTime,
+            isAvailable: false,
+            reason: reasonType,
+            explanation,
+            breakStart: breakStartStr,
+            breakEnd: breakEndStr,
+            closestBefore,
+            closestAfter,
+          };
+
+          // Reordenar las alternativas: ofrecer el hueco libre anterior y posterior como opciones prioritarias
+          const prioritized = [];
+          if (closestBefore) prioritized.push(closestBefore);
+          if (closestAfter) prioritized.push(closestAfter);
+
+          const remaining = daySlots.filter(s => s !== closestBefore && s !== closestAfter);
+          daySlots.length = 0;
+          daySlots.push(...prioritized, ...remaining);
+        }
+      }
+
       return {
         availableSlots: daySlots,
         date: checkDateStr,
+        timeSpecificFeedback,
       };
     };
 
@@ -507,6 +753,7 @@ class AIBookingService {
         date: targetDateStr,
         slotDurationMinutes: slotMinutes,
         availableSlots: singleRes.availableSlots || [],
+        timeSpecificFeedback: singleRes.timeSpecificFeedback || null,
         isHolidayOrWeekend: Boolean(singleRes.isHolidayOrWeekend),
         reason: singleRes.reason || null,
         timeframe: options.timeframe || null,
@@ -531,6 +778,7 @@ class AIBookingService {
           date: checkStr,
           slotDurationMinutes: slotMinutes,
           availableSlots: res.availableSlots,
+          timeSpecificFeedback: res.timeSpecificFeedback || null,
           timeframe: options.timeframe || null,
         };
       }
@@ -1030,6 +1278,7 @@ class AIBookingService {
     const freshSlotsData = await this.getAvailableSlots(cid, selectedSlot.date, {
       patientId: contact.patient_id || null,
       phone: contact.phone || null,
+      doctorId: bookingFlowState.doctor_id || null,
     });
     const isStillAvailable = (freshSlotsData.availableSlots || []).some(s => s.time === selectedSlot.time);
 
@@ -1061,6 +1310,7 @@ class AIBookingService {
       appointmentDate: selectedSlot.date,
       startTime: selectedSlot.time,
       serviceRequested: bookingFlowState.service_requested || null,
+      doctorId: bookingFlowState.doctor_id || null,
     });
 
     // 3. Registrar log de automatización

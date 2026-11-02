@@ -71,8 +71,8 @@ export function isValidFeatureKey(key) {
 export function getDefaultFeatures() {
   return {
     [VALID_FEATURES.CRM]: true,
-    [VALID_FEATURES.MESSAGING]: false,
-    [VALID_FEATURES.AI_AUTOMATIONS]: false,
+    [VALID_FEATURES.MESSAGING]: true,
+    [VALID_FEATURES.AI_AUTOMATIONS]: true,
     [VALID_FEATURES.CABINETS]: true,
     [VALID_FEATURES.PROMOTIONAL_PACKS]: true,
     [VALID_FEATURES.CALENDAR_PRODUCTIVITY]: true,

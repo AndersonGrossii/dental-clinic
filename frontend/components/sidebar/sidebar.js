@@ -75,8 +75,8 @@ export class Sidebar {
         ]
       },
       { path: '#/payments', label: 'Pagos', icon: icons.payments, roles: ['propietario', 'direccion', 'recepcionista'] },
-      ...(hasFeature('omnichannel_messaging', false) ? [{ path: '#/messages', label: 'Mensajes', icon: icons.messages, roles: ['propietario', 'direccion', 'recepcionista', 'doctor'] }] : []),
-      ...(hasFeature('ai_automations', false) ? [{ path: '#/automations', label: 'Automatizaciones & IA', icon: icons.automations, roles: ['propietario', 'direccion', 'recepcionista', 'doctor'] }] : []),
+      ...(hasFeature('omnichannel_messaging', true) ? [{ path: '#/messages', label: 'Mensajes', icon: icons.messages, roles: ['propietario', 'direccion', 'recepcionista', 'doctor'] }] : []),
+      ...(hasFeature('ai_automations', true) ? [{ path: '#/automations', label: 'Automatizaciones & IA', icon: icons.automations, roles: ['propietario', 'direccion', 'recepcionista', 'doctor'] }] : []),
       ...(hasFeature('reports', true) ? [{ path: '#/reports', label: 'Reportes', icon: icons.reports, roles: ['propietario', 'direccion'] }] : []),
       { path: '#/settings', label: 'Configuración', icon: icons.settings, roles: ['propietario', 'direccion', 'doctor'] },
     ];

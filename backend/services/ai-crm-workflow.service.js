@@ -444,23 +444,31 @@ class AICrmWorkflowService {
       );
       if (leadRes.rows.length > 0) leadId = leadRes.rows[0].id;
 
+      // 1. Obtener usuario de Sofía (Asistente IA) para la clínica
+      const sofiaUserId = await internalChatService.getSofiaUserId(cid);
+
       // 2. Crear Tarea para Recepción en la tabla tasks
       const taskPriority = isUrgent ? 'URGENT' : 'HIGH';
       const taskTitle = isUrgent
         ? `🚨 URGENCIA: Atención inmediata para ${patientName}`
         : `🔔 Traspaso de chat: ${patientName} (${channel})`;
       
+      const taskNoteContent = isUrgent
+        ? `🚨 ATENCIÓN URGENTE: El paciente ${patientName} requiere contacto inmediato debido a dolor o urgencia dental reportada por ${channel}. Revisar historial clínico del paciente y conversación en mensajería antes de responder.`
+        : `🔔 TRASPASO A RECEPCIÓN: El paciente ${patientName} solicita hablar con una persona por ${channel}. Revisar conversación activa en mensajería para atención personalizada.`;
+
       const taskDesc = `Traspaso solicitado por el paciente en el canal ${channel}.\n` +
         `Teléfono: ${contact.phone}\n` +
         `Último mensaje recibido: "${incomingText.substring(0, 200)}"\n` +
-        `Motivo: ${reason}`;
+        `Motivo: ${reason}\n\n` +
+        `📝 NOTA DE SOFÍA (ASISTENTE IA):\n${taskNoteContent}`;
 
       const taskRes = await query(
         `INSERT INTO tasks (
            clinic_id, contact_id, lead_id, patient_id, title, description,
-           priority, status, due_date, due_time, is_team_visible, created_by_type, created_at, updated_at
+           priority, status, due_date, due_time, is_team_visible, created_by_user_id, created_by_type, created_at, updated_at
          ) VALUES (
-           $1, $2, $3, $4, $5, $6, $7, 'PENDING', CURRENT_DATE, CURRENT_TIME, TRUE, 'ai', NOW(), NOW()
+           $1, $2, $3, $4, $5, $6, $7, 'PENDING', CURRENT_DATE, CURRENT_TIME, TRUE, $8, 'ai', NOW(), NOW()
          ) RETURNING *`,
         [
           cid,
@@ -470,10 +478,63 @@ class AICrmWorkflowService {
           taskTitle,
           taskDesc,
           taskPriority,
+          sofiaUserId,
         ]
       );
 
       const createdTask = taskRes.rows[0];
+
+      // 2.1 Crear Nota vinculada a la Tarea en crm_notes
+      try {
+        await query(
+          `INSERT INTO crm_notes (clinic_id, contact_id, lead_id, author_id, note, created_by_type)
+           VALUES ($1, $2, $3, $4, $5, 'ai')`,
+          [
+            cid,
+            contact.id,
+            leadId,
+            sofiaUserId,
+            `📝 [Nota en Tarea #${createdTask.id}]: ${taskNoteContent} (Motivo: ${reason}. Tel: ${contact.phone})`,
+          ]
+        );
+      } catch (noteErr) {
+        logger.warn('[AI_CRM] No se pudo crear nota en crm_notes:', noteErr.message);
+      }
+
+      // 2.2 Si está vinculado a un paciente existente, registrar nota en historial del paciente
+      if (contact.patient_id) {
+        try {
+          await query(
+            `INSERT INTO patient_notes (clinic_id, patient_id, user_id, title, content, type)
+             VALUES ($1, $2, $3, $4, $5, 'seguimiento')`,
+            [
+              cid,
+              contact.patient_id,
+              sofiaUserId,
+              `Nota de Sofía en Tarea #${createdTask.id}`,
+              `${taskNoteContent}\n\nCanal: ${channel}\nTeléfono: ${contact.phone}\nMotivo: ${reason}\nÚltimo mensaje recibido: "${incomingText.substring(0, 200)}"`,
+            ]
+          );
+        } catch (pNoteErr) {
+          logger.warn('[AI_CRM] No se pudo crear nota en patient_notes:', pNoteErr.message);
+        }
+      }
+
+      // 2.3 Crear nota en el calendario diario de la clínica
+      try {
+        await query(
+          `INSERT INTO calendar_notes (clinic_id, note_date, title, content, color, is_team_visible, user_id)
+           VALUES ($1, CURRENT_DATE, $2, $3, '#fed7aa', TRUE, $4)`,
+          [
+            cid,
+            `📝 Nota en Tarea #${createdTask.id}: ${taskTitle}`,
+            `Paciente ${patientName} (${contact.phone}) en canal ${channel}. Motivo: ${reason}.\n${taskNoteContent}`,
+            sofiaUserId,
+          ]
+        );
+      } catch (calNoteErr) {
+        logger.warn('[AI_CRM] No se pudo crear nota en calendar_notes:', calNoteErr.message);
+      }
 
       // 3. Registrar Actividad de Traspaso en crm_activities
       await query(
@@ -489,15 +550,15 @@ class AICrmWorkflowService {
         ]
       );
 
-      // 4. Notificar en el Chat Interno del personal
+      // 4. Notificar en el Chat Interno del personal (registrado como Sofía)
       try {
         const chatNotice = isUrgent
-          ? `🚨 [URGENCIA CLÍNICA PRIORITARIA] El paciente ${patientName} (${contact.phone}) informa molestia aguda o urgencia por ${channel}. Conversación transferida al mostrador.`
-          : `🔔 [TRASPASO A RECEPCIÓN] El paciente ${patientName} (${contact.phone}) solicita hablar con una persona por ${channel}. Conversación transferida al mostrador.`;
+          ? `🚨 [URGENCIA CLÍNICA PRIORITARIA - TRASPASO URGENTE] El paciente ${patientName} (${contact.phone}) informa molestia aguda o urgencia por ${channel}. Conversación transferida al mostrador de recepción.`
+          : `🔔 [TRASPASO A RECEPCIÓN - TRASPASO URGENTE] El paciente ${patientName} (${contact.phone}) solicita hablar con una persona por ${channel}. Conversación transferida al mostrador de recepción.`;
 
         await internalChatService.sendMessage({
           clinicId: cid,
-          senderId: 1, // ID del sistema
+          senderId: sofiaUserId, // Registrado a nombre de Sofía (Asistente IA)
           recipientId: null, // Canal general de esa clínica
           message: chatNotice,
         });
@@ -551,25 +612,43 @@ class AICrmWorkflowService {
     const cid = parseInt(clinicId, 10) || 1;
 
     try {
+      const sofiaUserId = await internalChatService.getSofiaUserId(cid);
       const dueDate = new Date();
       dueDate.setDate(dueDate.getDate() + daysFromNow);
       const dueDateStr = dueDate.toISOString().split('T')[0];
 
       const taskTitle = `📞 ${reason}`;
-      const taskDesc = `Seguimiento automático programado por Sofía tras interacción en mensajería.\n` +
-        `Plazo sugerido: ${daysFromNow} días.`;
+      const taskNoteContent = `Seguimiento automático programado por Sofía tras interacción en mensajería. Plazo sugerido: ${daysFromNow} días.`;
+      const taskDesc = `${taskNoteContent}\n\n📝 NOTA DE SOFÍA (ASISTENTE IA):\nVerificar interés del lead/paciente y agendar cita en clínica.`;
 
       const insTask = await query(
         `INSERT INTO tasks (
            clinic_id, contact_id, lead_id, patient_id, title, description,
-           priority, status, due_date, due_time, is_team_visible, created_by_type, created_at, updated_at
+           priority, status, due_date, due_time, is_team_visible, created_by_user_id, created_by_type, created_at, updated_at
          ) VALUES (
-           $1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, '10:00:00', TRUE, 'ai', NOW(), NOW()
+           $1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, '10:00:00', TRUE, $9, 'ai', NOW(), NOW()
          ) RETURNING *`,
-        [cid, contactId, leadId, patientId, taskTitle, taskDesc, priority, dueDateStr]
+        [cid, contactId, leadId, patientId, taskTitle, taskDesc, priority, dueDateStr, sofiaUserId]
       );
 
       const task = insTask.rows[0];
+
+      // Registrar nota en crm_notes vinculada a la tarea
+      try {
+        await query(
+          `INSERT INTO crm_notes (clinic_id, contact_id, lead_id, author_id, note, created_by_type)
+           VALUES ($1, $2, $3, $4, $5, 'ai')`,
+          [
+            cid,
+            contactId,
+            leadId,
+            sofiaUserId,
+            `📝 [Nota en Tarea #${task.id}]: Seguimiento programado para el ${dueDateStr}. Motivo: ${reason}`,
+          ]
+        );
+      } catch (noteErr) {
+        logger.warn('[AI_CRM] No se pudo crear nota de seguimiento en crm_notes:', noteErr.message);
+      }
 
       // Registrar actividad
       await query(

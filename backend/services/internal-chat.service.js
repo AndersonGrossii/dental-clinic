@@ -5,8 +5,41 @@ import internalChatRepository from '../repositories/internal-chat.repository.js'
 import eventStreamService from './event-stream.service.js';
 import { ValidationError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
+import { query } from '../database/pool.js';
 
 class InternalChatService {
+  /**
+   * Obtiene o asegura el ID de usuario del bot Sofía para una clínica dada.
+   */
+  async getSofiaUserId(clinicId = 1) {
+    const cid = parseInt(clinicId, 10) || 1;
+    try {
+      const res = await query(
+        `SELECT id FROM users 
+         WHERE clinic_id = $1 
+           AND (email LIKE 'sofia.ia%' OR first_name ILIKE '%Sof%a%') 
+         ORDER BY id ASC LIMIT 1`,
+        [cid]
+      );
+      if (res.rows.length > 0) {
+        return res.rows[0].id;
+      }
+
+      // Si no existe para esta clínica, crearlo automáticamente
+      const sofiaEmail = `sofia.ia.${cid}@videsdental.com`;
+      const ins = await query(
+        `INSERT INTO users (clinic_id, role_id, first_name, last_name, email, password_hash, is_active)
+         VALUES ($1, 2, 'Sofía', '(Asistente IA)', $2, '$2b$10$sofia_bot_internal_dummy_hash', true)
+         RETURNING id`,
+        [cid, sofiaEmail]
+      );
+      return ins.rows[0].id;
+    } catch (err) {
+      logger.error(`[INTERNAL_CHAT] Error obteniendo usuario de Sofía para clínica ${cid}:`, err.message);
+      return 1;
+    }
+  }
+
   /**
    * Obtiene mensajes del canal general de la clínica (solo del día actual).
    */

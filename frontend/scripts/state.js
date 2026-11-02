@@ -15,7 +15,7 @@ class Store {
       activeClinicId: localStorage.getItem('activeClinicId') || null,
       features: {
         crm: true,
-        omnichannel_messaging: false,
+        omnichannel_messaging: true,
         ai_automations: false,
         cabinets: true,
         promotional_packs: true,

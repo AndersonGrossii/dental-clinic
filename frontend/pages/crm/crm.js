@@ -1052,11 +1052,14 @@ export class CrmPage {
                       />
                     </td>
                     <td>
-                      <div style="font-weight: 700; color: var(--text-primary); ${isCompleted ? 'text-decoration: line-through;' : ''}">
-                        ${this.escapeHtml(t.title)}
+                      <div style="font-weight: 700; color: var(--text-primary); display: flex; align-items: center; flex-wrap: wrap; gap: 6px; ${isCompleted ? 'text-decoration: line-through;' : ''}">
+                        <span>${this.escapeHtml(t.title)}</span>
+                        ${t.created_by_type === 'ai' || /sof[ií]a/i.test(t.created_by_first_name || '') ? `
+                          <span class="badge" style="background: #e0f2fe; color: #0369a1; font-size: 0.68rem; font-weight: 600; padding: 1px 6px; border-radius: 9999px;">🤖 Sofía (IA)</span>
+                        ` : ''}
                       </div>
                       ${t.description ? `
-                        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px;">
+                        <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; white-space: pre-line; line-height: 1.4;">
                           ${this.escapeHtml(t.description)}
                         </div>
                       ` : ''}

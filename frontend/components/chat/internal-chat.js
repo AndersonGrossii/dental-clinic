@@ -446,15 +446,18 @@ class InternalChatWidget {
           ${this.staffList.length === 0 ? `
             <div class="ic-empty-state">No hay otros empleados registrados en la clínica.</div>
           ` : this.staffList.map(staff => {
-            const initials = (staff.first_name?.[0] || 'U') + (staff.last_name?.[0] || '');
+            const isSofia = staff.first_name === 'Sofía' || /sof[ií]a/i.test(staff.first_name) || /asistente ia/i.test(staff.last_name || '');
+            const initials = isSofia ? '🤖' : ((staff.first_name?.[0] || 'U') + (staff.last_name?.[0] || ''));
+            const fullName = isSofia ? '🤖 Sofía (Asistente IA)' : `${this.escapeHtml(staff.first_name)} ${this.escapeHtml(staff.last_name)}`;
+            const roleName = isSofia ? 'IA Asistente Clínica' : this.escapeHtml(staff.role_name || 'Personal');
             const unread = this.unreadCounts?.directs?.[staff.id] || 0;
             return `
               <div class="ic-contact-item" data-staff-id="${staff.id}">
                 <div class="ic-contact-info">
-                  <div class="ic-avatar">${initials.toUpperCase()}</div>
+                  <div class="ic-avatar" style="${isSofia ? 'background: #e0f2fe; color: #0284c7; font-size: 1.1rem;' : ''}">${initials.toUpperCase()}</div>
                   <div class="ic-contact-meta">
-                    <span class="ic-contact-name">${this.escapeHtml(staff.first_name)} ${this.escapeHtml(staff.last_name)}</span>
-                    <span class="ic-contact-role">${this.escapeHtml(staff.role_name || 'Personal')}</span>
+                    <span class="ic-contact-name">${fullName}</span>
+                    <span class="ic-contact-role">${roleName}</span>
                   </div>
                 </div>
                 ${unread > 0 ? `<span class="ic-badge">${unread}</span>` : ''}
@@ -473,14 +476,15 @@ class InternalChatWidget {
             <span>👋 No hay mensajes recientes. ¡Inicia la conversación!</span>
           </div>
         ` : this.messages.map(msg => {
-          const isMine = msg.sender_id === this.currentUser?.id;
-          const senderName = isMine ? 'Tú' : `${msg.sender_first_name} ${msg.sender_last_name || ''}`;
-          const roleLabel = msg.sender_role ? ` (${msg.sender_role})` : '';
+          const isSofia = msg.sender_first_name === 'Sofía' || /sof[ií]a/i.test(msg.sender_first_name || '') || /asistente ia/i.test(msg.sender_last_name || '');
+          const isMine = !isSofia && msg.sender_id === this.currentUser?.id;
+          const senderName = isSofia ? '🤖 Sofía (Asistente IA)' : (isMine ? 'Tú' : `${msg.sender_first_name} ${msg.sender_last_name || ''}`);
+          const roleLabel = isSofia ? ' (IA Clínica)' : (msg.sender_role ? ` (${msg.sender_role})` : '');
           const time = msg.created_at ? formatTime(new Date(msg.created_at).toTimeString().substring(0, 5)) : '';
 
           return `
-            <div class="ic-message-row ${isMine ? 'mine' : 'theirs'}">
-              ${!isMine && !this.activeDirectUser ? `
+            <div class="ic-message-row ${isSofia ? 'theirs sofia' : (isMine ? 'mine' : 'theirs')}">
+              ${(!isMine || isSofia) && !this.activeDirectUser ? `
                 <div class="ic-sender-header">${this.escapeHtml(senderName)}${roleLabel}</div>
               ` : ''}
               <div class="ic-bubble">${this.escapeHtml(msg.message)}</div>
@@ -505,14 +509,15 @@ class InternalChatWidget {
         <span>👋 No hay mensajes recientes. ¡Inicia la conversación!</span>
       </div>
     ` : this.messages.map(msg => {
-      const isMine = msg.sender_id === this.currentUser?.id;
-      const senderName = isMine ? 'Tú' : `${msg.sender_first_name} ${msg.sender_last_name || ''}`;
-      const roleLabel = msg.sender_role ? ` (${msg.sender_role})` : '';
+      const isSofia = msg.sender_first_name === 'Sofía' || /sof[ií]a/i.test(msg.sender_first_name || '') || /asistente ia/i.test(msg.sender_last_name || '');
+      const isMine = !isSofia && msg.sender_id === this.currentUser?.id;
+      const senderName = isSofia ? '🤖 Sofía (Asistente IA)' : (isMine ? 'Tú' : `${msg.sender_first_name} ${msg.sender_last_name || ''}`);
+      const roleLabel = isSofia ? ' (IA Clínica)' : (msg.sender_role ? ` (${msg.sender_role})` : '');
       const time = msg.created_at ? formatTime(new Date(msg.created_at).toTimeString().substring(0, 5)) : '';
 
       return `
-        <div class="ic-message-row ${isMine ? 'mine' : 'theirs'}">
-          ${!isMine && !this.activeDirectUser ? `
+        <div class="ic-message-row ${isSofia ? 'theirs sofia' : (isMine ? 'mine' : 'theirs')}">
+          ${(!isMine || isSofia) && !this.activeDirectUser ? `
             <div class="ic-sender-header">${this.escapeHtml(senderName)}${roleLabel}</div>
           ` : ''}
           <div class="ic-bubble">${this.escapeHtml(msg.message)}</div>

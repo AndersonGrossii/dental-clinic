@@ -29,13 +29,15 @@ async function runSuite() {
   console.log('║  🛠️  SUITE FASE 4: AI TOOL GROUNDING & DETERMINISTIC SERVICES     ║');
   console.log('╚══════════════════════════════════════════════════════════════════╝\n');
 
+  let testApptId = null;
+
   try {
     // -------------------------------------------------------------
     // PREPARACIÓN DE DATOS DE PRUEBA EN BD
     // -------------------------------------------------------------
     // Obtener un paciente real de la clínica 1 (o asegurar existencia)
     let patientXuquer = (await query(
-      `SELECT id, first_name, last_name, phone FROM patients WHERE clinic_id = 1 AND phone IS NOT NULL LIMIT 1`
+      `SELECT id, first_name, last_name, phone FROM patients WHERE clinic_id = 1 AND phone IS NOT NULL AND deleted_at IS NULL LIMIT 1`
     )).rows[0];
 
     if (!patientXuquer) {
@@ -67,8 +69,14 @@ async function runSuite() {
       [patientXuquer.id]
     );
 
-    let testApptId = null;
     if (existingAppt.rows.length === 0 && doctorXuquer) {
+      // Limpiar preventivamente cualquier cita previa de prueba en el mismo slot/gabinete
+      await query(
+        `DELETE FROM appointments 
+         WHERE clinic_id = 1 AND appointment_date = $1 
+           AND start_time = '11:00:00' AND gabinete = 'Gabinete 1'`,
+        [futureDateStr]
+      );
       const insAppt = await query(
         `INSERT INTO appointments (clinic_id, patient_id, doctor_id, appointment_date, start_time, end_time, status_id, reason, created_at, updated_at)
          VALUES (1, $1, $2, $3, '11:00:00', '11:30:00', 1, 'Revisión y Limpieza', NOW(), NOW())
@@ -233,14 +241,18 @@ async function runSuite() {
     report('Guardrail de precio cero prevalece sobre cualquier tool', replyPrice.action === 'OFFER_FIRST_VISIT');
     report('No devuelve tarifas numéricas de tratamientos', !replyPrice.replyText.match(/\b\d+\s*(?:€|euros?)\b/i));
 
-    // Limpieza de datos de prueba si se creó cita temporal
-    if (testApptId) {
-      await query(`DELETE FROM appointments WHERE id = $1`, [testApptId]);
-    }
-
   } catch (err) {
     console.error('❌ Error fatal en test suite de Tool Grounding:', err);
     failed++;
+  } finally {
+    // Limpieza garantizada de cita de prueba si se creó
+    if (testApptId) {
+      try {
+        await query(`DELETE FROM appointments WHERE id = $1`, [testApptId]);
+      } catch (cleanErr) {
+        console.warn('⚠️ No se pudo eliminar cita temporal:', cleanErr.message);
+      }
+    }
   }
 
   console.log('\n═════════════════════════════════════════════════════════════');

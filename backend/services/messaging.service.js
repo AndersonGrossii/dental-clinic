@@ -272,9 +272,9 @@ class MessagingService {
         }
 
         if (!bookingHandled) {
-          // Cargar historial reciente de la conversación
+          // Cargar historial reciente de la conversación (últimos 12 mensajes para contexto amplio)
           const historyRes = await query(
-            `SELECT id, direction, body, created_at FROM messages WHERE conversation_id = $1 ORDER BY id DESC LIMIT 6`,
+            `SELECT id, direction, body, created_at FROM messages WHERE conversation_id = $1 ORDER BY id DESC LIMIT 12`,
             [conversation.id]
           );
           const conversationHistory = historyRes.rows.reverse();
@@ -297,6 +297,8 @@ class MessagingService {
                 step: 'AWAITING_SLOT_SELECTION',
                 offered_slots: sofiaRes.slots,
                 target_date: sofiaRes.slots[0].date,
+                doctor_id: sofiaRes.doctor?.id || sofiaRes.doctorId || null,
+                doctor_title: sofiaRes.doctorTitle || null,
                 offered_at: new Date().toISOString(),
               }
             }, conversation.clinic_id);
@@ -424,7 +426,7 @@ class MessagingService {
 
       if (!bookingHandled) {
         const historyRes = await query(
-          `SELECT id, direction, body, created_at FROM messages WHERE conversation_id = $1 ORDER BY id DESC LIMIT 6`,
+          `SELECT id, direction, body, created_at FROM messages WHERE conversation_id = $1 ORDER BY id DESC LIMIT 12`,
           [conversation.id]
         );
         const conversationHistory = historyRes.rows.reverse();
@@ -445,6 +447,8 @@ class MessagingService {
               step: 'AWAITING_SLOT_SELECTION',
               offered_slots: sofiaRes.slots,
               target_date: sofiaRes.slots[0].date,
+              doctor_id: sofiaRes.doctor?.id || sofiaRes.doctorId || null,
+              doctor_title: sofiaRes.doctorTitle || null,
               offered_at: new Date().toISOString(),
             }
           }, conversation.clinic_id);

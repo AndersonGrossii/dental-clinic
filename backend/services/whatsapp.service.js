@@ -3,6 +3,7 @@
 // ============================================
 import crypto from 'crypto';
 import config from '../config/app.js';
+import { query } from '../database/pool.js';
 import { logger } from '../utils/logger.js';
 import { AppError } from '../utils/errors.js';
 
@@ -12,9 +13,48 @@ class WhatsAppService {
     this.baseUrl = `https://graph.facebook.com/${this.apiVersion}`;
     this.verifyToken = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN || 'vides_dental_webhook_token_2026';
     this.appSecret = process.env.META_APP_SECRET || '';
-    this.accessToken = (process.env.WHATSAPP_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || '').trim().replace(/\s+/g, '');
+    this.accessToken = (process.env.WHATSAPP_API_KEY || process.env.WHATSAPP_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || '').trim().replace(/\s+/g, '');
     this.defaultPhoneId = (process.env.WHATSAPP_PHONE_NUMBER_ID || '').trim().replace(/\s+/g, '');
     this.businessAccountId = (process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '').trim().replace(/\s+/g, '');
+  }
+
+  /**
+   * Resuelve credenciales dinámicamente según la clínica o variables de entorno globales.
+   * Soporta tanto WHATSAPP_API_KEY como tokens y configuraciones por clínica en BD.
+   */
+  async resolveCredentials(clinicId = null) {
+    let token = (process.env.WHATSAPP_API_KEY || process.env.WHATSAPP_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || this.accessToken || '').trim().replace(/\s+/g, '');
+    let phoneId = (process.env.WHATSAPP_PHONE_NUMBER_ID || this.defaultPhoneId || '').trim().replace(/\s+/g, '');
+    let businessAccountId = (process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || this.businessAccountId || '').trim().replace(/\s+/g, '');
+
+    if (clinicId) {
+      try {
+        const res = await query(
+          `SELECT key, value FROM settings 
+           WHERE clinic_id = $1 AND key IN ('whatsapp_api_key', 'whatsapp_access_token', 'whatsapp_token', 'whatsapp_phone_number_id', 'whatsapp_business_account_id')`,
+          [clinicId]
+        );
+        for (const row of res.rows) {
+          if ((row.key === 'whatsapp_api_key' || row.key === 'whatsapp_access_token' || row.key === 'whatsapp_token') && row.value) {
+            token = row.value.trim().replace(/\s+/g, '');
+          }
+          if (row.key === 'whatsapp_phone_number_id' && row.value) {
+            phoneId = row.value.trim().replace(/\s+/g, '');
+          }
+          if (row.key === 'whatsapp_business_account_id' && row.value) {
+            businessAccountId = row.value.trim().replace(/\s+/g, '');
+          }
+        }
+      } catch (err) {
+        logger.warn(`Error al consultar credenciales de WhatsApp para clínica #${clinicId}:`, err.message);
+      }
+    }
+
+    return {
+      accessToken: token,
+      phoneId,
+      businessAccountId,
+    };
   }
 
   /**
@@ -145,9 +185,12 @@ class WhatsAppService {
 
   /**
    * Envía un mensaje de texto saliente a través de Meta WhatsApp Cloud API.
+   * Soporta resolución de API KEY / Access Token por clínica y fallback seguro en dev/sandbox.
    */
-  async sendTextMessage(toPhone, textBody, phoneId = null) {
-    const targetPhoneId = phoneId || this.defaultPhoneId;
+  async sendTextMessage(toPhone, textBody, phoneId = null, clinicId = null) {
+    const creds = await this.resolveCredentials(clinicId);
+    const targetPhoneId = (phoneId || creds.phoneId || this.defaultPhoneId || '').trim().replace(/\s+/g, '');
+    const token = (creds.accessToken || '').trim().replace(/\s+/g, '');
     const cleanPhone = toPhone.replace(/[\s\-+]/g, '');
 
     const payload = {
@@ -162,7 +205,7 @@ class WhatsAppService {
     };
 
     // Si estamos en entorno de tests automatizados o no hay token de Meta configurado, simular envío exitoso
-    if (process.env.NODE_ENV === 'test' || !this.accessToken || !targetPhoneId) {
+    if (process.env.NODE_ENV === 'test' || !token || !targetPhoneId) {
       logger.info(`[MOCK WHATSAPP] Enviando mensaje a ${cleanPhone}: "${textBody}"`);
       return {
         success: true,
@@ -171,13 +214,10 @@ class WhatsAppService {
       };
     }
 
-    const token = (process.env.WHATSAPP_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || this.accessToken || '').trim().replace(/\s+/g, '');
-    const finalPhoneId = (targetPhoneId || process.env.WHATSAPP_PHONE_NUMBER_ID || this.defaultPhoneId || '').trim().replace(/\s+/g, '');
-
-    logger.info(`[WHATSAPP SEND] PhoneID: "${finalPhoneId}", To: "${cleanPhone}", TokenPrefix: "${token.substring(0, 15)}...", Length: ${token.length}`);
+    logger.info(`[WHATSAPP SEND] PhoneID: "${targetPhoneId}", To: "${cleanPhone}", TokenPrefix: "${token.substring(0, 15)}...", Length: ${token.length}`);
 
     try {
-      const response = await fetch(`${this.baseUrl}/${finalPhoneId}/messages`, {
+      const response = await fetch(`${this.baseUrl}/${targetPhoneId}/messages`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -191,11 +231,12 @@ class WhatsAppService {
       if (!response.ok) {
         logger.error('Error al enviar WhatsApp a Meta Graph API:', data);
         const fbMsg = data.error?.message || 'Error en WhatsApp Cloud API';
-        const isAuth = data.error?.code === 190;
-        const isSandboxUnlisted = data.error?.code === 131030;
+        const fbCode = data.error?.code;
+        const isAuth = fbCode === 190;
+        const isSandboxUnlisted = fbCode === 131030;
 
-        if (isSandboxUnlisted) {
-          logger.warn(`[SANDBOX] Número ${cleanPhone} no registrado en Meta Developers Allowlist. Simulando entrega.`);
+        if (isSandboxUnlisted || (isAuth && process.env.NODE_ENV !== 'production')) {
+          logger.warn(`[SANDBOX / DEV] ${isAuth ? 'Token de Meta WhatsApp caducado en desarrollo' : 'Número no listado en sandbox'}. Simulando entrega para ${cleanPhone}.`);
           return {
             success: true,
             sandbox: true,
@@ -204,7 +245,7 @@ class WhatsAppService {
         }
 
         const errorText = isAuth
-          ? `El token de acceso de Meta WhatsApp ha caducado (${fbMsg}). Es necesario actualizar WHATSAPP_TOKEN.`
+          ? `El token de acceso de Meta WhatsApp ha caducado (${fbMsg}). Es necesario actualizar WHATSAPP_API_KEY / WHATSAPP_ACCESS_TOKEN.`
           : `Error de Meta WhatsApp API: ${fbMsg}`;
         throw new AppError(errorText, 400);
       }
@@ -223,7 +264,10 @@ class WhatsAppService {
   /**
    * Envía una plantilla (Template) pre-aprobada de Meta.
    */
-  async sendTemplateMessage(toPhone, templateName, languageCode = 'es', parameters = [], phoneId = null) {
+  async sendTemplateMessage(toPhone, templateName, languageCode = 'es', parameters = [], phoneId = null, clinicId = null) {
+    const creds = await this.resolveCredentials(clinicId);
+    const targetPhoneId = (phoneId || creds.phoneId || this.defaultPhoneId || '').trim().replace(/\s+/g, '');
+    const token = (creds.accessToken || '').trim().replace(/\s+/g, '');
     const cleanPhone = toPhone.replace(/[\s\-+]/g, '');
     const lang = (templateName === 'hello_world' && (!languageCode || languageCode === 'es')) ? 'en_US' : (languageCode || 'es');
 
@@ -246,9 +290,6 @@ class WhatsAppService {
         components: components.length > 0 ? components : undefined,
       },
     };
-
-    const token = (process.env.WHATSAPP_ACCESS_TOKEN || process.env.WHATSAPP_TOKEN || this.accessToken || '').trim().replace(/\s+/g, '');
-    const targetPhoneId = (phoneId || process.env.WHATSAPP_PHONE_NUMBER_ID || this.defaultPhoneId || '').trim().replace(/\s+/g, '');
 
     if (process.env.NODE_ENV === 'test' || !token || !targetPhoneId) {
       logger.info(`[MOCK WHATSAPP TEMPLATE] Enviando plantilla "${templateName}" a ${cleanPhone} con params:`, parameters);
@@ -276,10 +317,20 @@ class WhatsAppService {
         const fbMsg = data.error?.message || 'Error en plantilla WhatsApp Cloud API';
         const fbCode = data.error?.code;
         const isAuth = fbCode === 190;
+        const isSandboxUnlisted = fbCode === 131030;
+
+        if (isSandboxUnlisted || (isAuth && process.env.NODE_ENV !== 'production')) {
+          logger.warn(`[SANDBOX / DEV] ${isAuth ? 'Token de Meta WhatsApp caducado en desarrollo' : 'Número no listado en sandbox'}. Simulando entrega de plantilla para ${cleanPhone}.`);
+          return {
+            success: true,
+            sandbox: true,
+            messages: [{ id: `wamid.sandbox_tpl_${Date.now()}` }],
+          };
+        }
 
         let errorText;
         if (isAuth) {
-          errorText = `El token de acceso de Meta WhatsApp ha caducado (${fbMsg}). Es necesario actualizar WHATSAPP_TOKEN.`;
+          errorText = `El token de acceso de Meta WhatsApp ha caducado (${fbMsg}). Es necesario actualizar WHATSAPP_API_KEY / WHATSAPP_ACCESS_TOKEN.`;
         } else if (fbCode === 132001) {
           errorText = `La plantilla "${templateName}" no existe en Meta Developers para el idioma "${lang}" (${fbMsg}).`;
         } else {
