@@ -5,4 +5,4 @@
 
 UPDATE messaging_contacts
 SET name = '@ig_user_' || RIGHT(phone, 4), updated_at = NOW()
-WHERE channel = 'instagram' AND name = '@andersongrossii';
+WHERE name = '@andersongrossii';
