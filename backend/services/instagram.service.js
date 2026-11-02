@@ -192,14 +192,15 @@ class InstagramService {
 
     try {
       const baseUrl = this.getBaseUrl(creds.accessToken);
-      const url = `${baseUrl}/${igsid}?fields=name,username,profile_pic,profile_picture_url&access_token=${creds.accessToken}`;
+      // Solo consultar name y username (profile_pic no es soportado en este endpoint y causaba error de Meta)
+      const url = `${baseUrl}/${igsid}?fields=name,username&access_token=${creds.accessToken}`;
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         return {
-          name: data.name || null,
+          name: data.name || (data.username ? `@${data.username}` : null),
           username: data.username || null,
-          profile_pic: data.profile_pic || data.profile_picture_url || null,
+          profile_pic: null,
         };
       }
       return null;

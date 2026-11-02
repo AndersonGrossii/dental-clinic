@@ -23,13 +23,16 @@ export class MessagingRepository extends BaseRepository {
 
     if (findRes.rows.length > 0) {
       const contact = findRes.rows[0];
-      // Si recibimos un nombre nuevo o externalId y no los tiene, actualizar
-      if ((name && !contact.name) || (externalId && !contact.external_id)) {
+      // Si recibimos un nombre nuevo y el actual es nulo o es un placeholder genérico (@ig_user_...)
+      const hasPlaceholder = contact.name && contact.name.startsWith('@ig_user_');
+      const shouldUpdateName = name && (!contact.name || (hasPlaceholder && !name.startsWith('@ig_user_')));
+
+      if (shouldUpdateName || (externalId && !contact.external_id)) {
         const updateRes = await query(
           `UPDATE messaging_contacts 
            SET name = COALESCE($1, name), external_id = COALESCE($2, external_id), updated_at = NOW() 
            WHERE id = $3 RETURNING *`,
-          [name, externalId, contact.id]
+          [shouldUpdateName ? name : contact.name, externalId, contact.id]
         );
         return updateRes.rows[0];
       }

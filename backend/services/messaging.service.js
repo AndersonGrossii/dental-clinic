@@ -160,7 +160,7 @@ class MessagingService {
           try {
             const profile = await instagramService.getUserProfile(patientId, clinicId);
             if (profile) {
-              patientName = profile.name || (profile.username ? `@${profile.username}` : patientName);
+              patientName = profile.username ? `@${profile.username.replace(/^@/, '')}` : (profile.name || patientName);
               avatarUrl = profile.profile_pic || null;
             }
           } catch (profileErr) {
@@ -224,7 +224,7 @@ class MessagingService {
         try {
           const profile = await instagramService.getUserProfile(evt.senderId, clinicId);
           if (profile) {
-            initialName = profile.name || (profile.username ? `@${profile.username}` : initialName);
+            initialName = profile.username ? `@${profile.username.replace(/^@/, '')}` : (profile.name || initialName);
             avatarUrl = profile.profile_pic || null;
           }
         } catch (profileErr) {

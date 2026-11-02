@@ -50,6 +50,12 @@ export class Messages {
                 </div>
               </div>
               
+              <!-- Estado del Canal Instagram de la Empresa -->
+              <div class="messaging-account-badge" style="font-size: 0.78rem; padding: 6px 10px; background: #fdf2f8; border: 1px solid #fbcfe8; border-radius: 6px; color: #db2777; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
+                <span>📸 <strong>Canal Empresa:</strong> @maislindaswear</span>
+                <span style="background: #10b981; color: white; padding: 1px 6px; border-radius: 10px; font-size: 0.68rem; font-weight: 600;">Conectado</span>
+              </div>
+
               <!-- Selector de Canal -->
               <div class="messaging-channel-tabs" style="display:flex;gap:4px;border-bottom:1px solid var(--border-light);padding-bottom:6px;">
                 <button class="messaging-filter-tab channel-tab active" data-channel="ALL">Todos</button>
@@ -265,7 +271,8 @@ export class Messages {
       ? `<span>•</span><span id="chat-crm-container"><span class="badge" style="background:var(--bg-tertiary); font-size:0.75rem;">...</span></span>`
       : '';
 
-    const channelTitle = isIg ? `📸 Instagram Direct (@${conv.contact_phone})` : `📱 WhatsApp (${conv.contact_phone})`;
+    const igHandle = conv.contact_name && conv.contact_name.startsWith('@') ? conv.contact_name : (conv.contact_name || `@${conv.contact_phone}`);
+    const channelTitle = isIg ? `📸 Instagram Direct (${igHandle})` : `📱 WhatsApp (${conv.contact_phone})`;
     const placeholderText = isIg ? 'Escribe un mensaje directo de Instagram...' : 'Escribe un mensaje de WhatsApp...';
 
     mainEl.innerHTML = `
