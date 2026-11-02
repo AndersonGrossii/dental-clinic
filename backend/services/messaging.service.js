@@ -135,9 +135,90 @@ class MessagingService {
 
     for (const evt of events) {
       if (evt.type === 'MESSAGE') {
+        if (evt.isEcho) {
+          // ============================================
+          // CASO ECO: Mensaje enviado por la propia clínica (desde la app móvil de Instagram o web)
+          // ============================================
+          const clinicId = await this.resolveClinicId(evt.recipientId, evt.senderId);
+          const patientId = evt.recipientId;
+
+          // 1. Evitar duplicar si el mensaje ya fue registrado previamente (ej: enviado desde la web #/messages)
+          if (evt.externalMessageId) {
+            const existing = await query(
+              'SELECT id FROM messages WHERE external_id = $1 LIMIT 1',
+              [evt.externalMessageId]
+            );
+            if (existing.rows.length > 0) {
+              results.push({ success: true, messageId: existing.rows[0].id, duplicateEcho: true, isEcho: true, channel: 'INSTAGRAM' });
+              continue;
+            }
+          }
+
+          // 2. Localizar o registrar al paciente destinatario
+          let patientName = `@ig_user_${patientId.slice(-4)}`;
+          let avatarUrl = null;
+          try {
+            const profile = await instagramService.getUserProfile(patientId, clinicId);
+            if (profile) {
+              patientName = profile.name || (profile.username ? `@${profile.username}` : patientName);
+              avatarUrl = profile.profile_pic || null;
+            }
+          } catch (profileErr) {
+            logger.debug('No se pudo obtener perfil de Instagram:', profileErr.message);
+          }
+
+          const contact = await messagingRepository.findOrCreateContact(
+            clinicId,
+            patientId,
+            patientName,
+            patientId
+          );
+
+          if (avatarUrl && !contact.avatar_url) {
+            await query('UPDATE messaging_contacts SET avatar_url = $1 WHERE id = $2', [avatarUrl, contact.id]);
+            contact.avatar_url = avatarUrl;
+          }
+
+          const conversation = await messagingRepository.findOrCreateConversation(
+            clinicId,
+            contact.id,
+            'INSTAGRAM'
+          );
+
+          // 3. Registrar como OUTBOUND en la conversación del paciente
+          const outboundMsg = await messagingRepository.createMessage({
+            conversationId: conversation.id,
+            clinicId,
+            direction: 'OUTBOUND',
+            messageType: 'TEXT',
+            body: evt.text || '[Mensaje saliente de Instagram]',
+            externalId: evt.externalMessageId,
+            status: 'DELIVERED',
+            rawPayload: { ...evt.raw, isEcho: true, sentFromMobileApp: true },
+          });
+
+          // 4. Emitir evento SSE para actualizar en tiempo real el chat en la pantalla web
+          eventStreamService.broadcastToClinic(clinicId, 'MESSAGING_OUTGOING', {
+            conversationId: conversation.id,
+            channel: 'INSTAGRAM',
+            body: evt.text || '[Mensaje saliente]',
+            messageId: outboundMsg.id,
+          });
+
+          // 5. Desactivar bot de Sofía si un humano respondió desde el móvil
+          if (conversation.automation_enabled) {
+            await messagingRepository.setAutomationEnabled(conversation.id, false, clinicId);
+          }
+
+          results.push({ success: true, messageId: outboundMsg.id, channel: 'INSTAGRAM', isEcho: true });
+          continue;
+        }
+
+        // ============================================
+        // CASO INBOUND: Mensaje entrante enviado por el paciente
+        // ============================================
         const clinicId = await this.resolveClinicId(evt.senderId, evt.recipientId);
 
-        // Intentar resolver perfil público del usuario de Instagram
         let initialName = `@ig_user_${evt.senderId.slice(-4)}`;
         let avatarUrl = null;
         try {
@@ -150,7 +231,6 @@ class MessagingService {
           logger.debug('No se pudo obtener perfil de Instagram:', profileErr.message);
         }
 
-        // Buscar o crear contacto de Instagram por su IGSID
         const contact = await messagingRepository.findOrCreateContact(
           clinicId,
           evt.senderId,
@@ -159,7 +239,7 @@ class MessagingService {
         );
 
         if (avatarUrl && !contact.avatar_url) {
-          await query(`UPDATE messaging_contacts SET avatar_url = $1 WHERE id = $2`, [avatarUrl, contact.id]);
+          await query('UPDATE messaging_contacts SET avatar_url = $1 WHERE id = $2', [avatarUrl, contact.id]);
           contact.avatar_url = avatarUrl;
         }
 

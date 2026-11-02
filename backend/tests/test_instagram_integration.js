@@ -130,8 +130,37 @@ async function runInstagramTests() {
   console.log(`  ✅ PASS: Lead #1 (Xúquer) registrado como source: "instagram", AI Score: ${lead1.ai_score}`);
   console.log(`  ✅ PASS: Lead #2 (Castellón) registrado como source: "instagram", AI Score: ${lead2.ai_score}`);
 
+  // 6. Prueba de Mensaje Eco (enviado desde la app de Instagram móvil por el personal)
+  console.log('\n🔹 [6/6] Soporte de Respuestas desde App Móvil (Eventos de Eco)');
+  const echoPayload = {
+    object: 'instagram',
+    entry: [{
+      id: 'ig_page_xuquer_1',
+      time: Date.now(),
+      messaging: [{
+        sender: { id: 'ig_page_xuquer_1' },
+        recipient: { id: 'ig_user_112233' },
+        timestamp: Date.now(),
+        message: {
+          mid: 'm_mid_echo_staff_reply_' + Date.now(),
+          text: 'Perfecto Carolina, te esperamos el martes a las 9:00.',
+          is_echo: true
+        }
+      }]
+    }]
+  };
+  const echoRes = await messagingService.processInboundInstagramWebhook(echoPayload);
+  if (!echoRes || echoRes.length === 0 || !echoRes[0].isEcho) {
+    throw new Error('Fallo al procesar evento de eco de Instagram');
+  }
+  const echoMsgInDb = (await query('SELECT * FROM messages WHERE external_id = $1', ['m_mid_echo_staff_reply_999'])).rows[0];
+  if (!echoMsgInDb || echoMsgInDb.direction !== 'OUTBOUND') {
+    throw new Error('El mensaje de eco no se guardó como OUTBOUND en la conversación del paciente');
+  }
+  console.log(`  ✅ PASS: Mensaje de eco registrado como OUTBOUND en conversación #${echoMsgInDb.conversation_id}`);
+
   console.log('\n══════════════════════════════════════════════════════════════════');
-  console.log('  ✨ TODAS LAS PRUEBAS DE INTEGRACIÓN DE INSTAGRAM SUPERADAS (5/5)');
+  console.log('  ✨ TODAS LAS PRUEBAS DE INTEGRACIÓN DE INSTAGRAM SUPERADAS (6/6)');
   console.log('══════════════════════════════════════════════════════════════════');
 }
 

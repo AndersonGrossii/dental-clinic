@@ -55,6 +55,7 @@ export const verifyInstagramWebhook = (req, res) => {
  */
 export const receiveInstagramWebhook = async (req, res) => {
   try {
+    logger.info('[WEBHOOK INSTAGRAM RECEIVED] Payload:', JSON.stringify(req.body));
     res.status(200).json({ status: 'EVENT_RECEIVED' });
     await messagingService.processInboundInstagramWebhook(req.body);
   } catch (error) {
