@@ -11,7 +11,13 @@ ON CONFLICT (clinic_id, key) DO UPDATE SET value = EXCLUDED.value;
 
 -- Limpiar conversaciones residuales donde la propia clínica se hablaba a sí misma antes del filtro de eco
 DELETE FROM messages WHERE conversation_id IN (
-  SELECT id FROM conversations WHERE contact_phone IN ('17841452159448211', '29046445808282647')
+  SELECT c.id FROM conversations c
+  JOIN messaging_contacts mc ON c.contact_id = mc.id
+  WHERE mc.phone IN ('17841452159448211', '29046445808282647')
 );
-DELETE FROM conversations WHERE contact_phone IN ('17841452159448211', '29046445808282647');
+
+DELETE FROM conversations WHERE contact_id IN (
+  SELECT id FROM messaging_contacts WHERE phone IN ('17841452159448211', '29046445808282647')
+);
+
 DELETE FROM messaging_contacts WHERE phone IN ('17841452159448211', '29046445808282647');
