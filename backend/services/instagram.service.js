@@ -126,6 +126,11 @@ class InstagramService {
         const messageObj = msg.message;
         const postbackObj = msg.postback;
 
+        // Ignorar mensajes de eco (enviados por la propia cuenta de Instagram) para evitar crear conversaciones duplicadas con uno mismo
+        if (messageObj?.is_echo || (entry.id && String(senderId) === String(entry.id))) {
+          continue;
+        }
+
         // Caso 1: Mensaje de texto o contenido multimedia directo
         if (messageObj && senderId) {
           const isStoryReply = Boolean(messageObj.reply_to?.story);
