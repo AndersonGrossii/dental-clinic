@@ -434,6 +434,7 @@ class PatientService {
     if (!patient) {
       throw new AppError('Paciente no encontrado.', 404);
     }
+    const rawDate = data.treatment_date || data.date || data.performed_date || data.created_at;
     return await patientRepository.addDentalHistory({
       patient_id: patientId,
       doctor_id: data.doctor_id || null,
@@ -441,7 +442,8 @@ class PatientService {
       treatment: data.treatment || data.procedure_name || data.name || 'Procedimiento Odontológico',
       procedure_name: data.procedure_name || data.treatment || data.name || 'Procedimiento Odontológico',
       condition: data.condition || data.treatment || data.procedure_name || data.name || 'Tratamiento Realizado',
-      notes: data.notes || null
+      notes: data.notes || null,
+      treatment_date: rawDate || null,
     });
   }
 

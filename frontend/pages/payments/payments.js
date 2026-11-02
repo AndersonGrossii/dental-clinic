@@ -178,7 +178,7 @@ export class Payments {
         <td style="color: var(--success-600); font-weight: 700;">${formatCurrency(pay.amount)}${parseFloat(pay.credit_used || 0) > 0 ? `<br><span class="badge badge-success" style="font-size: 10px;">Saldo a favor: ${formatCurrency(pay.credit_used)}</span>` : ''}</td>
         <td><span class="badge badge-info">${pay.payment_method_name || 'N/A'}</span></td>
         <td>${pay.reference_number || '—'}</td>
-        <td>${formatDateTime(pay.payment_date)}</td>
+        <td>${formatDate(pay.payment_date || pay.created_at)}</td>
         <td>
           <button class="btn btn-sm btn-danger void-payment-btn" data-id="${pay.id}" data-amount="${pay.amount}" data-invoice="${pay.invoice_number || ''}" title="Cancelar este pago y restaurar el saldo">🚫 Cancelar Pago</button>
         </td>
@@ -602,7 +602,7 @@ export class Payments {
             const documentType = formData.get('document_type') || 'recibo';
             const discountAmount = parseFloat(formData.get('discount_amount') || 0);
 
-            const selectedMethod = methods.find(m => String(m.id) === String(data.payment_method_id));
+            const selectedMethod = (this.paymentMethods || []).find(m => String(m.id) === String(data.payment_method_id));
             const isSaldoCredito = selectedMethod?.name === 'saldo_credito' || data.payment_method_id === 5 || data.payment_method_id === 'saldo_credito';
 
             const res = await paymentService.processTreatmentPayment({
@@ -616,6 +616,7 @@ export class Payments {
               discount_amount: discountAmount,
               reference_number: data.reference_number || null,
               notes: data.notes || null,
+              payment_date: data.payment_date || todayStr,
             });
 
             if (isSaldoCredito) {
@@ -662,7 +663,7 @@ export class Payments {
 
     const updateMethodUI = () => {
       const selectedVal = methodSelect?.value;
-      const selectedMethod = methods.find(m => String(m.id) === String(selectedVal));
+      const selectedMethod = (this.paymentMethods || []).find(m => String(m.id) === String(selectedVal));
       const isCredit = selectedMethod?.name === 'saldo_credito' || selectedVal === '5' || selectedVal === 'saldo_credito';
       if (docTypeGroup) docTypeGroup.style.display = isCredit ? 'none' : 'block';
       if (creditNotice) creditNotice.style.display = isCredit ? 'block' : 'none';

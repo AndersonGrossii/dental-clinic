@@ -7,6 +7,38 @@ import { query, als } from '../database/pool.js';
 import { AppError } from '../utils/errors.js';
 
 /**
+ * Parsea una fecha personalizada evitando desfases de zona horaria cuando viene en formato YYYY-MM-DD.
+ * @param {string|Date|null|undefined} dateInput
+ * @returns {Date}
+ */
+function parseCustomDate(dateInput) {
+  if (!dateInput) return new Date();
+  if (dateInput instanceof Date) {
+    return isNaN(dateInput.getTime()) ? new Date() : dateInput;
+  }
+  const str = String(dateInput).trim();
+  if (!str) return new Date();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const now = new Date();
+    const [year, month, day] = str.split('-').map(Number);
+    if (
+      now.getFullYear() === year &&
+      now.getMonth() + 1 === month &&
+      now.getDate() === day
+    ) {
+      return now;
+    }
+    return new Date(year, month - 1, day, 12, 0, 0, 0);
+  }
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) {
+    const [day, month, year] = str.split('/').map(Number);
+    return new Date(year, month - 1, day, 12, 0, 0, 0);
+  }
+  const parsed = new Date(str);
+  return isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+/**
  * Servicio para la lógica de negocio de facturas.
  * Gestiona creación manual, desde cotización, y estadísticas de facturación.
  */
@@ -126,8 +158,9 @@ class InvoiceService {
       created_by: userId,
     };
 
-    if (invoiceFields.invoice_date) {
-      invoiceData.created_at = invoiceFields.invoice_date;
+    const customDateRaw = invoiceFields.invoice_date || invoiceFields.payment_date || invoiceFields.date || invoiceFields.created_at || null;
+    if (customDateRaw) {
+      invoiceData.created_at = parseCustomDate(customDateRaw);
     }
 
     const createdInvoice = await invoiceRepository.createWithItems(invoiceData, processedItems);
@@ -141,7 +174,7 @@ class InvoiceService {
         quote_number: quoteNumber,
         patient_id: invoiceData.patient_id,
         doctor_id: invoiceData.doctor_id || null,
-        quotation_date: new Date().toISOString().split('T')[0],
+        quotation_date: customDateRaw ? String(customDateRaw).slice(0, 10) : new Date().toISOString().split('T')[0],
         subtotal: invoiceData.subtotal,
         tax_rate: invoiceData.tax_rate,
         tax_amount: invoiceData.tax_amount,
@@ -197,8 +230,8 @@ class InvoiceService {
     if (data.patient_id !== undefined) updateFields.patient_id = data.patient_id;
     if (data.doctor_id !== undefined) updateFields.doctor_id = data.doctor_id || null;
     if (data.due_date !== undefined) updateFields.due_date = data.due_date;
-    if (data.created_at !== undefined || data.invoice_date !== undefined) {
-      updateFields.created_at = data.created_at || data.invoice_date;
+    if (data.created_at !== undefined || data.invoice_date !== undefined || data.payment_date !== undefined || data.date !== undefined) {
+      updateFields.created_at = parseCustomDate(data.created_at || data.invoice_date || data.payment_date || data.date);
     }
     if (data.notes !== undefined) updateFields.notes = data.notes;
     if (data.status !== undefined) updateFields.status = data.status;
@@ -414,11 +447,13 @@ class InvoiceService {
    * @returns {Promise<object>} Factura creada
    * @throws {AppError} Si la cotización no existe o no está aceptada
    */
-  async createFromQuotation(quotationId, userId, selectedItemIds = null, documentType = 'recibo', itemAllocations = null) {
+  async createFromQuotation(quotationId, userId, selectedItemIds = null, documentType = 'recibo', itemAllocations = null, customDate = null) {
     const quotation = await quotationRepository.findByIdWithItems(quotationId);
     if (!quotation) {
       throw new AppError('Cotización no encontrada.', 404);
     }
+
+    const effectiveCreatedAt = customDate ? parseCustomDate(customDate) : null;
 
     const allItems = quotation.items || [];
     let itemsToBill = [];
@@ -510,6 +545,7 @@ class InvoiceService {
         status: 'pendiente',
         notes: `Recibo generado desde cotización ${quotation.quote_number}${isPartial ? ' (Aceptación parcial de ítems)' : ''}`,
         created_by: userId,
+        ...(effectiveCreatedAt ? { created_at: effectiveCreatedAt } : {}),
       };
       const createdReceipt = await invoiceRepository.createWithItems(receiptData, items);
 
@@ -533,6 +569,7 @@ class InvoiceService {
         status: createdReceipt.status,
         notes: `Factura oficial vinculada al Recibo #${createdReceipt.invoice_number} (Cotización ${quotation.quote_number}${isPartial ? ' - Aceptación parcial' : ''})`,
         created_by: userId,
+        ...(effectiveCreatedAt ? { created_at: effectiveCreatedAt } : {}),
       };
       const createdInvoice = await invoiceRepository.createWithItems(invoiceData, items);
 
@@ -567,6 +604,7 @@ class InvoiceService {
       status: 'pendiente',
       notes: `Generada desde cotización ${quotation.quote_number}${isPartial ? ' (Aceptación parcial de ítems)' : ''}`,
       created_by: userId,
+      ...(effectiveCreatedAt ? { created_at: effectiveCreatedAt } : {}),
     };
 
     await quotationRepository.recalculateQuotationStatus(quotation.id);
@@ -604,7 +642,18 @@ class InvoiceService {
       throw new AppError('Recibo de pago no encontrado.', 404);
     }
 
-    const { items = [], notes = null, tax_rate = null, discount = null, patient_id = null, doctor_id = null } = customData;
+    const {
+      items = [],
+      notes = null,
+      tax_rate = null,
+      discount = null,
+      patient_id = null,
+      doctor_id = null,
+      invoice_date = null,
+      payment_date = null,
+      date = null,
+      created_at = null,
+    } = customData;
 
     // Custom items provided by user or default from receipt items
     const invoiceItems = (Array.isArray(items) && items.length > 0)
@@ -642,6 +691,7 @@ class InvoiceService {
     const taxable = Math.max(0, subtotal - discountVal);
     const taxAmount = parseFloat((taxable * (taxRateVal / 100)).toFixed(2));
     const total = parseFloat((taxable + taxAmount).toFixed(2));
+    const effectiveInvoiceDate = parseCustomDate(invoice_date || payment_date || date || created_at || receipt.created_at);
 
     const invoiceData = {
       patient_id: patient_id ? Number(patient_id) : receipt.patient_id,
@@ -661,6 +711,7 @@ class InvoiceService {
       status: 'pagada',
       notes: notes || `Factura oficial vinculada al Recibo #${receipt.invoice_number}`,
       created_by: userId,
+      created_at: effectiveInvoiceDate,
     };
 
     const createdInvoice = await invoiceRepository.createWithItems(invoiceData, invoiceItems);

@@ -379,6 +379,30 @@ export class OdontogramComponent {
     `;
   }
 
+  getTodayLocalStr() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  extractDateInputValue(val) {
+    if (!val) return this.getTodayLocalStr();
+    if (typeof val === 'string') {
+      const m = val.match(/^(\d{4}-\d{2}-\d{2})/);
+      if (m) return m[1];
+    }
+    const parsed = new Date(val);
+    if (!isNaN(parsed.getTime())) {
+      const y = parsed.getFullYear();
+      const mo = String(parsed.getMonth() + 1).padStart(2, '0');
+      const d = String(parsed.getDate()).padStart(2, '0');
+      return `${y}-${mo}-${d}`;
+    }
+    return this.getTodayLocalStr();
+  }
+
   renderFindingsTable() {
     if (this.entries.length === 0) {
       return `
@@ -390,10 +414,18 @@ export class OdontogramComponent {
       `;
     }
 
-    const rows = this.entries.map(e => {
+    const sortedEntries = [...this.entries].sort((a, b) => {
+      const dateA = String(a.treatment_date || a.date || (a.created_at ? String(a.created_at).split('T')[0] : '') || '');
+      const dateB = String(b.treatment_date || b.date || (b.created_at ? String(b.created_at).split('T')[0] : '') || '');
+      if (dateA !== dateB) return dateB.localeCompare(dateA);
+      return (b.id || 0) - (a.id || 0);
+    });
+
+    const rows = sortedEntries.map(e => {
       const surfacesStr = Array.isArray(e.surfaces) && e.surfaces.length > 0 ? e.surfaces.join(', ') : 'Toda la pieza';
       const statusClass = e.state || 'DIAGNOSED';
       const statusLabel = e.state === 'COMPLETED' ? 'Realizado' : e.state === 'PLANNED' ? 'Planificado' : 'Diagnosticado';
+      const entryDate = e.treatment_date || e.date || e.created_at;
 
       return `
         <tr>
@@ -402,9 +434,10 @@ export class OdontogramComponent {
           <td>${surfacesStr}</td>
           <td><span class="finding-status-badge ${statusClass}">${statusLabel}</span></td>
           <td>${e.notes ? this.escapeHtml(e.notes) : '<span style="color:var(--text-tertiary);font-style:italic;">—</span>'}</td>
-          <td>${e.created_at ? formatDate(e.created_at) : ''}</td>
+          <td>${entryDate ? formatDate(entryDate) : ''}</td>
           ${this.isClinicalStaff ? `
-            <td style="text-align: right;">
+            <td style="text-align: right; white-space: nowrap;">
+              <button type="button" class="btn btn-xs btn-outline btn-edit-finding" data-id="${e.id}" title="Editar entrada">✏️</button>
               <button type="button" class="btn btn-xs btn-danger btn-delete-finding" data-id="${e.id}" title="Eliminar entrada">🗑️</button>
             </td>
           ` : ''}
@@ -472,7 +505,16 @@ export class OdontogramComponent {
       });
     });
 
-    // 3. Eliminar hallazgo
+    // 3. Editar / Eliminar hallazgo
+    container.querySelectorAll('.btn-edit-finding').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = parseInt(btn.dataset.id, 10);
+        const entry = this.entries.find(item => item.id === id);
+        if (entry) this.openEditFindingModal(entry);
+      });
+    });
+
     container.querySelectorAll('.btn-delete-finding').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -489,6 +531,7 @@ export class OdontogramComponent {
     }
 
     const currentEntries = this.teethMap[toothNumber] || [];
+    const todayStr = this.getTodayLocalStr();
 
     const modalContent = `
       <form id="form-tooth-condition" style="display: flex; flex-direction: column; gap: 14px;">
@@ -497,19 +540,25 @@ export class OdontogramComponent {
           <span style="font-size: 0.8rem; color: #64748b;">${currentEntries.length} hallazgo(s) registrado(s)</span>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">Condición / Diagnóstico Clínico *</label>
-          <select name="condition" class="form-select" id="select-tooth-condition" required>
-            <option value="CARIES" selected>🔴 Caries Dental</option>
-            <option value="OBTURACION">🔵 Obturación / Empaste (Resina/Amalgama)</option>
-            <option value="CORONA">🟡 Corona Protésica</option>
-            <option value="ENDODONCIA">🟣 Endodoncia / Tratamiento de Conductos</option>
-            <option value="IMPLANTE">🔩 Implante Dental</option>
-            <option value="AUSENTE">✕ Diente Ausente / Extraído</option>
-            <option value="FRACTURA">🟠 Fractura Coronaria / Radicular</option>
-            <option value="SELLADOR">🟢 Sellador de Fosas y Fisuras</option>
-            <option value="SANO">✅ Diente Sano / Restauración Íntegra</option>
-          </select>
+        <div style="display: grid; grid-template-columns: 1.4fr 1fr; gap: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Condición / Diagnóstico Clínico *</label>
+            <select name="condition" class="form-select" id="select-tooth-condition" required>
+              <option value="CARIES" selected>🔴 Caries Dental</option>
+              <option value="OBTURACION">🔵 Obturación / Empaste (Resina/Amalgama)</option>
+              <option value="CORONA">🟡 Corona Protésica</option>
+              <option value="ENDODONCIA">🟣 Endodoncia / Tratamiento de Conductos</option>
+              <option value="IMPLANTE">🔩 Implante Dental</option>
+              <option value="AUSENTE">✕ Diente Ausente / Extraído</option>
+              <option value="FRACTURA">🟠 Fractura Coronaria / Radicular</option>
+              <option value="SELLADOR">🟢 Sellador de Fosas y Fisuras</option>
+              <option value="SANO">✅ Diente Sano / Restauración Íntegra</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Fecha del Tratamiento *</label>
+            <input type="date" name="treatment_date" class="form-input" value="${todayStr}" required />
+          </div>
         </div>
 
         <div class="form-group" id="surfaces-group">
@@ -570,6 +619,7 @@ export class OdontogramComponent {
         const stateVal = formData.get('state');
         const severity = formData.get('severity');
         const notes = formData.get('notes');
+        const treatmentDate = formData.get('treatment_date') || todayStr;
         const surfaces = Array.from(form.querySelectorAll('input[name="surfaces"]:checked')).map(cb => cb.value);
 
         try {
@@ -580,6 +630,8 @@ export class OdontogramComponent {
             state: stateVal,
             severity,
             notes,
+            treatment_date: treatmentDate,
+            date: treatmentDate,
           });
           toast.success(`Hallazgo registrado en pieza #${toothNumber}`);
           await this.loadData();
@@ -596,6 +648,136 @@ export class OdontogramComponent {
     // Auto-ocultar superficies si la condición es para todo el diente
     const selectCondition = document.getElementById('select-tooth-condition');
     const surfacesGroup = document.getElementById('surfaces-group');
+    if (selectCondition && surfacesGroup) {
+      selectCondition.addEventListener('change', (e) => {
+        const val = e.target.value;
+        if (['IMPLANTE', 'AUSENTE', 'CORONA', 'ENDODONCIA'].includes(val)) {
+          surfacesGroup.style.display = 'none';
+        } else {
+          surfacesGroup.style.display = 'block';
+        }
+      });
+    }
+  }
+
+  openEditFindingModal(entry) {
+    if (!this.isClinicalStaff) return;
+
+    const currentDateStr = this.extractDateInputValue(entry.treatment_date || entry.date || entry.created_at);
+    const currentSurfaces = Array.isArray(entry.surfaces) ? entry.surfaces : [];
+
+    const modalContent = `
+      <form id="form-edit-tooth-condition" style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; background: #f8fafc; padding: 10px 14px; border-radius: 8px; border: 1px solid #e2e8f0;">
+          <span style="font-weight: 700; font-size: 1rem; color: #1e40af;">🦷 Editar Pieza Dental #${entry.tooth_number}</span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1.4fr 1fr; gap: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Condición / Diagnóstico Clínico *</label>
+            <select name="condition" class="form-select" id="select-edit-tooth-condition" required>
+              <option value="CARIES" ${entry.condition === 'CARIES' ? 'selected' : ''}>🔴 Caries Dental</option>
+              <option value="OBTURACION" ${entry.condition === 'OBTURACION' ? 'selected' : ''}>🔵 Obturación / Empaste (Resina/Amalgama)</option>
+              <option value="CORONA" ${entry.condition === 'CORONA' ? 'selected' : ''}>🟡 Corona Protésica</option>
+              <option value="ENDODONCIA" ${entry.condition === 'ENDODONCIA' ? 'selected' : ''}>🟣 Endodoncia / Tratamiento de Conductos</option>
+              <option value="IMPLANTE" ${entry.condition === 'IMPLANTE' ? 'selected' : ''}>🔩 Implante Dental</option>
+              <option value="AUSENTE" ${entry.condition === 'AUSENTE' ? 'selected' : ''}>✕ Diente Ausente / Extraído</option>
+              <option value="FRACTURA" ${entry.condition === 'FRACTURA' ? 'selected' : ''}>🟠 Fractura Coronaria / Radicular</option>
+              <option value="SELLADOR" ${entry.condition === 'SELLADOR' ? 'selected' : ''}>🟢 Sellador de Fosas y Fisuras</option>
+              <option value="SANO" ${entry.condition === 'SANO' ? 'selected' : ''}>✅ Diente Sano / Restauración Íntegra</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Fecha del Tratamiento *</label>
+            <input type="date" name="treatment_date" class="form-input" value="${currentDateStr}" required />
+          </div>
+        </div>
+
+        <div class="form-group" id="edit-surfaces-group" style="${['IMPLANTE', 'AUSENTE', 'CORONA', 'ENDODONCIA'].includes(entry.condition) ? 'display:none;' : ''}">
+          <label class="form-label">Superficies Afectadas:</label>
+          <div style="display: flex; gap: 10px; flex-wrap: wrap; background: #fafaf9; padding: 8px 12px; border-radius: 6px; border: 1px solid #e5e7eb;">
+            <label style="display: flex; align-items: center; gap: 4px; font-size: 0.85rem; font-weight: 600; cursor: pointer;">
+              <input type="checkbox" name="surfaces" value="O" ${currentSurfaces.includes('O') ? 'checked' : ''} /> O (Oclusal/Incisal)
+            </label>
+            <label style="display: flex; align-items: center; gap: 4px; font-size: 0.85rem; font-weight: 600; cursor: pointer;">
+              <input type="checkbox" name="surfaces" value="M" ${currentSurfaces.includes('M') ? 'checked' : ''} /> M (Mesial)
+            </label>
+            <label style="display: flex; align-items: center; gap: 4px; font-size: 0.85rem; font-weight: 600; cursor: pointer;">
+              <input type="checkbox" name="surfaces" value="D" ${currentSurfaces.includes('D') ? 'checked' : ''} /> D (Distal)
+            </label>
+            <label style="display: flex; align-items: center; gap: 4px; font-size: 0.85rem; font-weight: 600; cursor: pointer;">
+              <input type="checkbox" name="surfaces" value="V" ${currentSurfaces.includes('V') ? 'checked' : ''} /> V (Vestibular)
+            </label>
+            <label style="display: flex; align-items: center; gap: 4px; font-size: 0.85rem; font-weight: 600; cursor: pointer;">
+              <input type="checkbox" name="surfaces" value="L" ${currentSurfaces.includes('L') ? 'checked' : ''} /> L (Lingual/Palatino)
+            </label>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Estado:</label>
+            <select name="state" class="form-select">
+              <option value="DIAGNOSED" ${entry.state === 'DIAGNOSED' ? 'selected' : ''}>Diagnosticado (Pendiente)</option>
+              <option value="PLANNED" ${entry.state === 'PLANNED' ? 'selected' : ''}>Planificado en Presupuesto</option>
+              <option value="COMPLETED" ${entry.state === 'COMPLETED' ? 'selected' : ''}>Tratamiento Realizado</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Severidad:</label>
+            <select name="severity" class="form-select">
+              <option value="EARLY" ${entry.severity === 'EARLY' ? 'selected' : ''}>Incipiente / Leve</option>
+              <option value="MODERATE" ${(!entry.severity || entry.severity === 'MODERATE') ? 'selected' : ''}>Moderada</option>
+              <option value="SEVERE" ${entry.severity === 'SEVERE' ? 'selected' : ''}>Avanzada / Severa</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Observaciones Clínicas:</label>
+          <textarea name="notes" class="form-input" rows="2" placeholder="Detalles de la lesión, sintomatología, etc...">${this.escapeHtml(entry.notes || '')}</textarea>
+        </div>
+      </form>
+    `;
+
+    Modal.show({
+      title: `✏️ Editar Anotación en Pieza #${entry.tooth_number}`,
+      content: modalContent,
+      confirmText: 'Guardar Cambios',
+      onConfirm: async (modalEl) => {
+        const form = modalEl.querySelector('#form-edit-tooth-condition');
+        const formData = new FormData(form);
+        const condition = formData.get('condition');
+        const stateVal = formData.get('state');
+        const severity = formData.get('severity');
+        const notes = formData.get('notes');
+        const treatmentDate = formData.get('treatment_date') || currentDateStr;
+        const surfaces = Array.from(form.querySelectorAll('input[name="surfaces"]:checked')).map(cb => cb.value);
+
+        try {
+          await odontogramService.updateEntry(entry.id, {
+            condition,
+            surfaces,
+            state: stateVal,
+            severity,
+            notes,
+            treatment_date: treatmentDate,
+            date: treatmentDate,
+          });
+          toast.success(`Hallazgo actualizado en pieza #${entry.tooth_number}`);
+          await this.loadData();
+          this.render();
+          if (this.onUpdate) this.onUpdate();
+          return true;
+        } catch (err) {
+          toast.error(err.message || 'Error al actualizar hallazgo');
+          return false;
+        }
+      }
+    });
+
+    const selectCondition = document.getElementById('select-edit-tooth-condition');
+    const surfacesGroup = document.getElementById('edit-surfaces-group');
     if (selectCondition && surfacesGroup) {
       selectCondition.addEventListener('change', (e) => {
         const val = e.target.value;
@@ -678,7 +860,7 @@ export class OdontogramComponent {
             font-size: 0.85rem;
             color: #475569;
           }
-          .arch-type-btn, .btn-delete-finding, .odontogram-view-controls { display: none !important; }
+          .arch-type-btn, .btn-edit-finding, .btn-delete-finding, .odontogram-view-controls { display: none !important; }
           @media print {
             body { margin: 0; padding: 10px; }
             button { display: none !important; }

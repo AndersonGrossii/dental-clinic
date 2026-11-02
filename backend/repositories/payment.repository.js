@@ -42,7 +42,7 @@ class PaymentRepository extends BaseRepository {
    * @param {object} options - Opciones de búsqueda y paginación
    * @returns {Promise<{ rows: Array, total: number }>}
    */
-  async findAllWithDetails({ limit = 20, offset = 0, sortBy = 'pay.created_at', sortOrder = 'DESC', filters = {} } = {}) {
+  async findAllWithDetails({ limit = 20, offset = 0, sortBy = 'pay.payment_date', sortOrder = 'DESC', filters = {} } = {}) {
     const conditions = ['pay.deleted_at IS NULL'];
     const params = [];
     scopeClinic(conditions, params, 'pay');
@@ -66,15 +66,17 @@ class PaymentRepository extends BaseRepository {
       paramIndex++;
     }
 
-    if (filters.start_date) {
+    const startDate = filters.date_from || filters.start_date;
+    if (startDate) {
       conditions.push(`pay.payment_date >= $${paramIndex}`);
-      params.push(filters.start_date);
+      params.push(startDate);
       paramIndex++;
     }
 
-    if (filters.end_date) {
+    const endDate = filters.date_to || filters.end_date;
+    if (endDate) {
       conditions.push(`pay.payment_date <= $${paramIndex}`);
-      params.push(filters.end_date);
+      params.push(String(endDate).length === 10 ? `${endDate} 23:59:59` : endDate);
       paramIndex++;
     }
 
@@ -86,7 +88,7 @@ class PaymentRepository extends BaseRepository {
 
     const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
-    const safeSortBy = /^[a-zA-Z_.]+$/.test(sortBy) ? sortBy : 'pay.created_at';
+    const safeSortBy = /^[a-zA-Z_.]+$/.test(sortBy) ? sortBy : 'pay.payment_date';
     const safeSortOrder = sortOrder === 'ASC' ? 'ASC' : 'DESC';
 
     const countResult = await query(
@@ -114,7 +116,7 @@ class PaymentRepository extends BaseRepository {
        LEFT JOIN patients p ON COALESCE(pay.patient_id, i.patient_id) = p.id
        LEFT JOIN payment_methods pm ON pay.payment_method_id = pm.id
        ${whereClause}
-       ORDER BY ${safeSortBy} ${safeSortOrder}
+       ORDER BY ${safeSortBy} ${safeSortOrder}, pay.id DESC
        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
       [...params, limit, offset]
     );

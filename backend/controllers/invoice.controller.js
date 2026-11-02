@@ -67,12 +67,24 @@ export const remove = async (req, res, next) => {
 export const createFromQuotation = async (req, res, next) => {
   try {
     const { quotationId } = req.params;
-    const { itemIds, item_ids, document_type, documentType, item_allocations, itemAllocations } = req.body || {};
+    const {
+      itemIds,
+      item_ids,
+      document_type,
+      documentType,
+      item_allocations,
+      itemAllocations,
+      invoice_date,
+      payment_date,
+      date,
+      created_at,
+    } = req.body || {};
     const selectedItemIds = itemIds || item_ids || null;
     const docType = document_type || documentType || 'recibo';
     const allocations = item_allocations || itemAllocations || null;
+    const customDate = invoice_date || payment_date || date || created_at || null;
     const userId = req.user.id;
-    const invoice = await invoiceService.createFromQuotation(quotationId, userId, selectedItemIds, docType, allocations);
+    const invoice = await invoiceService.createFromQuotation(quotationId, userId, selectedItemIds, docType, allocations, customDate);
     return ApiResponse.created(res, invoice, 'Documento generado desde cotización exitosamente');
   } catch (error) {
     next(error);

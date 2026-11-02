@@ -535,6 +535,7 @@ export class Invoices {
             await invoiceService.createFromReceipt(raw.receipt_id, {
               patient_id: raw.patient_id ? parseInt(raw.patient_id, 10) : undefined,
               doctor_id: raw.doctor_id ? parseInt(raw.doctor_id, 10) : undefined,
+              invoice_date: raw.invoice_date || undefined,
               notes: raw.notes || undefined,
               discount: parseFloat(raw.discount) || 0,
               items: items,
@@ -867,6 +868,10 @@ export class Invoices {
               }
               if (notesTextarea) {
                 notesTextarea.value = receipt.notes || `Factura oficial vinculada al Recibo #${receipt.invoice_number}`;
+              }
+              const invoiceDateInput = modalBody.querySelector('input[name="invoice_date"]');
+              if (invoiceDateInput && receipt.created_at) {
+                invoiceDateInput.value = String(receipt.created_at).slice(0, 10);
               }
 
               if (container && Array.isArray(receipt.items) && receipt.items.length > 0) {

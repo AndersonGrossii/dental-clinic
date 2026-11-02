@@ -22,6 +22,35 @@ const VALID_CONDITIONS = [
 
 const VALID_STATES = ['DIAGNOSED', 'PLANNED', 'COMPLETED'];
 
+function getTodayDateString() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function normalizeDateString(val) {
+  if (!val) return null;
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    return `${val.getFullYear()}-${String(val.getMonth() + 1).padStart(2, '0')}-${String(val.getDate()).padStart(2, '0')}`;
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match) return match[1];
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime())) {
+      return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+    }
+  }
+  return null;
+}
+
+function toNoonUtcTimestamp(dateStr) {
+  return `${dateStr}T12:00:00.000Z`;
+}
+
 class OdontogramService {
   /**
    * Obtiene el odontograma completo de un paciente organizado por pieza dental.
@@ -75,6 +104,9 @@ class OdontogramService {
 
     const surfaces = Array.isArray(data.surfaces) ? data.surfaces.map(s => String(s).toUpperCase().trim()) : [];
 
+    const rawDate = data.treatment_date || data.date || data.performed_date || data.created_at;
+    const dateStr = normalizeDateString(rawDate) || getTodayDateString();
+
     const payload = {
       clinic_id: clinicId,
       patient_id: parseInt(patientId, 10),
@@ -85,6 +117,7 @@ class OdontogramService {
       severity: data.severity || 'MODERATE',
       notes: data.notes ? data.notes.trim() : null,
       created_by_user_id: userId,
+      created_at: toNoonUtcTimestamp(dateStr),
     };
 
     const entry = await odontogramRepository.create(payload);
@@ -115,6 +148,15 @@ class OdontogramService {
     }
     if (data.severity !== undefined) updateData.severity = data.severity;
     if (data.notes !== undefined) updateData.notes = data.notes ? data.notes.trim() : null;
+
+    const rawDate = data.treatment_date ?? data.date ?? data.performed_date ?? data.created_at;
+    if (rawDate !== undefined) {
+      const dateStr = normalizeDateString(rawDate);
+      if (!dateStr) {
+        throw new ValidationError('Formato de fecha inválido. Use YYYY-MM-DD');
+      }
+      updateData.created_at = toNoonUtcTimestamp(dateStr);
+    }
 
     await odontogramRepository.update(entryId, updateData);
     return odontogramRepository.getEntryById(entryId, clinicId);

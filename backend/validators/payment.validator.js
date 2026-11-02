@@ -47,7 +47,12 @@ export const createPaymentRules = [
     field: 'payment_method_id',
     label: 'Método de pago',
     required: true,
-    type: 'number',
+    custom: (value) => {
+      if (value === 'saldo_credito') return null;
+      if (typeof value === 'number' && !isNaN(value)) return null;
+      if (typeof value === 'string' && value.trim() !== '' && !isNaN(Number(value))) return null;
+      return 'Método de pago inválido.';
+    },
   },
   {
     field: 'payment_date',
@@ -57,6 +62,12 @@ export const createPaymentRules = [
   {
     field: 'reference',
     label: 'Referencia',
+    type: 'string',
+    maxLength: 255,
+  },
+  {
+    field: 'reference_number',
+    label: 'Número de referencia',
     type: 'string',
     maxLength: 255,
   },
@@ -93,7 +104,17 @@ export const processTreatmentPaymentRules = [
     field: 'payment_method_id',
     label: 'Método de pago',
     required: true,
-    type: 'number',
+    custom: (value) => {
+      if (value === 'saldo_credito') return null;
+      if (typeof value === 'number' && !isNaN(value)) return null;
+      if (typeof value === 'string' && value.trim() !== '' && !isNaN(Number(value))) return null;
+      return 'Método de pago inválido.';
+    },
+  },
+  {
+    field: 'payment_date',
+    label: 'Fecha de pago',
+    type: 'string',
   },
   {
     field: 'credit_used',

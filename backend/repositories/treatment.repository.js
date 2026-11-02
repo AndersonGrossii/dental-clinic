@@ -4,6 +4,36 @@
 import { query, scopeClinic, als } from '../database/pool.js';
 import { BaseRepository } from './base.repository.js';
 
+function normalizeDateString(val) {
+  if (!val) return null;
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    return `${val.getFullYear()}-${String(val.getMonth() + 1).padStart(2, '0')}-${String(val.getDate()).padStart(2, '0')}`;
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match) return match[1];
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime())) {
+      return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+    }
+  }
+  return null;
+}
+
+function normalizePatientTreatmentRow(row) {
+  if (!row) return null;
+  const startDate = normalizeDateString(row.start_date);
+  const endDate = normalizeDateString(row.end_date);
+  const treatmentDate = normalizeDateString(row.treatment_date) || endDate || startDate || normalizeDateString(row.created_at);
+  return {
+    ...row,
+    start_date: startDate,
+    end_date: endDate,
+    treatment_date: treatmentDate,
+  };
+}
+
 /**
  * Repositorio para la gestión de tratamientos y categorías.
  * Extiende el repositorio base con consultas especializadas.
@@ -161,8 +191,9 @@ class TreatmentRepository extends BaseRepository {
          pt.tax_rate,
          pt.status,
          pt.notes,
-         pt.start_date,
-         pt.end_date,
+         TO_CHAR(pt.start_date, 'YYYY-MM-DD') AS start_date,
+         TO_CHAR(pt.end_date, 'YYYY-MM-DD') AS end_date,
+         TO_CHAR(COALESCE(pt.end_date, pt.start_date, pt.created_at::date), 'YYYY-MM-DD') AS treatment_date,
          pt.created_at,
          pt.updated_at,
          pt.invoice_id,
@@ -215,11 +246,12 @@ class TreatmentRepository extends BaseRepository {
        LEFT JOIN quotation_items qi ON qi.patient_treatment_id = pt.id
        LEFT JOIN quotations q ON qi.quotation_id = q.id
        WHERE ${conditions.join(' AND ')}
-       ORDER BY pt.created_at DESC`,
+       ORDER BY COALESCE(pt.end_date, pt.start_date, pt.created_at::date) DESC, pt.created_at DESC, pt.id DESC`,
       params
     );
 
-    return result.rows.map(row => {
+    return result.rows.map(rawRow => {
+      const row = normalizePatientTreatmentRow(rawRow);
       const docs = Array.isArray(row.linked_documents) ? row.linked_documents : [];
       const uniqueDocs = docs.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
@@ -286,7 +318,7 @@ class TreatmentRepository extends BaseRepository {
        RETURNING *`,
       values
     );
-    return result.rows[0];
+    return normalizePatientTreatmentRow(result.rows[0]);
   }
 
   /**
@@ -311,7 +343,7 @@ class TreatmentRepository extends BaseRepository {
        RETURNING *`,
       params
     );
-    return result.rows[0] || null;
+    return normalizePatientTreatmentRow(result.rows[0] || null);
   }
 
   /**
@@ -334,7 +366,7 @@ class TreatmentRepository extends BaseRepository {
        WHERE ${conditions.join(' AND ')}`,
       params
     );
-    return result.rows[0] || null;
+    return normalizePatientTreatmentRow(result.rows[0] || null);
   }
 
   /**

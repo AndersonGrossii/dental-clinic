@@ -799,6 +799,11 @@ export class Quotations {
           <strong id="convert-selected-total" style="color: var(--primary-700); font-size: var(--text-lg);">${formatCurrency(q.total)}</strong>
         </div>
       </div>
+
+      <div class="form-group" style="margin-top: var(--space-4);">
+        <label class="form-label" style="font-weight: 600;">Fecha de Emisión</label>
+        <input type="date" id="convert-invoice-date" class="form-input" value="${new Date().toISOString().split('T')[0]}" required />
+      </div>
     `;
 
     Modal.show({
@@ -809,6 +814,7 @@ export class Quotations {
       onConfirm: async (modalBody) => {
         const checkboxes = modalBody.querySelectorAll('.quote-item-checkbox:checked');
         const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+        const invoiceDate = modalBody.querySelector('#convert-invoice-date')?.value || new Date().toISOString().split('T')[0];
 
         if (selectedIds.length === 0) {
           toast.error('Debe seleccionar al menos un ítem para facturar.');
@@ -816,7 +822,7 @@ export class Quotations {
         }
 
         try {
-          await invoiceService.createFromQuotation(quotationId, selectedIds);
+          await invoiceService.createFromQuotation(quotationId, selectedIds, 'recibo', null, invoiceDate);
           toast.success('Factura generada exitosamente con los ítems seleccionados');
           if (onSuccess) {
             await onSuccess();
@@ -2211,7 +2217,7 @@ export class Quotations {
               toast.success(`¡Presupuesto guardado y pago (${formatCurrency(payAmount)}) con Saldo (Crédito) registrado!`);
             } else {
               const checkedIds = checkedAllocations.map(a => a.id);
-              const invoiceRes = await invoiceService.createFromQuotation(targetQuoteId, checkedIds, documentType, checkedAllocations);
+              const invoiceRes = await invoiceService.createFromQuotation(targetQuoteId, checkedIds, documentType, checkedAllocations, payDate);
               const invObj = invoiceRes?.data || invoiceRes;
 
               if (invObj?.id) {
@@ -2786,11 +2792,18 @@ export class Quotations {
           </div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">Método de Pago</label>
-          <select id="quote-payment-method-select" name="payment_method_id" class="form-select" required>
-            ${methodOpts}
-          </select>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Método de Pago</label>
+            <select id="quote-payment-method-select" name="payment_method_id" class="form-select" required>
+              ${methodOpts}
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Fecha del Pago <span style="color: var(--danger-500);">*</span></label>
+            <input type="date" id="quote-pay-date" name="payment_date" class="form-input" value="${new Date().toISOString().split('T')[0]}" required />
+          </div>
         </div>
 
         <div class="form-group">
@@ -2947,6 +2960,7 @@ export class Quotations {
       const creditUsed = parseFloat(formData.get('credit_used') || 0);
       const referenceNumber = formData.get('reference_number') || null;
       const notes = formData.get('notes') || null;
+      const paymentDate = formData.get('payment_date') || new Date().toISOString().split('T')[0];
 
       const itemAllocations = [];
       document.querySelectorAll('.quote-item-alloc-input').forEach(input => {
@@ -2985,7 +2999,7 @@ export class Quotations {
               credit_used: alloc.amount,
               reference_number: referenceNumber,
               notes: notes,
-              payment_date: new Date().toISOString().split('T')[0]
+              payment_date: paymentDate
             });
           }
 
@@ -3003,7 +3017,7 @@ export class Quotations {
 
         // Pago con Efectivo, Tarjeta, etc.: genera recibo/factura
         const acceptedItemIds = acceptedItems.map(i => i.id);
-        const invoiceRes = await invoiceService.createFromQuotation(quotationId, acceptedItemIds, documentType, itemAllocations);
+        const invoiceRes = await invoiceService.createFromQuotation(quotationId, acceptedItemIds, documentType, itemAllocations, paymentDate);
         const invObj = invoiceRes?.data || invoiceRes;
         const targetInvoiceId = invObj?.id;
         const docNum = invObj?.invoice_number || '';
@@ -3019,7 +3033,7 @@ export class Quotations {
           credit_used: creditUsed,
           reference_number: referenceNumber,
           notes,
-          payment_date: new Date().toISOString().split('T')[0],
+          payment_date: paymentDate,
         };
 
         const payRes = await paymentService.create(payPayload);

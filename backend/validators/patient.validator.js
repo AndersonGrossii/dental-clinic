@@ -183,3 +183,22 @@ export const updatePatientRules = createPatientRules.map(rule => ({
   ...rule,
   required: false,
 }));
+
+export const dentalHistoryRules = [
+  {
+    field: 'treatment_date',
+    label: 'Fecha del tratamiento',
+    required: false,
+    type: 'string',
+    pattern: /^\d{4}-\d{2}-\d{2}(T.*)?$/,
+    patternMsg: 'La fecha debe tener el formato AAAA-MM-DD.',
+  },
+  {
+    field: 'date',
+    label: 'Fecha',
+    required: false,
+    type: 'string',
+    pattern: /^\d{4}-\d{2}-\d{2}(T.*)?$/,
+    patternMsg: 'La fecha debe tener el formato AAAA-MM-DD.',
+  },
+];

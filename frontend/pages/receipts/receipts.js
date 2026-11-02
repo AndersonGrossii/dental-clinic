@@ -557,6 +557,7 @@ export class Receipts {
       const methods = await paymentService.getPaymentMethods();
 
       const methodOpts = methods.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
+      const todayStr = new Date().toISOString().split('T')[0];
 
       const content = `
         <form id="register-payment-form">
@@ -573,6 +574,11 @@ export class Receipts {
           <div class="form-group">
             <label class="form-label">Monto a Pagar</label>
             <input type="number" step="0.01" name="amount" class="form-input" value="${rec.balance}" max="${rec.balance}" min="0.01" required />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Fecha del Pago</label>
+            <input type="date" name="payment_date" class="form-input" value="${todayStr}" required />
           </div>
 
           <div class="form-group">
@@ -604,6 +610,7 @@ export class Receipts {
           invoice_id: rec.id,
           payment_method_id: parseInt(formData.get('payment_method_id'), 10),
           amount: parseFloat(formData.get('amount')),
+          payment_date: formData.get('payment_date') || todayStr,
           reference_number: formData.get('reference_number') || null,
           notes: formData.get('notes') || null,
         };
@@ -690,7 +697,7 @@ export class Receipts {
 
           <div class="form-group" style="margin-bottom: var(--space-3);">
             <label class="form-label" style="font-weight: 600;">Fecha de Emisión de la Factura</label>
-            <input type="date" name="invoice_date" class="form-input" value="${new Date().toISOString().split('T')[0]}" required />
+            <input type="date" name="invoice_date" class="form-input" value="${rec.created_at ? String(rec.created_at).slice(0, 10) : new Date().toISOString().split('T')[0]}" required />
           </div>
 
           <div class="form-group" style="margin-bottom: var(--space-4);">

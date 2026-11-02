@@ -17,6 +17,7 @@ export class OdontogramRepository extends BaseRepository {
     const params = [patientId];
     let sql = `
       SELECT o.*,
+             TO_CHAR(o.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS treatment_date,
              u.first_name AS author_first_name,
              u.last_name AS author_last_name
       FROM odontogram_entries o
@@ -29,7 +30,7 @@ export class OdontogramRepository extends BaseRepository {
       params.push(targetClinicId);
     }
 
-    sql += ` ORDER BY o.tooth_number ASC, o.created_at ASC`;
+    sql += ` ORDER BY o.created_at DESC, o.id DESC`;
 
     const result = await query(sql, params);
     return result.rows;
@@ -43,6 +44,7 @@ export class OdontogramRepository extends BaseRepository {
     const params = [id];
     let sql = `
       SELECT o.*,
+             TO_CHAR(o.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS treatment_date,
              u.first_name AS author_first_name,
              u.last_name AS author_last_name
       FROM odontogram_entries o

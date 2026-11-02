@@ -305,8 +305,14 @@ export class PatientProfile {
       const canWriteHistory = ['propietario', 'direccion', 'doctor', 'higienista'].includes(userRole);
 
       const historyList = Array.isArray(this.dentalHistory) ? this.dentalHistory : (this.dentalHistory?.data || this.dentalHistory?.rows || []);
+      const sortedHistory = [...historyList].sort((a, b) => {
+        const dA = String(a.treatment_date || a.date || (a.created_at ? String(a.created_at).split('T')[0] : '') || '');
+        const dB = String(b.treatment_date || b.date || (b.created_at ? String(b.created_at).split('T')[0] : '') || '');
+        if (dA !== dB) return dB.localeCompare(dA);
+        return (b.id || 0) - (a.id || 0);
+      });
 
-      let treatmentRows = historyList.map(dh => {
+      let treatmentRows = sortedHistory.map(dh => {
         const doctorName = dh.doctor_name ? `Dr/a. ${dh.doctor_name} ${dh.doctor_lastname || ''}` : 'Sin asignar';
 
         const actionButtons = [];
@@ -319,9 +325,11 @@ export class PatientProfile {
           ? `<div style="font-size: var(--text-sm); color: var(--text-primary); white-space: pre-wrap;">${dh.notes}</div>`
           : `<span style="color: var(--text-tertiary); font-size: 12px; font-style: italic;">Sin observaciones adicionales</span>`;
 
+        const dhDate = dh.treatment_date || dh.date || dh.created_at;
+
         return `
           <tr>
-            <td style="white-space: nowrap;"><strong>${dh.created_at ? formatDate(dh.created_at) : 'N/A'}</strong></td>
+            <td style="white-space: nowrap;"><strong>${dhDate ? formatDate(dhDate) : 'N/A'}</strong></td>
             <td>
               <strong style="color: var(--primary-700); font-size: 14px;">${dh.procedure_name || dh.treatment || dh.description || 'Procedimiento Odontológico'}</strong>
             </td>
@@ -619,7 +627,7 @@ export class PatientProfile {
           <td>Dr/a. ${q.doctor_name || 'Sin asignar'}</td>
           <td><strong>${formatCurrency(q.total)}</strong></td>
           <td>${statusBadge}</td>
-          <td>${q.created_at ? formatDate(q.created_at) : 'N/A'}</td>
+          <td>${(q.quotation_date || q.created_at) ? formatDate(q.quotation_date || q.created_at) : 'N/A'}</td>
           <td style="text-align: right;">
             <div style="display: inline-flex; gap: 6px;">
               <button type="button" class="btn btn-sm btn-primary manage-profile-quotation-btn" data-id="${q.id}" title="Gestionar ítems, estados y pagos del presupuesto">
@@ -2081,7 +2089,8 @@ export class PatientProfile {
       toast.error('Error al cargar datos requeridos');
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const activeTreatments = treatments.filter(t => t.is_active);
 
     const treatmentOptions = activeTreatments
@@ -2157,6 +2166,11 @@ export class PatientProfile {
         if (data.doctor_id) data.doctor_id = Number(data.doctor_id);
         else delete data.doctor_id;
 
+        if (data.end_date) {
+          data.treatment_date = data.end_date;
+          data.start_date = data.end_date;
+        }
+
         try {
           await treatmentService.addPatientTreatment(data);
           toast.success('Entrada guardada en el Diario Odontológico');
@@ -2172,15 +2186,29 @@ export class PatientProfile {
   }
 
   showEditTreatmentModal(treatment) {
+    const rawTreatDate = treatment.treatment_date || treatment.end_date || treatment.start_date || treatment.created_at || '';
+    const treatDateStr = typeof rawTreatDate === 'string' && /^\d{4}-\d{2}-\d{2}/.test(rawTreatDate)
+      ? rawTreatDate.substring(0, 10)
+      : (() => {
+          const d = new Date(rawTreatDate || Date.now());
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        })();
+
     const content = `
       <form id="edit-treatment-history-form">
         <div class="form-group">
           <label class="form-label">Procedimiento / Tratamiento</label>
           <input type="text" name="treatment_name" class="form-input" value="${treatment.treatment_name || treatment.description || ''}" required />
         </div>
-        <div class="form-group" style="margin-top: var(--space-3);">
-          <label class="form-label">Diente / Pieza (Opcional)</label>
-          <input type="text" name="tooth_number" class="form-input" value="${treatment.tooth_number || ''}" placeholder="Ej: 14, 15 o 18, 21" />
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Fecha del Procedimiento <span style="color: var(--danger-500);">*</span></label>
+            <input type="date" name="treatment_date" class="form-input" value="${treatDateStr}" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Diente / Pieza (Opcional)</label>
+            <input type="text" name="tooth_number" class="form-input" value="${treatment.tooth_number || ''}" placeholder="Ej: 14, 15 o 18, 21" />
+          </div>
         </div>
         <div class="form-group" style="margin-top: var(--space-3);">
           <label class="form-label">Notas Clínicas y Detalles de la Intervención</label>
@@ -2199,6 +2227,10 @@ export class PatientProfile {
         data.price = 0;
         if (data.tooth_number && data.tooth_number.trim()) data.tooth_number = data.tooth_number.trim();
         else data.tooth_number = null;
+        if (data.treatment_date) {
+          data.end_date = data.treatment_date;
+          data.start_date = data.treatment_date;
+        }
 
         try {
           await treatmentService.updatePatientTreatment(treatment.id, data);
@@ -2258,7 +2290,7 @@ export class PatientProfile {
           </div>
           <div>
             <span style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 2px;">Fecha de Registro</span>
-            <strong>${treatment.created_at ? formatDate(treatment.created_at) : 'N/A'}</strong>
+            <strong>${(treatment.treatment_date || treatment.end_date || treatment.start_date || treatment.created_at) ? formatDate(treatment.treatment_date || treatment.end_date || treatment.start_date || treatment.created_at) : 'N/A'}</strong>
           </div>
           <div>
             <span style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 2px;">Precio</span>
@@ -2681,6 +2713,9 @@ export class PatientProfile {
         `;
       }).join('');
 
+      const now = new Date();
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
       const taxFieldHtml = `
         <input type="hidden" id="pay-modal-tax-rate" name="tax_rate" value="0" />
         <input type="hidden" id="pay-modal-disc-amt" name="discount_amount" value="0" />
@@ -2732,11 +2767,17 @@ export class PatientProfile {
             </div>
           </div>
 
-          <div class="form-group">
-            <label class="form-label">Método de Pago</label>
-            <select name="payment_method_id" id="treat-pay-method-select" class="form-select" required>
-              ${methodOpts}
-            </select>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-bottom: var(--space-3);">
+            <div class="form-group">
+              <label class="form-label">Método de Pago</label>
+              <select name="payment_method_id" id="treat-pay-method-select" class="form-select" required>
+                ${methodOpts}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Fecha del Pago <span style="color: var(--danger-500);">*</span></label>
+              <input type="date" name="payment_date" class="form-input" value="${todayStr}" required />
+            </div>
           </div>
 
           <div class="form-group">
@@ -2832,6 +2873,7 @@ export class PatientProfile {
           discount_amount: parseFloat(formData.get('discount_amount') || 0),
           reference_number: formData.get('reference_number') || null,
           notes: formData.get('notes') || null,
+          payment_date: formData.get('payment_date') || todayStr,
         };
 
         try {
@@ -3002,7 +3044,8 @@ export class PatientProfile {
       toast.error('Error al cargar métodos de pago');
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const nowDep = new Date();
+    const todayStr = `${nowDep.getFullYear()}-${String(nowDep.getMonth() + 1).padStart(2, '0')}-${String(nowDep.getDate()).padStart(2, '0')}`;
     const nonSaldoMethods = (methods || []).filter(m => m.id !== 'saldo_credito' && m.id !== 5);
     const methodOptions = nonSaldoMethods.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
 
@@ -3096,7 +3139,8 @@ export class PatientProfile {
       toast.error('Error al cargar datos para cobrar el tratamiento');
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const nowChg = new Date();
+    const todayStr = `${nowChg.getFullYear()}-${String(nowChg.getMonth() + 1).padStart(2, '0')}-${String(nowChg.getDate()).padStart(2, '0')}`;
     const pendingTreatments = (this.clinicalTreatments || []).filter(t => {
       const isPaid = t.invoice_status === 'pagada' || (t.remaining_balance !== undefined && parseFloat(t.remaining_balance) <= 0.001);
       return !isPaid;
@@ -3311,7 +3355,8 @@ export class PatientProfile {
                 createdQuote.id,
                 [quoteItemId],
                 documentType,
-                [{ id: quoteItemId, amount: amountPaid }]
+                [{ id: quoteItemId, amount: amountPaid }],
+                paymentDate
               );
 
               // 3. Registrar pago vinculado al comprobante
@@ -3351,7 +3396,8 @@ export class PatientProfile {
                 itemData?.quote_id,
                 [quoteItemId],
                 documentType,
-                [{ id: quoteItemId, amount: amountPaid }]
+                [{ id: quoteItemId, amount: amountPaid }],
+                paymentDate
               );
 
               await paymentService.create({
@@ -3375,6 +3421,8 @@ export class PatientProfile {
               price: totalPrice,
               doctor_id: doctorId,
               tooth_number: toothNumber,
+              treatment_date: paymentDate,
+              end_date: paymentDate,
               notes: notes
             });
 
@@ -3518,6 +3566,9 @@ export class PatientProfile {
       doctors = await doctorService.getAll().catch(() => []);
     } catch {}
 
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
     const doctorList = Array.isArray(doctors) ? doctors : (doctors?.data || doctors?.rows || []);
     const doctorOptions = doctorList.map(d => `<option value="${d.id}">Dr/a. ${d.first_name} ${d.last_name || ''}</option>`).join('');
 
@@ -3527,10 +3578,14 @@ export class PatientProfile {
           <label class="form-label">Procedimiento / Tratamiento Realizado <span style="color: var(--danger-500);">*</span></label>
           <input type="text" name="procedure_name" class="form-input" placeholder="Ej: Curación de caries, Limpieza profunda, Endodoncia..." required />
         </div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Fecha del Tratamiento <span style="color: var(--danger-500);">*</span></label>
+            <input type="date" name="treatment_date" class="form-input" value="${todayStr}" required />
+          </div>
           <div class="form-group">
             <label class="form-label">Pieza / Diente # (Opcional)</label>
-            <input type="text" name="tooth_number" class="form-input" placeholder="Ej: 14, 15 o 18, 21, Molar..." />
+            <input type="text" name="tooth_number" class="form-input" placeholder="Ej: 14, 15 o 18, 21..." />
           </div>
           <div class="form-group">
             <label class="form-label">Doctor / Profesional Responsable</label>
@@ -3562,6 +3617,8 @@ export class PatientProfile {
             treatment: data.procedure_name,
             tooth_number: data.tooth_number ? data.tooth_number.trim() : null,
             doctor_id: data.doctor_id ? Number(data.doctor_id) : null,
+            treatment_date: data.treatment_date || todayStr,
+            date: data.treatment_date || todayStr,
             notes: data.notes || null,
             condition: 'Tratamiento Realizado'
           });
@@ -3582,6 +3639,14 @@ export class PatientProfile {
       doctors = await doctorService.getAll().catch(() => []);
     } catch {}
 
+    const rawItemDate = item.treatment_date || item.date || item.created_at || '';
+    const itemDateStr = typeof rawItemDate === 'string' && /^\d{4}-\d{2}-\d{2}/.test(rawItemDate)
+      ? rawItemDate.substring(0, 10)
+      : (() => {
+          const d = new Date(rawItemDate || Date.now());
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        })();
+
     const doctorList = Array.isArray(doctors) ? doctors : (doctors?.data || doctors?.rows || []);
     const doctorOptions = doctorList.map(d => `<option value="${d.id}" ${Number(d.id) === Number(item.doctor_id) ? 'selected' : ''}>Dr/a. ${d.first_name} ${d.last_name || ''}</option>`).join('');
 
@@ -3591,7 +3656,11 @@ export class PatientProfile {
           <label class="form-label">Procedimiento / Tratamiento Realizado <span style="color: var(--danger-500);">*</span></label>
           <input type="text" name="procedure_name" class="form-input" value="${item.procedure_name || item.treatment || item.description || ''}" required />
         </div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--space-3); margin-top: var(--space-3);">
+          <div class="form-group">
+            <label class="form-label">Fecha del Tratamiento <span style="color: var(--danger-500);">*</span></label>
+            <input type="date" name="treatment_date" class="form-input" value="${itemDateStr}" required />
+          </div>
           <div class="form-group">
             <label class="form-label">Pieza / Diente # (Opcional)</label>
             <input type="text" name="tooth_number" class="form-input" value="${item.tooth_number || ''}" placeholder="Ej: 14, 15 o 18, 21..." />
@@ -3626,6 +3695,8 @@ export class PatientProfile {
             treatment: data.procedure_name,
             tooth_number: data.tooth_number ? data.tooth_number.trim() : null,
             doctor_id: data.doctor_id ? Number(data.doctor_id) : null,
+            treatment_date: data.treatment_date || itemDateStr,
+            date: data.treatment_date || itemDateStr,
             notes: data.notes || null
           });
           toast.success('¡Entrada actualizada exitosamente!');

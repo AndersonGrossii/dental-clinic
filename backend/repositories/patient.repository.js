@@ -4,6 +4,44 @@
 import { BaseRepository } from './base.repository.js';
 import { query, scopeClinic } from '../database/pool.js';
 
+function getTodayDateString() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function normalizeDateString(val) {
+  if (!val) return null;
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    return `${val.getFullYear()}-${String(val.getMonth() + 1).padStart(2, '0')}-${String(val.getDate()).padStart(2, '0')}`;
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match) return match[1];
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime())) {
+      return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+    }
+  }
+  return null;
+}
+
+function toNoonUtcTimestamp(dateStr) {
+  return `${dateStr}T12:00:00.000Z`;
+}
+
+function normalizeDentalHistoryRow(row) {
+  if (!row) return null;
+  const resolvedDate = normalizeDateString(row.treatment_date) || normalizeDateString(row.created_at);
+  return {
+    ...row,
+    treatment_date: resolvedDate,
+  };
+}
+
 /**
  * Repositorio para operaciones de datos de pacientes.
  * Extiende BaseRepository con métodos de búsqueda avanzada e historial.
@@ -357,6 +395,7 @@ class PatientRepository extends BaseRepository {
     }
     const result = await query(
       `SELECT dh.*,
+              TO_CHAR(COALESCE(dh.treatment_date, dh.created_at::date), 'YYYY-MM-DD') AS treatment_date,
               COALESCE(dh.treatment, '') AS procedure_name,
               doc.specialty,
               u.first_name AS doctor_name, u.last_name AS doctor_lastname
@@ -364,38 +403,40 @@ class PatientRepository extends BaseRepository {
        LEFT JOIN doctors doc ON doc.id = dh.doctor_id
        LEFT JOIN users u ON u.id = doc.user_id
        WHERE ${conditions.join(' AND ')} AND dh.deleted_at IS NULL
-       ORDER BY dh.created_at DESC`,
+       ORDER BY COALESCE(dh.treatment_date, dh.created_at::date) DESC, dh.created_at DESC, dh.id DESC`,
       params
     );
-    return result.rows;
+    return result.rows.map(normalizeDentalHistoryRow);
   }
 
   /**
    * Agrega una entrada al historial dental (diario clínico).
    */
-  async addDentalHistory({ patient_id, doctor_id, tooth_number, procedure_name, treatment, condition, notes }) {
+  async addDentalHistory({ patient_id, doctor_id, tooth_number, procedure_name, treatment, condition, notes, treatment_date, date, performed_date, created_at }) {
     const clinicId = this.getClinicId();
     const procValue = treatment || procedure_name || 'Procedimiento Odontológico';
     const condValue = condition || procValue || 'Tratamiento Realizado';
+    const dateStr = normalizeDateString(treatment_date || date || performed_date || created_at) || getTodayDateString();
+    const createdAtTs = toNoonUtcTimestamp(dateStr);
 
     try {
       const result = await query(
-        `INSERT INTO dental_history (patient_id, doctor_id, tooth_number, treatment, condition, notes${clinicId ? ', clinic_id' : ''})
-         VALUES ($1, $2, $3, $4, $5, $6${clinicId ? ', $7' : ''})
-         RETURNING *, treatment AS procedure_name`,
+        `INSERT INTO dental_history (patient_id, doctor_id, tooth_number, treatment, condition, notes, treatment_date, created_at${clinicId ? ', clinic_id' : ''})
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8${clinicId ? ', $9' : ''})
+         RETURNING *, TO_CHAR(COALESCE(treatment_date, created_at::date), 'YYYY-MM-DD') AS treatment_date, treatment AS procedure_name`,
         clinicId
-          ? [patient_id, doctor_id || null, tooth_number || null, procValue, condValue, notes || null, clinicId]
-          : [patient_id, doctor_id || null, tooth_number || null, procValue, condValue, notes || null]
+          ? [patient_id, doctor_id || null, tooth_number || null, procValue, condValue, notes || null, dateStr, createdAtTs, clinicId]
+          : [patient_id, doctor_id || null, tooth_number || null, procValue, condValue, notes || null, dateStr, createdAtTs]
       );
-      return result.rows[0];
+      return normalizeDentalHistoryRow(result.rows[0]);
     } catch (err) {
       if (err.message && err.message.includes('column "condition"')) {
         await query(`ALTER TABLE dental_history ADD COLUMN IF NOT EXISTS condition VARCHAR(255) DEFAULT 'Tratamiento Realizado'`).catch(() => {});
-        return this.addDentalHistory({ patient_id, doctor_id, tooth_number, procedure_name, treatment, condition, notes });
+        return this.addDentalHistory({ patient_id, doctor_id, tooth_number, procedure_name, treatment, condition, notes, treatment_date, date, performed_date, created_at });
       }
       if (err.message && err.message.includes('column "treatment"')) {
         await query(`ALTER TABLE dental_history ADD COLUMN IF NOT EXISTS treatment VARCHAR(255) DEFAULT 'Procedimiento Odontológico'`).catch(() => {});
-        return this.addDentalHistory({ patient_id, doctor_id, tooth_number, procedure_name, treatment, condition, notes });
+        return this.addDentalHistory({ patient_id, doctor_id, tooth_number, procedure_name, treatment, condition, notes, treatment_date, date, performed_date, created_at });
       }
       throw err;
     }
@@ -404,7 +445,7 @@ class PatientRepository extends BaseRepository {
   /**
    * Actualiza una entrada del historial dental.
    */
-  async updateDentalHistory(id, { tooth_number, procedure_name, treatment, condition, notes, doctor_id } = {}) {
+  async updateDentalHistory(id, { tooth_number, procedure_name, treatment, condition, notes, doctor_id, treatment_date, date, performed_date, created_at } = {}) {
     const clinicId = this.getClinicId();
     const setClauses = ['updated_at = NOW()'];
     const params = [id];
@@ -436,6 +477,17 @@ class PatientRepository extends BaseRepository {
       setClauses.push(`doctor_id = $${params.length}`);
     }
 
+    const rawDate = treatment_date ?? date ?? performed_date ?? created_at;
+    if (rawDate !== undefined) {
+      const dateStr = normalizeDateString(rawDate);
+      if (dateStr) {
+        params.push(dateStr);
+        setClauses.push(`treatment_date = $${params.length}`);
+        params.push(toNoonUtcTimestamp(dateStr));
+        setClauses.push(`created_at = $${params.length}`);
+      }
+    }
+
     const conditions = ['id = $1', 'deleted_at IS NULL'];
     if (clinicId) {
       conditions.push(`clinic_id = $${params.length + 1}`);
@@ -446,10 +498,10 @@ class PatientRepository extends BaseRepository {
       `UPDATE dental_history
        SET ${setClauses.join(', ')}
        WHERE ${conditions.join(' AND ')}
-       RETURNING *, treatment AS procedure_name`,
+       RETURNING *, TO_CHAR(COALESCE(treatment_date, created_at::date), 'YYYY-MM-DD') AS treatment_date, treatment AS procedure_name`,
       params
     );
-    return result.rows[0] || null;
+    return normalizeDentalHistoryRow(result.rows[0] || null);
   }
 
   /**
@@ -538,7 +590,11 @@ class PatientRepository extends BaseRepository {
     const total = parseInt(countResult.rows[0].total, 10);
 
     const dataResult = await query(
-      `SELECT pt.*, t.name AS treatment_name, t.code AS treatment_code,
+      `SELECT pt.*,
+              TO_CHAR(pt.start_date, 'YYYY-MM-DD') AS start_date,
+              TO_CHAR(pt.end_date, 'YYYY-MM-DD') AS end_date,
+              TO_CHAR(COALESCE(pt.end_date, pt.start_date, pt.created_at::date), 'YYYY-MM-DD') AS treatment_date,
+              t.name AS treatment_name, t.code AS treatment_code,
               tc.name AS category_name, tc.color AS category_color,
               u.first_name AS doctor_name, u.last_name AS doctor_lastname
        FROM patient_treatments pt
@@ -547,7 +603,7 @@ class PatientRepository extends BaseRepository {
        LEFT JOIN doctors doc ON doc.id = pt.doctor_id
        LEFT JOIN users u ON u.id = doc.user_id
        WHERE ${where} AND pt.deleted_at IS NULL
-       ORDER BY pt.created_at DESC
+       ORDER BY COALESCE(pt.end_date, pt.start_date, pt.created_at::date) DESC, pt.created_at DESC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
       [...params, limit, offset]
     );

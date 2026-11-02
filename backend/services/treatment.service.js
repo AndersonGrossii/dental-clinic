@@ -7,6 +7,35 @@ import invoiceRepository from '../repositories/invoice.repository.js';
 import patientCreditRepository from '../repositories/patient_credit.repository.js';
 import { AppError } from '../utils/errors.js';
 
+function getTodayDateString() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function normalizeDateString(val) {
+  if (!val) return null;
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    return `${val.getFullYear()}-${String(val.getMonth() + 1).padStart(2, '0')}-${String(val.getDate()).padStart(2, '0')}`;
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match) return match[1];
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime())) {
+      return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+    }
+  }
+  return null;
+}
+
+function toNoonUtcTimestamp(dateStr) {
+  return `${dateStr}T12:00:00.000Z`;
+}
+
 /**
  * Servicio que encapsula la lógica de negocio para la gestión de tratamientos.
  */
@@ -238,6 +267,11 @@ class TreatmentService {
       invoiceId = createdInvoice.id;
     }
 
+    const rawDate = data.treatment_date || data.date || data.performed_date || data.end_date || data.start_date || data.created_at;
+    const resolvedDate = normalizeDateString(rawDate) || getTodayDateString();
+    const startDate = normalizeDateString(data.start_date) || resolvedDate;
+    const endDate = normalizeDateString(data.end_date) || resolvedDate;
+
     const ptData = {
       patient_id: data.patient_id,
       treatment_id: data.treatment_id,
@@ -247,8 +281,9 @@ class TreatmentService {
       price,
       status: data.status || 'completado',
       notes: data.notes || null,
-      start_date: data.start_date || null,
-      end_date: data.end_date || null,
+      start_date: startDate,
+      end_date: endDate,
+      created_at: toNoonUtcTimestamp(resolvedDate),
       created_by: data.created_by || null,
       invoice_id: invoiceId,
       tax_rate: taxRate,
@@ -271,10 +306,34 @@ class TreatmentService {
     }
 
     const updateData = {};
-    const allowedFields = ['tooth_number', 'price', 'status', 'notes', 'start_date', 'end_date'];
+    const allowedFields = ['doctor_id', 'tooth_number', 'price', 'status', 'notes', 'start_date', 'end_date'];
     for (const field of allowedFields) {
       if (data[field] !== undefined) {
         updateData[field] = data[field];
+      }
+    }
+
+    const rawDate = data.treatment_date ?? data.date ?? data.performed_date ?? data.created_at;
+    if (rawDate !== undefined) {
+      const dateStr = normalizeDateString(rawDate);
+      if (dateStr) {
+        if (data.start_date === undefined) updateData.start_date = dateStr;
+        if (data.end_date === undefined) updateData.end_date = dateStr;
+        updateData.created_at = toNoonUtcTimestamp(dateStr);
+      }
+    }
+    if (data.start_date !== undefined) {
+      const sDate = normalizeDateString(data.start_date);
+      updateData.start_date = sDate;
+      if (rawDate === undefined && data.end_date === undefined && sDate) {
+        updateData.created_at = toNoonUtcTimestamp(sDate);
+      }
+    }
+    if (data.end_date !== undefined) {
+      const eDate = normalizeDateString(data.end_date);
+      updateData.end_date = eDate;
+      if (rawDate === undefined && eDate) {
+        updateData.created_at = toNoonUtcTimestamp(eDate);
       }
     }
 
