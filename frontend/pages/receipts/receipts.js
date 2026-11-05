@@ -503,13 +503,9 @@ export class Receipts {
             <p>Monto Abonado en este Recibo: <strong>${formatCurrency(rec.amount_paid)}</strong></p>
             <p>Método de Pago: ${formatPaymentMethods(rec)}</p>
             <hr/>
-            ${hasQuotation && quoteRemaining > 0 ? `
-              <h2 style="color: #b45309; margin: 8px 0 4px 0;">A FALTA DE ABONAR DEL TRATAMIENTO: ${formatCurrency(quoteRemaining)}</h2>
-              <p style="color: #64748b; font-size: 13px; margin: 2px 0;">Importe abonado en este Recibo: <strong>${formatCurrency(rec.total)}</strong> (de un total de <strong>${formatCurrency(quoteTotal)}</strong>)</p>
-            ` : `
-              <p>A falta de abonar de este recibo: <strong>${formatCurrency(rec.balance)}</strong></p>
-              <h2 style="color: ${primaryColor};">TOTAL RECIBO: ${formatCurrency(rec.total)}</h2>
-            `}
+            <p>A falta de abonar de este recibo: <strong>${formatCurrency(rec.balance)}</strong></p>
+            <h2 style="color: ${primaryColor};">TOTAL RECIBO: ${formatCurrency(rec.total)}</h2>
+    
           </div>
 
           <div class="footer">

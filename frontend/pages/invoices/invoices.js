@@ -1141,13 +1141,9 @@ export class Invoices {
             <p>Monto Abonado en esta Factura: <strong>${formatCurrency(invoice.amount_paid)}</strong></p>
             <p>Método de Pago: ${formatPaymentMethods(invoice)}</p>
             <hr/>
-            ${hasQuotation && quoteRemaining > 0 ? `
-              <h2 style="color: #b45309; margin: 8px 0 4px 0;">PENDIENTE DE ABONAR DEL TRATAMIENTO: ${formatCurrency(quoteRemaining)}</h2>
-              <p style="color: #64748b; font-size: 13px; margin: 2px 0;">Importe abonado en esta Factura: <strong>${formatCurrency(invoice.total)}</strong> (de un total de <strong>${formatCurrency(quoteTotal)}</strong>)</p>
-            ` : `
-              <p>Saldo Restante Factura: <strong>${formatCurrency(invoice.balance)}</strong></p>
+            <p>Saldo Restante Factura: <strong>${formatCurrency(invoice.balance)}</strong></p>
               <h2 style="color: ${primaryColor};">TOTAL FACTURA: ${formatCurrency(invoice.total)}</h2>
-            `}
+           
           </div>
 
           <div class="footer">
