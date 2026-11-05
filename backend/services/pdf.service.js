@@ -508,6 +508,7 @@ class PDFService {
       doc.text(this.stripEmojis(extraLabels[0]), rightX + 10, yPos + 57);
     }
 
+    doc.x = margin;
     doc.y = yPos + boxHeight + 14;
   }
 
@@ -643,9 +644,17 @@ class PDFService {
       });
     }
 
+    const margin = 40;
+    doc.x = margin;
     await doc.table(tableData, {
-      prepareHeader: () => doc.font('Helvetica-Bold').fontSize(8.5).fillColor(COLORS.white),
+      x: margin,
+      columnsSize: [235, 50, 45, 85, 100],
+      prepareHeader: () => {
+        doc.x = margin;
+        doc.font('Helvetica-Bold').fontSize(8.5).fillColor(COLORS.white);
+      },
       prepareRow: (row, indexColumn, indexRow, rectRow) => {
+        doc.x = margin;
         doc.font('Helvetica').fontSize(8.5).fillColor(COLORS.text);
       },
       padding: [5, 4],
@@ -653,7 +662,7 @@ class PDFService {
     });
 
     // 4. Resumen de Totales y Liquidación
-    const margin = 40;
+    doc.x = margin;
     const pageWidth = doc.page.width;
     const summaryWidth = 220;
     const summaryX = pageWidth - margin - summaryWidth;
@@ -753,12 +762,22 @@ class PDFService {
         })),
       };
 
+      doc.x = margin;
       await doc.table(paymentsTable, {
-        prepareHeader: () => doc.font('Helvetica-Bold').fontSize(8).fillColor(COLORS.text),
-        prepareRow: () => doc.font('Helvetica').fontSize(8).fillColor(COLORS.text),
+        x: margin,
+        columnsSize: [115, 140, 160, 100],
+        prepareHeader: () => {
+          doc.x = margin;
+          doc.font('Helvetica-Bold').fontSize(8).fillColor(COLORS.text);
+        },
+        prepareRow: () => {
+          doc.x = margin;
+          doc.font('Helvetica').fontSize(8).fillColor(COLORS.text);
+        },
         padding: [3, 4],
         headerBackgroundColor: COLORS.bgCard,
       });
+      doc.x = margin;
     }
 
     // 6. Observaciones y Cláusula Fiscal
@@ -1181,6 +1200,7 @@ class PDFService {
         .text(`Sin alergias conocidas registradas`, rightX + 10, yPos + 62);
     }
 
+    doc.x = margin;
     doc.y = yPos + boxHeight + 14;
 
     // 3. Tabla de Medicamentos Prescritos
@@ -1215,12 +1235,22 @@ class PDFService {
       });
     }
 
+    doc.x = margin;
     await doc.table(tableData, {
-      prepareHeader: () => doc.font('Helvetica-Bold').fontSize(8).fillColor(COLORS.white),
-      prepareRow: () => doc.font('Helvetica').fontSize(8).fillColor(COLORS.text),
+      x: margin,
+      columnsSize: [25, 145, 65, 75, 60, 145],
+      prepareHeader: () => {
+        doc.x = margin;
+        doc.font('Helvetica-Bold').fontSize(8).fillColor(COLORS.white);
+      },
+      prepareRow: () => {
+        doc.x = margin;
+        doc.font('Helvetica').fontSize(8).fillColor(COLORS.text);
+      },
       padding: [5, 4],
       headerBackgroundColor: theme.primary,
     });
+    doc.x = margin;
 
     // 4. Indicaciones Generales / Recomendaciones Clínicas
     if (presc.notes) {

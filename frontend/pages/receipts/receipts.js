@@ -497,21 +497,6 @@ export class Receipts {
           </table>
 
           <div class="totals">
-            ${hasQuotation ? `
-              <div style="background: ${quoteRemaining > 0 ? '#fffbeb' : '#f0fdf4'}; border: 1.5px solid ${quoteRemaining > 0 ? '#f59e0b' : '#16a34a'}; border-radius: 6px; padding: 12px 14px; text-align: right; margin-bottom: 14px;">
-                <p style="margin: 2px 0; font-size: 13px; color: #475569;">
-                  Total Tratamiento / Presupuesto ${quoteNum ? `(#${quoteNum})` : ''}: <strong>${formatCurrency(quoteTotal)}</strong>
-                </p>
-                <p style="margin: 2px 0; font-size: 13px; color: #475569;">
-                  Total Abonado al Presupuesto: <strong>${formatCurrency(quotePaid)}</strong>
-                </p>
-                <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid ${quoteRemaining > 0 ? '#fde68a' : '#bbf7d0'}; font-size: 16px; font-weight: 700; color: ${quoteRemaining > 0 ? '#b45309' : '#15803d'};">
-                  ${quoteRemaining > 0 
-                    ? `⚠️ Saldo pendiente que debe el paciente a la clínica: ${formatCurrency(quoteRemaining)}` 
-                    : `✅ Presupuesto completado y totalmente abonado (0,00 €)`}
-                </div>
-              </div>
-            ` : ''}
 
             <p><strong>Subtotal Recibo:</strong> ${formatCurrency(subtotalVal)}</p>
             ${discountVal > 0 ? `<p style="color: #dc2626;"><strong>Descuento (${pctStr}):</strong> -${formatCurrency(discountVal)}</p>` : ''}
